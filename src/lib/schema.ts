@@ -59,6 +59,11 @@ export const AnalysisResult = z.object({
   explanation: z.string(),
   // "mock" = canned explanation, "live" = real model. Always shown in UI.
   dataSource: z.enum(["mock", "live"]),
+  // Optional third-party enrichment (see ENRICHMENT_CONTRACT.md). Getters: schemas are defined at the end of this file.
+  get venueByItem() { return z.record(z.string(), VenueInfo).optional(); },
+  get weather() { return WeatherNote.optional(); },
+  get rideshareByItem() { return z.record(z.string(), z.array(RideshareOption)).optional(); },
+  get enrichment() { return EnrichmentMeta.optional(); },
 });
 export type AnalysisResult = z.infer<typeof AnalysisResult>;
 
@@ -207,7 +212,7 @@ export const CreatePlanInput = z.object({
     .max(10)
     .default([])
     .refine((cs) => new Set(cs.map((c) => c.id)).size === cs.length, "Contact ids must be unique")
-    .refine((cs) => cs.every((c) => c.id !== "paratransit"), 'Contact id "paratransit" is reserved'),
+    .refine((cs) => cs.every((c) => c.id !== "paratransit" && c.id !== "family"), 'Contact ids "paratransit" and "family" are reserved'),
 });
 export type CreatePlanInput = z.input<typeof CreatePlanInput>;
 
@@ -244,3 +249,56 @@ export const CommandResult = z.object({
   events: z.array(CoordinationEvent), // events appended by this call
 });
 export type CommandResult = z.infer<typeof CommandResult>;
+
+// ─── Enrichment contract (additive; see docs/daybridge/ENRICHMENT_CONTRACT.md) ───
+// Third-party data shown next to the deterministic plan. It never changes plan/blocked; every value says where it came from.
+
+export const Provenance = z.object({
+  source: z.enum(["live", "estimate", "mock"]),
+  provider: z.string().min(1), // e.g. "google-places", "open-meteo", "uber"
+  fetchedAt: z.iso.datetime({ offset: true }),
+  verified: z.literal(false), // third-party claims are never verified by DayBridge
+});
+export type Provenance = z.infer<typeof Provenance>;
+
+export const VenueInfo = z.object({
+  name: z.string().min(1),
+  address: z.string().optional(),
+  lat: z.number().min(-90).max(90).optional(),
+  lng: z.number().min(-180).max(180).optional(),
+  accessibility: z.object({ wheelchairEntrance: z.boolean().nullable().optional() }).optional(), // crowd-sourced: UI says "unconfirmed"
+  provenance: Provenance,
+});
+export type VenueInfo = z.infer<typeof VenueInfo>;
+
+// null = no forecast data. Never say "no rain" without a forecast for that date.
+export const WeatherNote = z
+  .object({
+    date: z.iso.date(), // YYYY-MM-DD of the activity occurrence the forecast covers
+    summary: z.string().min(1),
+    precipitationChance: z.number().min(0).max(100).optional(), // percent
+    outdoorConcern: z.boolean().optional(),
+    provenance: Provenance,
+  })
+  .nullable();
+export type WeatherNote = z.infer<typeof WeatherNote>;
+
+export const RideshareOption = z.object({
+  provider: z.enum(["uber", "lyft"]),
+  deepLink: z.url({ protocol: /^https$/ }),
+  fare: z
+    .object({ low: z.number().min(0), high: z.number().min(0), currency: z.string().regex(/^[A-Z]{3}$/) })
+    .refine((f) => f.low <= f.high, "fare.low must be <= fare.high")
+    .optional(),
+  pickupLabel: z.string().min(1), // must contain "(demo)" when it is the default demo pickup
+  notBooked: z.literal(true), // a deep link opens the app; DayBridge never books
+  provenance: Provenance,
+});
+export type RideshareOption = z.infer<typeof RideshareOption>;
+
+export const EnrichmentMeta = z.object({
+  enabled: z.boolean(), // DAYBRIDGE_ENRICH === "1"
+  budgetMs: z.number().int().min(0).max(2500), // DECISIONS.md cap
+  timedOut: z.boolean(), // true = budget hit, base plan returned
+});
+export type EnrichmentMeta = z.infer<typeof EnrichmentMeta>;

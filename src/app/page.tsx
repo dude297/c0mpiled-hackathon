@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { CircleX, LoaderCircle, Printer, RotateCcw, Share2 } from "lucide-react";
-import { DashboardShell, EvidencePanel, IntakeSlot, ProfilePanel } from "@/components/dashboard/panels";
+import { CircleX, LoaderCircle, Printer, RotateCcw } from "lucide-react";
+import { DashboardShell, EvidencePanel, ProfilePanel } from "@/components/dashboard/panels";
+import { IntakeReview } from "@/components/intake/IntakeReview";
+import { ShareControl } from "@/components/share/ShareControl";
 import { WeekCalendar, weekSummary } from "@/components/calendar/WeekCalendar";
 import { MatchFeed, hardBarriers, toggleInSet } from "@/components/feed/MatchFeed";
 import { CardDeck } from "@/components/onboarding/CardDeck";
@@ -15,12 +16,10 @@ import type { AnalysisResult, Profile } from "@/lib/schema";
 const TABS = ["matches", "week", "details"] as const;
 type Tab = (typeof TABS)[number];
 
-const SHARE_AVAILABLE = false; // flip when POST /api/plans and /plan/[id] exist
 const FRIENDLY_ERROR = "Our planner is having a moment — please try again.";
 const FOCUS = "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-foreground";
 
 export default function Home() {
-  const router = useRouter();
   const [profile, setProfile] = useState<Profile>(DEMO_PROFILES.margaret);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -28,7 +27,6 @@ export default function Home() {
   const [mode, setMode] = useState<"onboarding" | "dashboard">("onboarding");
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<Tab>("matches");
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "error">("idle");
   const [announce, setAnnounce] = useState("");
   const reqId = useRef(0);
   const focusNext = useRef<"tab" | "summary" | null>(null);
@@ -53,7 +51,6 @@ export default function Home() {
     } catch {}
     setLoading(true);
     setError(null);
-    setSaveState("idle");
     setAnnounce("");
     try {
       const res = await fetch("/api/analyze", {
@@ -84,30 +81,6 @@ export default function Home() {
     setProfile(p);
     setMode("dashboard");
     run(p);
-  }
-
-  async function intake(text: string) {
-    const res = await fetch("/api/intake", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "Request failed");
-    setProfile(data.profile);
-    run(data.profile);
-  }
-
-  async function savePlan() {
-    if (!result) return;
-    const res = await fetch("/api/plans", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profile, result }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "Request failed");
-    router.push(`/plan/${data.id}`);
   }
 
   // Always mounted (first child of every render) so announcements aren't lost on remount.
@@ -148,23 +121,11 @@ export default function Home() {
     );
   }
 
-  async function handleSave() {
-    if (!SHARE_AVAILABLE) return;
-    setSaveState("saving");
-    try {
-      await savePlan();
-      setSaveState("idle");
-    } catch {
-      setSaveState("error");
-    }
-  }
-
   function startOver() {
     reqId.current++; // ignore any in-flight response
     setLoading(false);
     setResult(null);
     setError(null);
-    setSaveState("idle");
     setAnnounce("");
     focusNext.current = null;
     setMode("onboarding");
@@ -174,7 +135,7 @@ export default function Home() {
   const details = (
     <>
       <ProfilePanel value={profile} onChange={setProfile} onSubmit={() => run()} onDemo={demo} loading={loading} error={null} hasResult={result !== null} />
-      <IntakeSlot onIntake={intake} />
+      <IntakeReview base={profile} disabled={loading} onConfirm={(p) => { setProfile(p); run(p); }} />
       {result && <EvidencePanel result={result} />}
     </>
   );
@@ -250,23 +211,11 @@ export default function Home() {
             <Printer aria-hidden="true" />
             Print
           </Button>
-          <Button size="lg" className={FOCUS} onClick={handleSave} disabled={!SHARE_AVAILABLE || saveState === "saving"} aria-describedby={SHARE_AVAILABLE ? undefined : "share-soon"}>
-            <Share2 aria-hidden="true" />
-            {saveState === "saving" ? "Saving…" : "Save & share"}
-          </Button>
-          {!SHARE_AVAILABLE && (
-            <span id="share-soon" className="text-sm text-foreground/75 md:text-base">Sharing: coming soon</span>
-          )}
           <Button variant="ghost" size="lg" className={FOCUS} onClick={startOver} disabled={loading}>
             <RotateCcw aria-hidden="true" />
             Start over
           </Button>
         </div>
-        {saveState === "error" && (
-          <p role="alert" className="mt-3 rounded-md bg-destructive/10 p-3 text-destructive">
-            We couldn&apos;t save a share link just now. You can still print the plan, or try again in a moment.
-          </p>
-        )}
         {error && !loading && (
           <p role="alert" className="mt-3 flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-destructive">
             <CircleX className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
@@ -280,6 +229,8 @@ export default function Home() {
           </p>
         )}
       </section>
+
+      <ShareControl result={result} />
 
       <div role="tablist" aria-label="Plan views" onKeyDown={onTabKey} className="grid grid-cols-3 gap-1 rounded-xl bg-muted p-1 print:hidden">
         {TABS.map((t) => (
