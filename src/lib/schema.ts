@@ -207,7 +207,7 @@ export const CreatePlanInput = z.object({
     .max(10)
     .default([])
     .refine((cs) => new Set(cs.map((c) => c.id)).size === cs.length, "Contact ids must be unique")
-    .refine((cs) => cs.every((c) => c.id !== "paratransit"), 'Contact id "paratransit" is reserved'),
+    .refine((cs) => cs.every((c) => c.id !== "paratransit" && c.id !== "family"), 'Contact ids "paratransit" and "family" are reserved'),
 });
 export type CreatePlanInput = z.input<typeof CreatePlanInput>;
 

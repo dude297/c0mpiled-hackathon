@@ -6,6 +6,9 @@ import type { ActionScope, Barrier, Contact, FeedbackSignal, Intervention, Prefe
 // Hard barriers come from the existing engine (checkActivity), so analysis and coordination never disagree.
 
 export const PARATRANSIT_ID = "paratransit";
+// Generic family ride when the profile says "family" but no listed contact drives. Still an external
+// dependency (approval + dispatch + confirmation event), the user just arranges it themselves.
+export const FAMILY_ID = "family";
 
 // Minimum data shared with a recipient; the approval scope names these exact fields.
 const SHARED_FIELDS: Record<ActionScope["kind"], string[]> = {
@@ -30,6 +33,9 @@ function rideCandidates(p: Profile, a: Activity, contacts: Contact[], ex: Exclus
   const family = a.travelMin.family;
   if (p.transport.includes("family") && family !== undefined && family <= p.maxTravelMin) {
     for (const c of contacts) if (c.canDrive && !ex.recipients.has(c.id)) out.push({ recipientId: c.id, label: `Ride from ${c.name} (${family} min)` });
+    // Generic family only when no driving contact exists or was tried: if Dan already failed, "family" means Dan again.
+    const driverTried = contacts.some((c) => c.canDrive && ex.recipients.has(c.id));
+    if (!out.length && !driverTried && !ex.recipients.has(FAMILY_ID)) out.push({ recipientId: FAMILY_ID, label: "Ride from family (you'll arrange it)" });
   }
   const para = a.travelMin.paratransit;
   if (p.transport.includes("paratransit") && para !== undefined && para <= p.maxTravelMin && !ex.recipients.has(PARATRANSIT_ID)) {
@@ -47,6 +53,7 @@ export function propose(p: Profile, a: Activity, contacts: Contact[], ex: Exclus
   const actions: ProposedAction[] = [];
   const blockers: Barrier[] = [];
   const when = whenOf(a);
+  let rideRecipient: string | undefined;
 
   for (const c of checks) {
     const b = c.barrier;
@@ -59,10 +66,12 @@ export function propose(p: Profile, a: Activity, contacts: Contact[], ex: Exclus
         blockers.push({ rule: "transport", severity: "hard", detail: `${b.detail}; no available driver or paratransit option left` });
         continue;
       }
+      rideRecipient = ride.recipientId;
       interventions.push({ id, kind: "ride", rule: b.rule, description: ride.label, actionId: undefined });
       actions.push({ interventionId: id, description: ride.label, scope: { kind: "ride", activityId: a.id, recipientId: ride.recipientId, sharedFields: [...SHARED_FIELDS.ride], when } });
     } else if (b.rule === "social") {
-      const friend = contacts.find((x) => !ex.recipients.has(x.id));
+      // Never invite the person already driving (engine emits transport before social).
+      const friend = contacts.find((x) => !ex.recipients.has(x.id) && x.id !== rideRecipient);
       if (friend) {
         const description = `Invite ${friend.name} to come along`;
         interventions.push({ id, kind: "invite", rule: b.rule, description });
