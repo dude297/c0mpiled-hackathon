@@ -8,16 +8,22 @@ import { PlanStatusLabel } from "@/components/shell/PlanStatusLabel";
 import { personLabel, useDeviceStore, usePlanStatus } from "@/components/shell/store";
 import { writeProfileHandoff } from "@/components/home/handoff";
 import { buildCareModel, possessive, type CareModel } from "./care-model";
+import { BackendCareDashboard } from "./BackendCareDashboard";
 
 const PRIMARY = `inline-flex min-h-14 items-center rounded-xl bg-primary px-6 text-lg font-semibold text-primary-foreground hover:bg-primary/85 ${FOCUS}`;
 const LINK = `inline-flex min-h-11 items-center rounded-md underline underline-offset-4 hover:text-foreground ${FOCUS}`;
 const H2 = "text-[1.375rem] font-semibold leading-tight";
 const META = "text-base text-muted-foreground";
 
-export function CareDashboard() {
+export function CareDashboard({ personId }: { personId?: string }) {
+  return <BackendCareDashboard personId={personId} fallback={<LocalCareDashboard />} />;
+}
+
+/** The existing browser-only demo remains available when the caregiver API is unavailable. */
+function LocalCareDashboard() {
   const store = useDeviceStore();
   const ps = usePlanStatus();
-  if (!store.ready) return null;
+  if (!store.ready) return <p role="status">Loading saved answers…</p>;
 
   const name = personLabel(store);
   if (!store.profile) return <SetUp name={name} />;
