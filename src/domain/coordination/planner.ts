@@ -60,13 +60,13 @@ export function propose(p: Profile, a: Activity, contacts: Contact[], ex: Exclus
         continue;
       }
       interventions.push({ id, kind: "ride", rule: b.rule, description: ride.label, actionId: undefined });
-      actions.push({ interventionId: id, description: ride.label, scope: { kind: "ride", recipientId: ride.recipientId, sharedFields: SHARED_FIELDS.ride, when } });
+      actions.push({ interventionId: id, description: ride.label, scope: { kind: "ride", activityId: a.id, recipientId: ride.recipientId, sharedFields: [...SHARED_FIELDS.ride], when } });
     } else if (b.rule === "social") {
       const friend = contacts.find((x) => !ex.recipients.has(x.id));
       if (friend) {
         const description = `Invite ${friend.name} to come along`;
         interventions.push({ id, kind: "invite", rule: b.rule, description });
-        actions.push({ interventionId: id, description, scope: { kind: "invite", recipientId: friend.id, sharedFields: SHARED_FIELDS.invite, when } });
+        actions.push({ interventionId: id, description, scope: { kind: "invite", activityId: a.id, recipientId: friend.id, sharedFields: [...SHARED_FIELDS.invite], when } });
       } else {
         interventions.push({ id, kind: "user_step", rule: b.rule, description: b.mitigation ?? b.detail });
       }

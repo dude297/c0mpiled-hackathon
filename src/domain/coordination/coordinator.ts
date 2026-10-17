@@ -19,6 +19,7 @@ import type { ProviderPort } from "./provider";
 // and provider evidence; AI output never reaches this module.
 
 export const MAX_APPROVAL_MS = 24 * 60 * 60 * 1000;
+export const PROVIDER_TIMEOUT_MS = 10_000;
 const TERMINAL_DEP = new Set<Dependency["status"]>(["declined", "cancelled", "failed"]);
 const CLOSED_PLAN = new Set<CoordinationPlan["state"]>(["COMPLETED", "CANCELLED"]);
 
@@ -39,8 +40,8 @@ export class CoordinationError extends Error {
 }
 
 export function sameScope(a: ActionScope, b: ActionScope) {
-  const fields = (s: ActionScope) => [...s.sharedFields].sort().join("|");
-  return a.kind === b.kind && a.recipientId === b.recipientId && a.when === b.when && fields(a) === fields(b);
+  const fields = (s: ActionScope) => JSON.stringify([...s.sharedFields].sort());
+  return a.kind === b.kind && a.activityId === b.activityId && a.recipientId === b.recipientId && a.when === b.when && fields(a) === fields(b);
 }
 
 export const currentActions = (p: CoordinationPlan) => p.actions.filter((a) => a.status !== "superseded");
@@ -57,10 +58,16 @@ export function readyViolations(p: CoordinationPlan): string[] {
   for (const a of currentActions(p)) {
     const appr = p.approvals.find((x) => x.id === a.approvalId);
     if (a.status !== "dispatched") out.push(`${a.id} not dispatched (${a.status})`);
-    if (!appr || appr.actionId !== a.id || !sameScope(appr.scope, a.scope)) out.push(`${a.id} has no matching approval`);
+    if (!appr || appr.revoked || appr.actionId !== a.id || !sameScope(appr.scope, a.scope)) out.push(`${a.id} has no matching approval`);
   }
   for (const d of currentDeps(p)) if (d.status !== "confirmed") out.push(`${d.id} is ${d.status}`);
   return out;
+}
+
+// Dispatched and not closed by the provider: someone was asked and may still act on it.
+function isLive(p: CoordinationPlan, a: ActionRequest) {
+  const d = p.dependencies.find((x) => x.actionId === a.id);
+  return !!a.providerRequestId && a.status !== "failed" && !!d && !TERMINAL_DEP.has(d.status);
 }
 
 export function createCoordinator(deps: CoordinatorDeps) {
@@ -116,9 +123,12 @@ export function createCoordinator(deps: CoordinatorDeps) {
     if (prop.feasible) {
       p.interventions = prop.interventions.map((iv) => ({ ...iv }));
       for (const pa of prop.actions) {
-        const carried = currentActions(p).find(
-          (a) => sameScope(a.scope, pa.scope) && p.dependencies.find((d) => d.actionId === a.id)?.status === "confirmed",
-        );
+        // Never re-send to someone already asked: keep live requests (requested/confirmed) and approved actions
+        // whose dispatch outcome is unknown (provider error), with their original idempotency key.
+        const carried = currentActions(p).find((a) => {
+          const st = p.dependencies.find((d) => d.actionId === a.id)?.status;
+          return sameScope(a.scope, pa.scope) && (st === "confirmed" || st === "requested" || (a.status === "approved" && a.dispatchError === true));
+        });
         const iv = p.interventions.find((x) => x.id === pa.interventionId)!;
         if (carried) {
           keep.add(carried.id);
@@ -134,13 +144,15 @@ export function createCoordinator(deps: CoordinatorDeps) {
       }
     }
     const superseded: string[] = [];
+    const toNotify: string[] = [];
     for (const a of p.actions) if (a.status !== "superseded" && !keep.has(a.id)) {
+      if (isLive(p, a)) toNotify.push(a.id);
       a.status = "superseded";
       superseded.push(a.id);
     }
     p.alternatives = alternativesFor(p.profile, catalog, activity.id, p.contacts);
     const events: Pending[] = [];
-    if (superseded.length) events.push({ type: "actions.superseded", actor: "agent", outcome: "applied", payload: { actionIds: superseded } });
+    if (superseded.length) events.push({ type: "actions.superseded", actor: "agent", outcome: "applied", payload: { actionIds: superseded, dispatchedActionsToNotify: toNotify } });
     events.push(
       prop.feasible
         ? { type: "plan.proposed", actor: "agent", outcome: "applied", payload: { version: p.version, activityId: activity.id, actions: currentActions(p).map((a) => a.id) } }
@@ -161,7 +173,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
   // After dispatch or provider evidence: READY only if the invariant holds; any failed dependency forces a replan.
   function settle(e: Entry): Pending[] {
     const p = e.plan;
-    if (!["PENDING_CONFIRMATION", "READY", "AWAITING_APPROVAL", "NEEDS_REPLAN"].includes(p.state)) return [];
+    if (CLOSED_PLAN.has(p.state)) return [];
     const failed = currentDeps(p).filter((d) => TERMINAL_DEP.has(d.status));
     if (failed.length) {
       const wasReady = p.state === "READY";
@@ -266,7 +278,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
           if (p.state === "PENDING_CONFIRMATION" || p.state === "READY") return done(e, [{ type, actor: "user", outcome: "duplicate", payload: {} }], "duplicate", "Already dispatched");
           if (p.state !== "AWAITING_APPROVAL") return reject(e, type, "user", `Cannot execute in ${p.state}`);
           const t = now().getTime();
-          const todo = currentActions(p).filter((a) => a.status !== "dispatched");
+          const todo = currentActions(p).filter((a) => a.status !== "dispatched" && a.status !== "failed");
           // Atomic precheck: nothing is sent unless every pending action has a valid approval right now.
           const invalid = todo.flatMap((a) => {
             const appr = p.approvals.find((x) => x.id === a.approvalId);
@@ -287,9 +299,14 @@ export function createCoordinator(deps: CoordinatorDeps) {
           let providerErrors = 0;
           for (const a of todo) {
             const dep = p.dependencies.find((d) => d.actionId === a.id)!;
-            const input = { planId: p.id, actionId: a.id, recipientId: a.scope.recipientId, approvalId: a.approvalId!, idempotencyKey: a.idempotencyKey, sharedFields: a.scope.sharedFields, when: a.scope.when };
+            const input = { planId: p.id, actionId: a.id, recipientId: a.scope.recipientId, approvalId: a.approvalId!, idempotencyKey: a.idempotencyKey, sharedFields: [...a.scope.sharedFields], when: a.scope.when };
             try {
-              const res = a.scope.kind === "invite" ? await deps.provider.sendApprovedInvite(input) : await deps.provider.requestApprovedRide(input);
+              const call = a.scope.kind === "invite" ? deps.provider.sendApprovedInvite(input) : deps.provider.requestApprovedRide(input);
+              // A hung provider must not hold the plan lock forever; a timeout is an unknown outcome like any error.
+              let timer: ReturnType<typeof setTimeout> | undefined;
+              const timeout = new Promise<never>((_, rej) => (timer = setTimeout(() => rej(new Error("Provider timed out")), PROVIDER_TIMEOUT_MS)));
+              const res = await Promise.race([call, timeout]).finally(() => clearTimeout(timer));
+              a.dispatchError = undefined;
               a.providerRequestId = res.requestId;
               if (res.status === "requested") {
                 a.status = "dispatched";
@@ -303,10 +320,12 @@ export function createCoordinator(deps: CoordinatorDeps) {
             } catch (err) {
               // Unknown whether it was sent: keep it approved; retry is safe because the idempotency key is stable.
               providerErrors++;
+              a.dispatchError = true;
               events.push({ type: `${a.scope.kind}.dispatch_error`, actor: "agent", outcome: "rejected", reason: err instanceof Error ? err.message : "Provider error", payload: { actionId: a.id, retrySafe: true } });
             }
           }
-          if (!providerErrors || todo.some((a) => a.status === "failed")) {
+          // Unknown outcomes: stay in AWAITING_APPROVAL (no replan, no re-send) until a retry resolves them.
+          if (!providerErrors) {
             p.state = "PENDING_CONFIRMATION";
             events.push(...settle(e));
           }
@@ -316,7 +335,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
         case "choose_alternative": {
           if (!["BLOCKED", "PROPOSED", "NEEDS_REPLAN"].includes(p.state)) return reject(e, type, "user", `Cannot switch activity in ${p.state}`);
           if (!p.alternatives.some((x) => x.activityId === cmd.activityId)) return reject(e, type, "user", "Not one of the offered alternatives");
-          const events: Pending[] = [{ type, actor: "user", outcome: "applied", payload: { activityId: cmd.activityId } }, ...plan(e, activityOf(cmd.activityId), { recipients: new Set() })];
+          const events: Pending[] = [{ type, actor: "user", outcome: "applied", payload: { activityId: cmd.activityId } }, ...plan(e, activityOf(cmd.activityId), exclusions(p))];
           p.state = p.blockers.length ? "BLOCKED" : "PROPOSED";
           return done(e, events);
         }
@@ -330,7 +349,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
 
         case "cancel": {
           p.state = "CANCELLED";
-          const open = currentActions(p).filter((a) => a.status === "dispatched").map((a) => a.id);
+          const open = p.actions.filter((a) => isLive(p, a)).map((a) => a.id);
           return done(e, [{ type: "plan.cancelled", actor: "user", outcome: "applied", payload: { dispatchedActionsToNotify: open } }]);
         }
 
@@ -369,9 +388,13 @@ export function createCoordinator(deps: CoordinatorDeps) {
       const base = { type, actor: ev.actor, idempotencyKey: ev.idempotencyKey, payload: { eventId: ev.eventId, requestId: ev.requestId, sequence: ev.sequence } } as const;
       const keys = [`event:${ev.eventId}`, ...(ev.idempotencyKey ? [`key:${ev.idempotencyKey}`] : [])];
       if (keys.some((k) => e.seenKeys.has(k))) return done(e, [{ ...base, outcome: "duplicate", reason: "Already processed" }], "duplicate", "Already processed");
-      keys.forEach((k) => e.seenKeys.add(k));
+      // Only valid callbacks burn their keys, so a forged or mistyped event cannot pre-empt the real one.
+      const burn = () => keys.forEach((k) => e.seenKeys.add(k));
 
-      const ignore = (reason: string) => done(e, [{ ...base, outcome: "ignored", reason }], "ignored", reason);
+      const ignore = (reason: string) => {
+        burn();
+        return done(e, [{ ...base, outcome: "ignored", reason }], "ignored", reason);
+      };
       const action = p.actions.find((a) => a.providerRequestId === ev.requestId);
       if (!action) return reject(e, type, ev.actor, "Unknown request id (nothing was dispatched for it)", base.payload);
       if (!type.startsWith(`${action.scope.kind}.`)) return reject(e, type, ev.actor, `Event type does not match a ${action.scope.kind} request`, base.payload);
@@ -382,6 +405,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
       if (TERMINAL_DEP.has(dep.status)) return ignore(`Dependency already ${dep.status}`);
 
       const next: Dependency["status"] = type.endsWith("accepted") || type.endsWith("confirmed") ? "confirmed" : type.endsWith("declined") ? (dep.status === "confirmed" ? "cancelled" : "declined") : "cancelled";
+      burn();
       dep.status = next;
       dep.lastSequence = ev.sequence;
       const events: Pending[] = [{ ...base, outcome: "applied", payload: { ...base.payload, dependencyId: dep.id, status: next, dataSource: p.dataSource } }];

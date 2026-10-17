@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Activity } from "@/domain/activities";
-import { CommandResult, CoordinationPlan, type ActionScope, type Contact, type Profile, type ProviderEvent } from "@/lib/schema";
-import { createCoordinator, currentActions, readyViolations } from "./coordinator";
+import { CommandResult, CoordinationPlan, CreatePlanInput, type ActionScope, type Contact, type Profile, type ProviderEvent } from "@/lib/schema";
+import { PROVIDER_TIMEOUT_MS, createCoordinator, currentActions, readyViolations } from "./coordinator";
 import { PARATRANSIT_ID, softCount } from "./planner";
 import { createMockProvider, type ProviderPort } from "./provider";
 
@@ -262,6 +262,101 @@ describe("provider evidence", () => {
     const exec = await s.c.command(r.plan.id, { type: "execute" });
     expect((await s.c.ingest(r.plan.id, ev(req(exec.plan, "invite"), "ride.confirmed"))).outcome).toBe("rejected");
     expect(s.c.get(r.plan.id).plan.state).toBe("PENDING_CONFIRMATION");
+  });
+});
+
+describe("review regressions", () => {
+  it("a ride decline while the invite is still in flight carries the live invite over instead of re-inviting", async () => {
+    const s = setup();
+    const mock = s.provider as ReturnType<typeof createMockProvider>;
+    const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
+    await s.c.command(r.plan.id, { type: "accept_proposal" });
+    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    const exec = await s.c.command(r.plan.id, { type: "execute" });
+    const inviteReq = req(exec.plan, "invite");
+    const replan = await s.c.ingest(r.plan.id, ev(req(exec.plan, "ride"), "ride.declined"));
+    expect(replan.plan.state).toBe("NEEDS_REPLAN");
+    expect(req(replan.plan, "invite")).toBe(inviteReq); // same live request, not superseded
+    await s.c.command(r.plan.id, { type: "accept_proposal" });
+    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    const again = await s.c.command(r.plan.id, { type: "execute" });
+    expect(mock.calls.filter((x) => x.kind === "invite")).toHaveLength(1);
+    await s.c.ingest(r.plan.id, ev(inviteReq, "invite.accepted")); // Elaine's reply to the original invite still counts
+    const ready = await s.c.ingest(r.plan.id, ev(req(again.plan, "ride"), "ride.confirmed"));
+    expect(ready.plan.state).toBe("READY");
+  });
+
+  it("choose_alternative keeps exclusions: someone who declined is not asked again", async () => {
+    const SAME_DAY: Activity = { ...WORKSHOP, id: "fair", name: "Craft Fair" };
+    let n = 0;
+    const provider = createMockProvider();
+    const c = createCoordinator({ provider, now: () => new Date(T0), activities: [...CATALOG, SAME_DAY], newId: () => `plan-${++n}` });
+    const r = await c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
+    await c.command(r.plan.id, { type: "accept_proposal" });
+    await approveAll(c, c.get(r.plan.id).plan, new Date(T0 + HOUR).toISOString());
+    const exec = await c.command(r.plan.id, { type: "execute" });
+    await c.ingest(r.plan.id, ev(req(exec.plan, "ride"), "ride.declined"));
+    const alt = await c.command(r.plan.id, { type: "choose_alternative", activityId: "fair" });
+    const ride = currentActions(alt.plan).find((a) => a.scope.kind === "ride")!;
+    expect(ride.scope.recipientId).toBe(PARATRANSIT_ID);
+    expect(ride.scope.activityId).toBe("fair");
+    // The live invite for the workshop is superseded and listed for notification, not silently dropped.
+    const sup = alt.events.find((e) => e.type === "actions.superseded")!;
+    expect(sup.payload.dispatchedActionsToNotify).toEqual([currentActions(exec.plan).find((a) => a.scope.kind === "invite")!.id]);
+  });
+
+  it("scope comparison cannot be fooled by joining field names", async () => {
+    const s = setup();
+    const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
+    await s.c.command(r.plan.id, { type: "accept_proposal" });
+    const ride = currentActions(r.plan).find((a) => a.scope.kind === "ride")!;
+    const forged = { ...ride.scope, sharedFields: ["mobility", "name|pickupWindow"] };
+    expect((await s.c.command(r.plan.id, { type: "approve", actionId: ride.id, scope: forged, expiresAt: s.at(HOUR) })).outcome).toBe("rejected");
+  });
+
+  it("a provider mutating sharedFields cannot widen the privacy scope of later plans", async () => {
+    const inner = createMockProvider();
+    const greedy: ProviderPort = {
+      dataSource: "mock",
+      sendApprovedInvite: (i) => inner.sendApprovedInvite(i),
+      requestApprovedRide: (i) => {
+        i.sharedFields.push("homeAddress");
+        return inner.requestApprovedRide(i);
+      },
+    };
+    const s = setup({ provider: greedy });
+    const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
+    await s.c.command(r.plan.id, { type: "accept_proposal" });
+    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await s.c.command(r.plan.id, { type: "execute" });
+    expect(currentActions(s.c.get(r.plan.id).plan).find((a) => a.scope.kind === "ride")!.scope.sharedFields).not.toContain("homeAddress");
+    const r2 = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
+    expect(currentActions(r2.plan).find((a) => a.scope.kind === "ride")!.scope.sharedFields).not.toContain("homeAddress");
+  });
+
+  it("a hung provider times out instead of holding the plan lock", async () => {
+    vi.useFakeTimers();
+    try {
+      const hung: ProviderPort = { dataSource: "mock", sendApprovedInvite: () => new Promise(() => {}), requestApprovedRide: () => new Promise(() => {}) };
+      const s = setup({ provider: hung });
+      const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
+      await s.c.command(r.plan.id, { type: "accept_proposal" });
+      await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+      const pending = s.c.command(r.plan.id, { type: "execute" });
+      await vi.advanceTimersByTimeAsync(PROVIDER_TIMEOUT_MS * 2 + 10);
+      const res = await pending;
+      expect(res.plan.state).toBe("AWAITING_APPROVAL");
+      expect((await s.c.command(r.plan.id, { type: "cancel" })).plan.state).toBe("CANCELLED");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("contract rejects duplicate or reserved contact ids", () => {
+    const base = { profile: MAYA, activityId: "workshop" };
+    expect(CreatePlanInput.safeParse({ ...base, contacts: [CONTACTS[0], CONTACTS[0]] }).success).toBe(false);
+    expect(CreatePlanInput.safeParse({ ...base, contacts: [{ id: "paratransit", name: "X" }] }).success).toBe(false);
+    expect(CreatePlanInput.safeParse({ ...base, contacts: CONTACTS }).success).toBe(true);
   });
 });
 

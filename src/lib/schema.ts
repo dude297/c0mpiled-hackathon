@@ -93,6 +93,7 @@ export type ActionKind = z.infer<typeof ActionKind>;
 // Exactly what the user authorizes: who is contacted, for what, which profile fields are shared, for which slot.
 export const ActionScope = z.object({
   kind: ActionKind,
+  activityId: z.string(), // the activity this action is for; a confirmation never transfers to another activity
   recipientId: z.string(),
   sharedFields: z.array(z.string()),
   when: z.string(),
@@ -109,6 +110,7 @@ export const ActionRequest = z.object({
   approvalId: z.string().optional(),
   idempotencyKey: z.string(),
   providerRequestId: z.string().optional(),
+  dispatchError: z.boolean().optional(), // last dispatch attempt had an unknown outcome; retry with the same key
 });
 export type ActionRequest = z.infer<typeof ActionRequest>;
 
@@ -200,7 +202,12 @@ export type CoordinationPlan = z.infer<typeof CoordinationPlan>;
 export const CreatePlanInput = z.object({
   profile: Profile,
   activityId: z.string().min(1),
-  contacts: z.array(Contact).max(10).default([]),
+  contacts: z
+    .array(Contact)
+    .max(10)
+    .default([])
+    .refine((cs) => new Set(cs.map((c) => c.id)).size === cs.length, "Contact ids must be unique")
+    .refine((cs) => cs.every((c) => c.id !== "paratransit"), 'Contact id "paratransit" is reserved'),
 });
 export type CreatePlanInput = z.input<typeof CreatePlanInput>;
 
