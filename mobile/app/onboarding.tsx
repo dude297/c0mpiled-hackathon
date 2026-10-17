@@ -8,7 +8,7 @@
 // same swipe cards). Switching modes keeps every answer.
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ChoiceStep } from '@/components/onboarding/ChoiceStep';
@@ -17,7 +17,7 @@ import { InterestGrid } from '@/components/onboarding/InterestGrid';
 import { NameStep, type AnswerMode, type DemoKey } from '@/components/onboarding/NameStep';
 import { ReviewStep } from '@/components/onboarding/ReviewStep';
 import { SwipeDeck } from '@/components/onboarding/SwipeDeck';
-import { PillButton, s as ui } from '@/components/onboarding/ui';
+import { PillButton } from '@/components/onboarding/ui';
 import {
   answersToProfile,
   BUDGET_OPTIONS,
@@ -45,11 +45,6 @@ type TransportKey = (typeof TRANSPORT_OPTIONS)[number]['key'];
 
 const STEPS = ['name', 'interests', 'times', 'travel', 'mobility', 'transport', 'comfort', 'budget', 'review'] as const;
 const stepOf = (f: (typeof STEPS)[number]) => STEPS.indexOf(f);
-const VIEWS = [
-  { key: 'swipe', label: 'Swipe', hint: 'One card at a time. Swipe or use the No and Yes buttons.' },
-  { key: 'easy', label: 'Easier view', hint: 'Shows every idea at once as tap tiles instead of swipe cards' },
-  { key: 'hands', label: 'Hands-free', hint: 'Answer each card by looking or tilting your head toward No or Yes' },
-] as const;
 const LAST = INTEREST_META.length - 1;
 
 // Answers rebuilt from the last matched profile, so "Change my answers" / Back from Matches lands on the
@@ -233,7 +228,7 @@ export default function Onboarding() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={[st.header, { paddingTop: insets.top + space.sm }]}>
+      <View style={[st.header, { paddingTop: insets.top + space.sm, paddingLeft: insets.left + 56 + space.md, paddingRight: insets.right + space.md }]}>
         {showTopBack || showBackToReview ? (
           <View style={st.headerRow}>
             {showTopBack ? (
@@ -242,25 +237,6 @@ export default function Onboarding() {
             {showBackToReview ? (
               <PillButton variant="outline" icon="checkmark" label="Back to review" onPress={backToReview} disabled={loading} style={st.backBtn} />
             ) : null}
-          </View>
-        ) : null}
-        {current === 'interests' ? (
-          <View style={st.views} accessibilityRole="radiogroup" accessibilityLabel="How to answer">
-            {VIEWS.map((v) => {
-              const on = v.key === mode;
-              return (
-                <Pressable
-                  key={v.key}
-                  accessibilityRole="radio"
-                  accessibilityLabel={v.label}
-                  accessibilityHint={v.hint}
-                  aria-checked={on}
-                  onPress={() => setMode(v.key)}
-                  style={({ pressed }) => [st.toggle, on && st.toggleOn, pressed && ui.pressed]}>
-                  <Text style={[st.viewText, { color: on ? colors.onTileSelected : colors.text }]}>{v.label}</Text>
-                </Pressable>
-              );
-            })}
           </View>
         ) : null}
         <Text style={[type.label, { color: colors.text }]}>
@@ -305,11 +281,11 @@ export default function Onboarding() {
             bottomInset={bottom}
           />
         ) : handsFree ? (
-          <View style={{ flex: 1, paddingBottom: bottom + space.md }}>
+          <View style={{ flex: 1, minHeight: 0, paddingBottom: bottom + space.sm }}>
             <HandsFreeDeck cursor={Math.min(cursor, LAST)} enterFrom={enterFrom} onAnswer={answerCard} onBack={back} />
           </View>
         ) : (
-          <View style={{ flex: 1, paddingBottom: bottom + space.md }}>
+          <View style={{ flex: 1, minHeight: 0, paddingBottom: bottom + space.sm }}>
             <SwipeDeck
               cursor={Math.min(cursor, LAST)}
               enterFrom={enterFrom}
@@ -427,25 +403,9 @@ export default function Onboarding() {
 }
 
 const st = StyleSheet.create({
-  header: { paddingHorizontal: space.md, gap: space.sm, paddingBottom: space.sm },
+  header: { flexShrink: 0, gap: space.sm, paddingBottom: space.sm },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: tap.min },
   backBtn: { minHeight: tap.min, paddingHorizontal: space.md },
-  views: { flexDirection: 'row', gap: space.xs },
-  viewText: { fontSize: 17, lineHeight: 20, fontWeight: '600', textAlign: 'center' },
-  toggle: {
-    flex: 1,
-    minHeight: tap.min,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: space.sm,
-    paddingHorizontal: space.xs,
-    borderRadius: radius.pill,
-    borderWidth: 2,
-    borderColor: colors.text,
-    backgroundColor: colors.tile,
-  },
-  toggleOn: { backgroundColor: colors.tileSelected, borderColor: colors.tileSelected },
   track: { height: 10, borderRadius: radius.pill, backgroundColor: colors.tile, overflow: 'hidden' },
   fill: { height: '100%', backgroundColor: colors.primary, borderRadius: radius.pill },
 });

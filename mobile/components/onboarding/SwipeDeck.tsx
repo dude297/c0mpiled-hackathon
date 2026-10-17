@@ -30,19 +30,19 @@ const FLICK_VELOCITY = 800;
 const tick = haptic.tick; // plain function so the gesture worklet can schedule it on the JS thread
 const MAX_ROTATE = 12;
 
-function CardFace({ interest }: { interest: Interest }) {
+function CardFace({ interest, compact = false }: { interest: Interest; compact?: boolean }) {
   return (
-    <View style={st.card}>
-      <Text style={[type.heading, { color: colors.textMuted }]}>Would you enjoy this?</Text>
-      <View style={st.center}>
-        <Text style={st.emoji} importantForAccessibility="no">{interest.emoji}</Text>
-        <Text style={[type.display, { color: colors.text, textAlign: 'center' }]}>{interest.label}</Text>
+    <View style={[st.card, compact && st.compactCard]}>
+      <Text style={[type.heading, { color: colors.textMuted }, compact && st.compactPrompt]}>Would you enjoy this?</Text>
+      <View style={[st.center, compact && st.compactCenter]}>
+        <Text style={[st.emoji, compact && st.compactEmoji]} importantForAccessibility="no">{interest.emoji}</Text>
+        <Text style={[type.display, { color: colors.text, textAlign: 'center' }, compact && st.compactTitle]}>{interest.label}</Text>
       </View>
-      <View style={st.hint} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
+      {!compact && <View style={st.hint} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
         <Ionicons name="arrow-back" size={22} color={colors.textMuted} />
         <Text style={[type.body, { color: colors.textMuted, textAlign: 'center' }]}>Swipe to answer</Text>
         <Ionicons name="arrow-forward" size={22} color={colors.textMuted} />
-      </View>
+      </View>}
     </View>
   );
 }
@@ -59,6 +59,7 @@ function Stamp({ like }: { like: boolean }) {
 
 function SwipeCard({
   interest,
+  compact,
   drag,
   enterFrom,
   reduceMotion,
@@ -66,6 +67,7 @@ function SwipeCard({
   ref,
 }: {
   interest: Interest;
+  compact: boolean;
   drag: SharedValue<number>; // 0..1, how far the top card is toward a commit — drives the card behind
   enterFrom: Dir | null; // after Undo, slide back in from the side it left
   reduceMotion: boolean;
@@ -168,7 +170,7 @@ function SwipeCard({
   return (
     <GestureDetector gesture={pan}>
       <Animated.View
-        style={[StyleSheet.absoluteFill, cardStyle]}
+        style={[{ flex: 1, minHeight: 0 }, cardStyle]}
         accessible
         accessibilityLabel={`${interest.label}. Would you enjoy this?`}
         accessibilityHint="Swipe right for yes, left for no, or use the Yes and No buttons below."
@@ -180,7 +182,7 @@ function SwipeCard({
           if (e.nativeEvent.actionName === 'like') swipe(1);
           else if (e.nativeEvent.actionName === 'nope') swipe(-1);
         }}>
-        <CardFace interest={interest} />
+        <CardFace interest={interest} compact={compact} />
         <Animated.View style={[st.stampSpot, { left: space.lg }, likeStyle]} pointerEvents="none">
           <Stamp like />
         </Animated.View>
@@ -196,6 +198,7 @@ export function SwipeDeck({
   cursor,
   enterFrom,
   canBack,
+  compact = false,
   onAnswer,
   onBack,
   left,
@@ -205,9 +208,10 @@ export function SwipeDeck({
   cursor: number; // index into INTEREST_META of the top card
   enterFrom: Dir | null;
   canBack: boolean;
+  compact?: boolean; // hands-free presentation; gestures and answers stay the same
   onAnswer: (key: Interest['key'], liked: boolean) => void;
   onBack: () => void;
-  left?: ReactNode; // optional overlays on the deck's left / right edges (hands-free ✕ / ❤️ targets)
+  left?: ReactNode; // hands-free No / Yes targets replace the action buttons in the bottom row
   right?: ReactNode;
   ref?: Ref<SwipeDeckHandle>;
 }) {
@@ -231,10 +235,10 @@ export function SwipeDeck({
   }));
 
   return (
-    <View style={{ flex: 1 }}>
-      <View style={{ flex: 1 }}>
-        <View style={st.stack}>
-          {next && (
+    <View style={{ flex: 1, minHeight: 0 }}>
+      <View style={st.cardArea}>
+        <View style={[st.stack, compact && st.compactStack]}>
+          {next && !compact && (
             <Animated.View
               style={[StyleSheet.absoluteFill, behindStyle]}
               importantForAccessibility="no-hide-descendants"
@@ -247,6 +251,7 @@ export function SwipeDeck({
               key={top.key}
               ref={cardRef}
               interest={top}
+              compact={compact}
               drag={drag}
               enterFrom={enterFrom}
               reduceMotion={reduceMotion}
@@ -254,21 +259,26 @@ export function SwipeDeck({
             />
           )}
         </View>
-        {left ? <View style={[st.side, { left: 0 }]} pointerEvents="box-none">{left}</View> : null}
-        {right ? <View style={[st.side, { right: 0 }]} pointerEvents="box-none">{right}</View> : null}
       </View>
-      <View style={st.bar}>
+      <View style={[st.bar, compact && st.compactBar]}>
         <CircleButton icon="arrow-undo" label="Back" a11yLabel="Back: undo last answer" color={colors.text} size={60} disabled={!canBack} onPress={onBack} />
-        <CircleButton icon="close" label="No" a11yLabel={top ? `No, not ${top.label}` : 'No'} color={colors.hard} size={84} onPress={() => cardRef.current?.swipe(-1)} />
-        <CircleButton icon="heart" label="Yes" a11yLabel={top ? `Yes, I'd enjoy ${top.label}` : 'Yes'} color={colors.like} size={84} onPress={() => cardRef.current?.swipe(1)} />
+        {left ?? <CircleButton icon="close" label="No" a11yLabel={top ? `No, not ${top.label}` : 'No'} color={colors.hard} size={84} onPress={() => cardRef.current?.swipe(-1)} />}
+        {right ?? <CircleButton icon="heart" label="Yes" a11yLabel={top ? `Yes, I'd enjoy ${top.label}` : 'Yes'} color={colors.like} size={84} onPress={() => cardRef.current?.swipe(1)} />}
       </View>
     </View>
   );
 }
 
 const st = StyleSheet.create({
+  cardArea: { flex: 1, minHeight: 0, overflow: 'hidden' },
+  compactStack: { marginTop: space.sm, marginBottom: space.sm },
+  compactCard: { padding: space.sm, justifyContent: 'center', gap: space.xs },
+  compactPrompt: { fontSize: 16, lineHeight: 20 },
+  compactCenter: { gap: 0, flexShrink: 1, justifyContent: 'center' },
+  compactEmoji: { fontSize: 64, lineHeight: 76, flexShrink: 1 },
+  compactTitle: { fontSize: 24, lineHeight: 28, flexShrink: 1 },
+  compactBar: { flexShrink: 0, paddingTop: space.xs },
   stack: { flex: 1, marginHorizontal: space.md, marginTop: space.sm, marginBottom: space.md },
-  side: { position: 'absolute', top: 0, bottom: 0, justifyContent: 'center' },
   card: {
     flex: 1,
     backgroundColor: colors.surface,
@@ -296,6 +306,8 @@ const st = StyleSheet.create({
   },
   stampText: { fontSize: 32, lineHeight: 38, fontWeight: '800', letterSpacing: 2 },
   bar: {
+    flexShrink: 0,
+    paddingTop: space.sm,
     flexDirection: 'row',
     justifyContent: 'space-evenly',
     alignItems: 'flex-end',
