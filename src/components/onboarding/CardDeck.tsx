@@ -7,7 +7,7 @@ import type { Profile } from "@/lib/schema";
 
 // Swipe-card onboarding: produces the same Profile as the manual form.
 // Dislike on an interest card only removes it from the running set — never blocks.
-// Walking aid and transport are asked directly and required; a review step shows every answer before analyze.
+// Walking aid, transport, hearing and group size are asked directly and required; a review step shows every answer before analyze.
 
 export const INTEREST_META = [
   { key: "music", emoji: "🎵", label: "Music & singing" },
@@ -46,11 +46,40 @@ export const TRANSPORT_OPTIONS: readonly { key: Profile["transport"][number]; em
   { key: "walk", emoji: "🚶", label: "I walk there" },
 ];
 
+// Asked directly — hearingImpaired and prefersSmallGroups only ever come from this answer.
+// "Neither" is exclusive, so "both false" is an explicit answer, never a default.
+export type ComfortKey = "hearing" | "smallGroups" | "neither";
+export const COMFORT_OPTIONS: readonly { key: ComfortKey; label: string }[] = [
+  { key: "hearing", label: "Noisy rooms are hard for me to hear in" },
+  { key: "smallGroups", label: "I prefer small groups" },
+  { key: "neither", label: "Neither of these" },
+];
+export const COMFORT_NEITHER: ComfortKey = "neither";
+
+export function comfortFromKeys(keys: readonly ComfortKey[]): Extract<Answer, { kind: "comfort" }> {
+  return { kind: "comfort", hearing: keys.includes("hearing"), smallGroups: keys.includes("smallGroups") };
+}
+
+export function comfortToKeys(answer: { hearing: boolean; smallGroups: boolean }): ComfortKey[] {
+  const keys: ComfortKey[] = [];
+  if (answer.hearing) keys.push("hearing");
+  if (answer.smallGroups) keys.push("smallGroups");
+  return keys.length ? keys : [COMFORT_NEITHER];
+}
+
+// Multi-select toggle with one exclusive option: picking it clears the rest, picking another clears it.
+export function toggleChoice<K extends string>(prev: readonly K[], key: K, exclusive?: K): K[] {
+  if (prev.includes(key)) return prev.filter((k) => k !== key);
+  if (key === exclusive) return [key];
+  return [...prev.filter((k) => k !== exclusive), key];
+}
+
 export type Answer =
   | { kind: "interest"; key: Profile["interests"][number]; liked: boolean }
   | { kind: "travel"; min: number }
   | { kind: "mobility"; key: Profile["mobility"] }
   | { kind: "transport"; modes: Profile["transport"] }
+  | { kind: "comfort"; hearing: boolean; smallGroups: boolean }
   | { kind: "times"; keys: Profile["times"][number][] }
   | { kind: "budget"; amount: number };
 
@@ -59,6 +88,7 @@ type CardDef =
   | { type: "travel" }
   | { type: "mobility" }
   | { type: "transport" }
+  | { type: "comfort" }
   | { type: "times" }
   | { type: "budget" };
 
@@ -76,6 +106,7 @@ function buildCards(): CardDef[] {
     { type: "travel" },
     { type: "mobility" },
     { type: "transport" },
+    { type: "comfort" },
     { type: "budget" },
   ];
 }
@@ -92,7 +123,7 @@ const DEFAULT_TIMES: Profile["times"] = ["morning", "afternoon"];
 const DEFAULT_TRAVEL_MIN = 30;
 const DEFAULT_BUDGET = 10;
 
-export type RequiredField = "mobility" | "transport";
+export type RequiredField = "mobility" | "transport" | "comfort";
 export type DefaultedField = "interests" | "times" | "travel" | "budget";
 export type ProfileResult =
   | { ok: true; profile: Profile; defaults: DefaultedField[] }
@@ -109,6 +140,8 @@ function collect(answers: readonly Answer[]) {
     a.kind === "mobility" && WALKING_AID_OPTIONS.some((o) => o.key === a.key));
   const transportAnswer = answers.find((a): a is Extract<Answer, { kind: "transport" }> => a.kind === "transport");
   const transport = TRANSPORT_OPTIONS.filter((o) => transportAnswer?.modes.includes(o.key)).map((o) => o.key);
+  const comfort = answers.find((a): a is Extract<Answer, { kind: "comfort" }> =>
+    a.kind === "comfort" && typeof a.hearing === "boolean" && typeof a.smallGroups === "boolean");
   return {
     interests: liked.length ? liked : null,
     times: times.size ? TIME_OPTIONS.filter((o) => times.has(o.key)).map((o) => o.key) : null,
@@ -116,13 +149,24 @@ function collect(answers: readonly Answer[]) {
     budget: budget?.amount ?? null,
     mobility: mobility?.key ?? null,
     transport: transport.length ? transport : null,
+    comfort: comfort ? { hearing: comfort.hearing, smallGroups: comfort.smallGroups } : null,
   };
 }
 
+const MISSING_LABEL: Record<RequiredField, string> = {
+  mobility: "walking aid",
+  transport: "how you get places",
+  comfort: "anything else that helps",
+};
+
 export function answersToProfile(answers: readonly Answer[], name: string): ProfileResult {
   const c = collect(answers);
-  if (!c.mobility || !c.transport) {
-    return { ok: false, missing: [...(c.mobility ? [] : ["mobility" as const]), ...(c.transport ? [] : ["transport" as const])] };
+  if (!c.mobility || !c.transport || !c.comfort) {
+    const missing: RequiredField[] = [];
+    if (!c.mobility) missing.push("mobility");
+    if (!c.transport) missing.push("transport");
+    if (!c.comfort) missing.push("comfort");
+    return { ok: false, missing };
   }
   const defaults: DefaultedField[] = [];
   if (!c.interests) defaults.push("interests");
@@ -140,13 +184,13 @@ export function answersToProfile(answers: readonly Answer[], name: string): Prof
       maxTravelMin: c.travelMin ?? DEFAULT_TRAVEL_MIN,
       times: c.times ?? DEFAULT_TIMES,
       budgetPerWeek: c.budget ?? DEFAULT_BUDGET,
-      hearingImpaired: false,
-      prefersSmallGroups: false,
+      hearingImpaired: c.comfort.hearing,
+      prefersSmallGroups: c.comfort.smallGroups,
     },
   };
 }
 
-export type ReviewField = DefaultedField | RequiredField;
+export type ReviewField = DefaultedField | "mobility" | "transport" | "hearing" | "groupSize";
 export type ReviewRow = { field: ReviewField; label: string; value: string; isDefault: boolean };
 
 // Plain-words summary for the "Here's what we heard" step. Defaults are flagged, never presented as answers.
@@ -163,6 +207,8 @@ export function reviewRows(answers: readonly Answer[]): ReviewRow[] {
     { field: "travel", label: "How far", value: travelText(c.travelMin ?? DEFAULT_TRAVEL_MIN), isDefault: c.travelMin === null },
     { field: "mobility", label: "Walking aid", value: c.mobility ? labelOf(WALKING_AID_OPTIONS, [c.mobility]) : "Not answered yet", isDefault: false },
     { field: "transport", label: "How you get places", value: c.transport ? labelOf(TRANSPORT_OPTIONS, c.transport) : "Not answered yet", isDefault: false },
+    { field: "hearing", label: "Hearing", value: c.comfort ? (c.comfort.hearing ? "Noisy rooms are hard to hear in" : "No trouble hearing") : "Not answered yet", isDefault: false },
+    { field: "groupSize", label: "Group size", value: c.comfort ? (c.comfort.smallGroups ? "Prefers small groups" : "Any size is fine") : "Not answered yet", isDefault: false },
     { field: "budget", label: "Weekly budget", value: budgetText(c.budget ?? DEFAULT_BUDGET), isDefault: c.budget === null },
   ];
 }
@@ -436,7 +482,7 @@ export function CardDeck({
   if (editing === null && index >= cards.length) {
     const result = answersToProfile(answers, name);
     const cardFor = (field: ReviewField) =>
-      field === "interests" ? 0 : cards.findIndex((c) => c.type === field);
+      field === "interests" ? 0 : cards.findIndex((c) => c.type === (field === "hearing" || field === "groupSize" ? "comfort" : field));
     return (
       <div ref={rootRef} className="mx-auto w-full max-w-md rounded-xl border bg-card p-6 text-base md:text-lg">
         <h2 tabIndex={-1} data-step-focus className="mb-1 text-2xl font-semibold outline-none">Here&apos;s what we heard</h2>
@@ -466,7 +512,7 @@ export function CardDeck({
         </dl>
         {!result.ok && (
           <p className="mt-3 font-medium text-destructive" role="alert">
-            Please answer {result.missing.map((m) => (m === "mobility" ? "walking aid" : "how you get places")).join(" and ")} first.
+            Please answer {result.missing.map((m) => MISSING_LABEL[m]).join(" and ")} first.
           </p>
         )}
         <p className="mt-4 flex items-center gap-2 text-muted-foreground" aria-live="polite">
@@ -512,7 +558,7 @@ export function CardDeck({
 
   return (
     <div ref={rootRef} className={`mx-auto w-full min-w-0 ${showGrid ? "max-w-3xl" : "max-w-md"} overflow-x-clip p-4 text-base md:text-lg`}>
-      {onDemo && index === 0 && !showGrid && (
+      {onDemo && index === 0 && editing === null && (
         <div className="mb-3 grid grid-cols-2 gap-2">
           <Button size="lg" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("margaret")} disabled={loading}>Demo: Margaret</Button>
           <Button size="lg" variant="outline" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("harold")} disabled={loading}>Demo: Harold</Button>
@@ -670,6 +716,22 @@ export function CardDeck({
         />
       )}
 
+      {card.type === "comfort" && (
+        <ChoiceCard
+          key={at}
+          multi
+          exclusive={COMFORT_NEITHER}
+          heading="Anything else that helps?"
+          helper="Pick any that apply."
+          options={COMFORT_OPTIONS}
+          initial={current?.kind === "comfort" ? comfortToKeys(current) : []}
+          disabled={loading}
+          locked={locked}
+          bigButtons={bigButtons}
+          onDone={(keys) => record(comfortFromKeys(keys))}
+        />
+      )}
+
       {card.type === "budget" && (
         <div className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 tabIndex={-1} data-step-focus className="mb-1 text-xl font-semibold outline-none">What&apos;s a comfortable weekly budget?</h2>
@@ -696,8 +758,10 @@ export function CardDeck({
 }
 
 // Required question: native radios (single) or checkboxes (multi); Continue stays disabled until something is picked.
-function ChoiceCard<K extends string>({ multi, heading, helper, options, initial, disabled, locked, bigButtons, onDone }: {
+function ChoiceCard<K extends string>({ multi, exclusive, heading, helper, options, initial, disabled, locked, bigButtons, onDone }: {
   multi: boolean;
+  // Multi only: an option that clears the others when picked (and is cleared by any other pick).
+  exclusive?: K;
   heading: string;
   helper: string;
   options: readonly { key: K; label: string; emoji?: string }[];
@@ -727,7 +791,7 @@ function ChoiceCard<K extends string>({ multi, heading, helper, options, initial
               disabled={disabled}
               onChange={() => {
                 if (locked()) return;
-                setSelected((prev) => (multi ? (prev.includes(o.key) ? prev.filter((k) => k !== o.key) : [...prev, o.key]) : [o.key]));
+                setSelected((prev) => (multi ? toggleChoice(prev, o.key, exclusive) : [o.key]));
               }}
               className="size-6 shrink-0 accent-foreground outline-none"
             />
