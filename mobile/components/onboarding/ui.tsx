@@ -19,8 +19,8 @@ export const haptic = {
 };
 
 // Moves screen-reader (and web keyboard) focus to a new card's heading when the card appears.
-export function useHeadingFocus() {
-  const ref = useRef<ComponentRef<typeof Text>>(null);
+export function useHeadingFocus<T extends ComponentRef<typeof Text> | ComponentRef<typeof View> = ComponentRef<typeof Text>>() {
+  const ref = useRef<T>(null);
   useEffect(() => {
     const node = ref.current;
     if (!node) return;

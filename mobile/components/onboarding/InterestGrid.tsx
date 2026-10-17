@@ -10,20 +10,22 @@ import { PillButton, s as ui, useHeadingFocus } from './ui';
 type Key = (typeof INTEREST_META)[number]['key'];
 
 export function InterestGrid({
+  sampleInterests,
   picked,
   onToggle,
   onClear,
   onContinue,
   bottomInset,
 }: {
+  sampleInterests?: readonly Key[];
   picked: ReadonlySet<Key>;
   onToggle: (key: Key) => void;
   onClear: () => void;
   onContinue: () => void;
   bottomInset: number;
 }) {
-  const n = picked.size;
   const heading = useHeadingFocus();
+  const n = picked.size;
   const { fontScale } = useWindowDimensions();
   return (
     <View style={{ flex: 1 }}>
@@ -37,12 +39,14 @@ export function InterestGrid({
           {INTEREST_META.map((i) => {
             const on = picked.has(i.key);
             const fg = on ? colors.onTileSelected : colors.text;
+            const presenterHint = sampleInterests ? `Margaret would say: ${sampleInterests.includes(i.key) ? 'Yes' : 'No'}` : undefined;
             return (
               <Pressable
                 key={i.key}
                 accessibilityRole="checkbox"
                 accessibilityState={{ checked: on }}
                 accessibilityLabel={i.label}
+                accessibilityHint={presenterHint}
                 onPress={() => onToggle(i.key)}
                 style={({ pressed }) => [st.tile, fontScale > 1.3 && { flexBasis: '100%' }, on && st.tileOn, pressed && ui.pressed]}>
                 {on && <Ionicons name="checkmark-circle" size={28} color={fg} style={st.check} />}
@@ -50,6 +54,7 @@ export function InterestGrid({
                 <Text style={[type.label, { color: fg, fontWeight: '700', fontSize: 20, lineHeight: 24, textAlign: 'center' }]}>
                   {i.label}
                 </Text>
+                {presenterHint ? <Text style={[st.presenterHint, { color: on ? colors.onTileSelected : colors.textMuted }]}>{presenterHint}</Text> : null}
               </Pressable>
             );
           })}
@@ -80,4 +85,5 @@ const st = StyleSheet.create({
   tileOn: { backgroundColor: colors.tileSelected },
   check: { position: 'absolute', top: space.sm, right: space.sm },
   emoji: { fontSize: 40, lineHeight: 48 },
+  presenterHint: { fontSize: 15, lineHeight: 20, textAlign: 'center' },
 });

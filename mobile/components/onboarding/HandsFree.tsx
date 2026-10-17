@@ -1,15 +1,15 @@
-// Hands-free interest cards: look or turn toward a screen half (1.2 s), or tilt (0.8 s).
+// Hands-free interest cards: move your eyes toward a screen half (1 s), or tilt your head (0.8 s).
 // Runs in Expo Go: the camera + MediaPipe Face Landmarker live in a small WebView tile
 // (lib/handsfreePage.ts) that posts progress / answer messages; everything you see here is native.
 // Answers go through SwipeDeck's own swipe(), the same path as the No / Yes buttons, which keep working.
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useCallback, useEffect, useRef, useState, type ComponentType, type Ref } from 'react';
-import { AccessibilityInfo, AppState, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState, type ComponentType, type Ref } from 'react';
+import { AccessibilityInfo, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } from 'react-native-webview';
 
 import type { Mode, Zone } from '@/lib/handsfree';
-import { buildHandsFreeHtml, HANDSFREE_BASE_URL, handsFreeContextScript, handsFreeModeScript, isCurrentPageMessage, parsePageMessage, type PageContext, type PageError } from '@/lib/handsfreePage';
+import { buildHandsFreeHtml, HANDSFREE_BASE_URL, handsFreeModeScript, parsePageMessage, type PageError } from '@/lib/handsfreePage';
 import { INTEREST_META } from '@/lib/onboarding';
 import { colors, radius, space, tap, type } from '@/lib/theme';
 
@@ -103,7 +103,7 @@ function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void })
             key={m}
             accessibilityRole="radio"
             aria-checked={on}
-            accessibilityLabel={m === 'look' ? 'Look to answer' : 'Tilt your head to answer'}
+            accessibilityLabel={m === 'look' ? 'Move your eyes to answer' : 'Tilt your head to answer'}
             onPress={() => onMode(m)}
             style={({ pressed }) => [st.segBtn, on && st.segOn, pressed && ui.pressed]}>
             <Ionicons name={icon} size={22} color={on ? colors.onTileSelected : colors.text} />
@@ -116,11 +116,13 @@ function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void })
 }
 
 export function HandsFreeDeck({
+  sampleInterests,
   cursor,
   enterFrom,
   onAnswer,
   onBack,
 }: {
+  sampleInterests?: readonly Interest['key'][];
   cursor: number;
   enterFrom: 1 | -1 | null;
   onAnswer: (key: Interest['key'], liked: boolean) => void;
@@ -129,36 +131,12 @@ export function HandsFreeDeck({
   const reduceMotion = useReducedMotion();
   const deckRef = useRef<SwipeDeckHandle>(null);
   const webRef = useRef<WebViewHandle>(null);
-  const contextRef = useRef<PageContext>({ session: 0, revision: 0, live: false });
-  const resetInput = useCallback(() => {
-    const context = contextRef.current;
-    if (!context.live) return;
-    context.revision++;
-    webRef.current?.injectJavaScript(handsFreeContextScript(context.session, context.revision));
-    setProgress({ side: null, value: 0 });
-  }, []);
-  useEffect(() => { resetInput(); }, [cursor, resetInput]);
-  useEffect(() => {
-    const subscription = AppState.addEventListener('change', (state) => {
-      // Permission prompts can temporarily be inactive; a genuine background transition stops input.
-      if (state !== 'background') return;
-      contextRef.current.live = false;
-      webRef.current?.injectJavaScript('window.__hf && window.__hf.stop(); true;');
-      setPhase('idle');
-      setProgress({ side: null, value: 0 });
-    });
-    return () => {
-      subscription.remove();
-      contextRef.current.live = false;
-      webRef.current?.injectJavaScript('window.__hf && window.__hf.stop(); true;');
-    };
-  }, []);
   const [mode, setMode] = useState<Mode>('look');
   // Read by the ready handshake even if the selection changed while the WebView was loading.
   const modeRef = useRef<Mode>('look');
   const [swapSides, setSwapSides] = useState(false); // persisted in the camera page's localStorage
   const [pageReady, setPageReady] = useState(false);
-  const [meter, setMeter] = useState<{ signal: number; zone: Zone; mode: Mode }>({ signal: 0, zone: 'center', mode: 'look' });
+  const [meter, setMeter] = useState<{ signal: number; reading: number; zone: Zone; mode: Mode }>({ signal: 0, reading: 0, zone: 'center', mode: 'look' });
   const [phase, setPhase] = useState<Phase>('idle');
   const [attempt, setAttempt] = useState(0); // bump to (re)mount the camera page
   const [html, setHtml] = useState(''); // built per start; later mode changes are sent to the running page
@@ -179,7 +157,6 @@ export function HandsFreeDeck({
     const id = setInterval(() => {
       const quiet = Date.now() - lastMsg.current;
       if (quiet > START_TIMEOUT_MS) {
-        contextRef.current.live = false;
         webRef.current?.injectJavaScript('window.__hf && window.__hf.stop(); true;');
         setError('timeout');
         setPhase('error');
@@ -189,7 +166,6 @@ export function HandsFreeDeck({
   }, [phase]);
 
   const start = () => {
-    contextRef.current = { session: contextRef.current.session + 1, revision: 0, live: true };
     lastMsg.current = Date.now();
     setError(null);
     setDetail('Opening the camera page…');
@@ -197,36 +173,33 @@ export function HandsFreeDeck({
     setCalib(0);
     setPageReady(false);
     setProgress({ side: null, value: 0 });
-    setMeter({ signal: 0, zone: 'center', mode: modeRef.current });
-    setHtml(buildHandsFreeHtml(mode, contextRef.current.session));
+    setMeter({ signal: 0, reading: 0, zone: 'center', mode: modeRef.current });
+    setHtml(buildHandsFreeHtml(mode));
     setAttempt((a) => a + 1);
     setPhase('starting');
   };
   const stop = () => {
-    contextRef.current.live = false;
     webRef.current?.injectJavaScript('window.__hf && window.__hf.stop(); true;');
     setPhase('idle');
     setProgress({ side: null, value: 0 });
   };
   const pickMode = (m: Mode) => {
-    resetInput();
     modeRef.current = m;
     setMode(m);
+    setMeter({ signal: 0, reading: 0, zone: 'center', mode: m });
     setProgress({ side: null, value: 0 });
     webRef.current?.injectJavaScript(handsFreeModeScript(m));
   };
   const swap = () => {
-    resetInput();
     const next = !swapSides;
     setSwapSides(next);
     setProgress({ side: null, value: 0 });
     webRef.current?.injectJavaScript(`window.__hf && window.__hf.setSwapSides(${next}); true;`);
   };
 
-  // Every answer lands here — gaze/yaw/tilt, the No/Yes bar and a finger swipe —
+  // Every answer lands here — eyes/tilt, the No/Yes bar and a finger swipe —
   // so each one is announced ("Liked Gardening") before it's recorded.
   const recordAnswer = (key: Interest['key'], liked: boolean) => {
-    resetInput();
     const label = INTEREST_META.find((i) => i.key === key)?.label;
     if (label) {
       const msg = `${liked ? 'Liked' : 'Passed on'} ${label}`;
@@ -241,31 +214,23 @@ export function HandsFreeDeck({
   const onMessage = (e: WebViewMessageEvent) => {
     const m = parsePageMessage(e.nativeEvent.data);
     if (!m) return;
-    const context = contextRef.current;
-    if (!context.live || m.session !== context.session) return;
-    if (m.type !== 'ready' && !isCurrentPageMessage(m, context)) return;
     lastMsg.current = Date.now();
     if (m.type === 'ready') {
       setPageReady(true);
       setSwapSides(m.swapSides);
-      webRef.current?.injectJavaScript(handsFreeContextScript(context.session, context.revision));
       webRef.current?.injectJavaScript(handsFreeModeScript(modeRef.current));
     } else if (m.type === 'progress') {
       // Drop queued frames from the previous mode so old holds cannot repaint the panel.
       if (m.mode !== modeRef.current) return;
       setProgress({ side: m.side, value: m.value });
-      setMeter({ signal: m.signal, zone: m.zone, mode: m.mode });
+      setMeter({ signal: m.signal, reading: m.reading, zone: m.zone, mode: m.mode });
     } else if (m.type === 'answer') {
-      if (m.mode === modeRef.current) {
-        resetInput();
-        answer(m.liked);
-      }
+      if (m.mode === modeRef.current) answer(m.liked);
     } else if (m.state === 'error') {
-      contextRef.current.live = false;
       setError(m.error);
       setDetail(m.detail ?? '');
       setPhase('error');
-    } else if (m.state === 'stopped') { contextRef.current.live = false; setPhase('idle'); }
+    } else if (m.state === 'stopped') setPhase('idle');
     else {
       setPhase(m.state);
       if (m.detail) setDetail(m.detail);
@@ -274,7 +239,6 @@ export function HandsFreeDeck({
     }
   };
   const pageFailed = (e?: { nativeEvent?: object }) => {
-    contextRef.current.live = false;
     const n = e?.nativeEvent as { description?: string; statusCode?: number } | undefined;
     setError('load');
     setDetail(n?.description ? `WebView: ${n.description}` : n?.statusCode ? `WebView HTTP ${n.statusCode}` : 'The camera page stopped.');
@@ -294,20 +258,21 @@ export function HandsFreeDeck({
   else if (phase === 'loading') statusText = detail || 'Getting ready… (a few seconds)';
   else if (face === false) statusText = "Can't see your face. Hold the phone in front of you, in good light.";
   else if (phase === 'calibrating') {
-    statusText = 'Look at the middle of the screen…';
+    statusText = mode === 'look' ? 'Keep your head still and look at the middle…' : 'Hold your head upright and look at the middle…';
     percent = `${Math.round(calib * 100)}%`;
   } else if (tracking)
-    statusText = mode === 'look' ? 'Hold a look or turn for 1.2s, then return to the middle.' : 'Tilt your head toward No or Yes and hold.';
+    statusText = mode === 'look' ? 'Move only your eyes left or right. Hold for 1s, then look at the middle.' : 'Tilt your head toward No or Yes and hold.';
 
   return (
     <SwipeDeck
+      sampleInterests={sampleInterests}
       compact
       ref={deckRef}
       cursor={cursor}
       enterFrom={enterFrom}
       canBack
       onAnswer={recordAnswer}
-      onBack={() => { resetInput(); onBack(); }}
+      onBack={onBack}
       header={(
         <ScrollView style={st.panel} contentContainerStyle={st.panelContent}>
           {web ? (
@@ -370,7 +335,8 @@ export function HandsFreeDeck({
                   </View>
                   <Text style={st.privacy}>Yes</Text>
                 </View>
-                <Text style={st.privacy}>Seeing: {meter.zone} · {meter.mode === 'look' ? 'Look' : 'Tilt'}</Text>
+                <Text style={st.privacy}>Seeing: {meter.zone} · {meter.mode === 'look' ? 'Look (eyes)' : 'Tilt (head)'}</Text>
+                <Text style={st.privacy}>{meter.mode === 'look' ? 'Eyes' : 'Tilt'}: {meter.reading.toFixed(2)}{meter.mode === 'tilt' ? '°' : ''}</Text>
               </View>
               <View style={st.liveRow}>
                 <View style={{ flex: 1 }}>
@@ -400,7 +366,7 @@ export function HandsFreeDeck({
                 style={st.bigStart}
               />
               <Text numberOfLines={2} style={st.instruction}>
-                Look, turn or tilt left for No, right for Yes. You can also tap the buttons.
+                Look with your eyes or tilt your head: left for No, right for Yes. You can also tap the buttons.
               </Text>
               <ModeSwitch mode={mode} onMode={pickMode} />
             </>
