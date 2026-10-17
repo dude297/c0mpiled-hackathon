@@ -312,32 +312,3 @@ export function EvidencePanel({ result }: { result: AnalysisResult | null }) {
     </Card>
   );
 }
-
-// Kept as the lead's /api/plans slot: the plan panel's inline Save & share is wired to
-// savePlan in page.tsx; this component is available for /plan/[id] pages once they exist.
-export function SaveShareSlot({ onSave }: { onSave: () => Promise<void> }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const available = false; // flip when POST /api/plans exists
-  async function submit() {
-    setBusy(true);
-    setError(null);
-    try {
-      await onSave();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="flex items-center gap-3 print:hidden">
-      <Button size="lg" onClick={submit} disabled={busy || !available}>
-        <Printer aria-hidden="true" />
-        Save &amp; share
-      </Button>
-      {!available && <span className="text-sm text-muted-foreground md:text-base">Coming soon.</span>}
-      {error && <p role="alert" className="text-destructive">{error}</p>}
-    </div>
-  );
-}
