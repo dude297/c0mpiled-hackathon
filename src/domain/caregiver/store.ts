@@ -1,4 +1,16 @@
-import type { Ack, CheckIn, Grant, Person, PlanLink } from "./contract";
+import type { Ack, CheckIn, Grant, Person, PlanLink, ProfileProposal, ProfileSource, ProfileVersion } from "./contract";
+
+export type DecideProposalInput = {
+  personId: string;
+  proposalId: string;
+  decision: "confirmed" | "rejected";
+  /** Required to confirm; the caller's view of the current version. */
+  expectedVersion?: number;
+  decidedBy: string;
+  at: string;
+};
+export type DecideProposalResult = { proposal: ProfileProposal; version?: ProfileVersion } | "not_found" | "not_pending" | "stale" | "version_conflict";
+export type AppendVersionInput = { personId: string; expectedVersion: number; profile: Person["profile"]; source: ProfileSource; createdBy: string; at: string; proposalId?: string };
 
 // Storage port. Every method is async and returns plain JSON data (no class instances or Maps cross it),
 // so a durable (Supabase) adapter can drop in. Atomic single-call operations keep invariants inside the store;
@@ -28,6 +40,23 @@ export interface CaregiverStore {
   listCheckins(personId: string): Promise<CheckIn[]>;
   ack(ack: Ack): Promise<void>;
   listAckedItemIds(personId: string, userId: string): Promise<string[]>;
+
+  // ─── Person profiles (PERSON_PROFILES.md). createPerson also records version 1 (source "create"). ───
+  /** Atomic: refuses ("stale") unless proposal.baseVersion is the person's current version. Changes nothing on the profile. */
+  createProposal(proposal: ProfileProposal): Promise<ProfileProposal | "not_found" | "stale">;
+  getProposal(proposalId: string): Promise<ProfileProposal | null>;
+  /** Oldest first. */
+  listProposals(personId: string): Promise<ProfileProposal[]>;
+  /**
+   * Atomic. Only a "proposed" proposal can be decided. Confirm: expectedVersion must equal the current version
+   * ("version_conflict" otherwise) and baseVersion must too (else it is marked stale → "stale"); then
+   * profile = {...profile, ...changes}, version + 1 is appended, and other open proposals are marked stale.
+   */
+  decideProposal(input: DecideProposalInput): Promise<DecideProposalResult>;
+  /** Atomic compare-and-append: refuses ("stale") unless expectedVersion is current. Marks open proposals stale. */
+  appendVersion(input: AppendVersionInput): Promise<ProfileVersion | "not_found" | "stale">;
+  /** Oldest first. */
+  listVersions(personId: string): Promise<ProfileVersion[]>;
 }
 
 const sameCheckinBody = (a: CheckIn, b: CheckIn) =>
@@ -41,6 +70,8 @@ export function createMemoryStore(): CaregiverStore {
   const links = new Map<string, PlanLink>(); // planId
   const checkins: CheckIn[] = [];
   const acks = new Map<string, Ack>(); // `${personId}|${userId}|${itemId}`
+  const versions: ProfileVersion[] = [];
+  const proposals = new Map<string, ProfileProposal>(); // proposalId
   const clone = structuredClone;
   const gk = (p: string, u: string) => `${p}|${u}`;
   const otherManagers = (personId: string, userId: string) =>
@@ -49,7 +80,8 @@ export function createMemoryStore(): CaregiverStore {
   return {
     kind: "memory",
     async createPerson(person, creatorGrant) {
-      people.set(person.personId, clone(person));
+      people.set(person.personId, clone({ ...person, profileVersion: 1 }));
+      versions.push(clone({ personId: person.personId, version: 1, profile: person.profile, createdAt: person.createdAt, createdBy: person.createdBy, source: "create" as const }));
       grants.set(gk(creatorGrant.personId, creatorGrant.userId), clone(creatorGrant));
     },
     async getPerson(id) {
@@ -62,6 +94,8 @@ export function createMemoryStore(): CaregiverStore {
       for (const [k, l] of links) if (l.personId === id) links.delete(k);
       for (let i = checkins.length - 1; i >= 0; i--) if (checkins[i].personId === id) checkins.splice(i, 1);
       for (const [k, a] of acks) if (a.personId === id) acks.delete(k);
+      for (let i = versions.length - 1; i >= 0; i--) if (versions[i].personId === id) versions.splice(i, 1);
+      for (const [k, p] of proposals) if (p.personId === id) proposals.delete(k);
     },
     async getGrant(personId, userId) {
       const g = grants.get(gk(personId, userId));
@@ -118,8 +152,62 @@ export function createMemoryStore(): CaregiverStore {
     async listAckedItemIds(personId, userId) {
       return [...acks.values()].filter((a) => a.personId === personId && a.userId === userId).map((a) => a.itemId);
     },
+    async createProposal(p) {
+      const person = people.get(p.personId);
+      if (!person) return "not_found";
+      if (p.baseVersion !== current(person)) return "stale";
+      proposals.set(p.proposalId, clone(p));
+      return clone(p);
+    },
+    async getProposal(id) {
+      const p = proposals.get(id);
+      return p ? clone(p) : null;
+    },
+    async listProposals(personId) {
+      return clone([...proposals.values()].filter((p) => p.personId === personId));
+    },
+    async decideProposal({ personId, proposalId, decision, expectedVersion, decidedBy, at }) {
+      const p = proposals.get(proposalId);
+      const person = people.get(personId);
+      if (!p || !person || p.personId !== personId) return "not_found";
+      if (p.status === "stale") return "stale";
+      if (p.status !== "proposed") return "not_pending";
+      if (decision === "rejected") {
+        Object.assign(p, { status: "rejected", decidedAt: at, decidedBy });
+        return { proposal: clone(p) };
+      }
+      if (p.baseVersion !== current(person)) {
+        Object.assign(p, { status: "stale", decidedAt: at, decidedBy });
+        return "stale";
+      }
+      if (expectedVersion !== current(person)) return "version_conflict";
+      const version = append(person, { ...person.profile, ...p.changes }, p.source, decidedBy, at, p.proposalId);
+      Object.assign(p, { status: "confirmed", decidedAt: at, decidedBy });
+      return { proposal: clone(p), version: clone(version) };
+    },
+    async appendVersion({ personId, expectedVersion, profile, source, createdBy, at, proposalId }) {
+      const person = people.get(personId);
+      if (!person) return "not_found";
+      if (expectedVersion !== current(person)) return "stale";
+      return clone(append(person, profile, source, createdBy, at, proposalId));
+    },
+    async listVersions(personId) {
+      return clone(versions.filter((v) => v.personId === personId).sort((a, b) => a.version - b.version));
+    },
   };
+
+  // Callers hold no await between check and write, so each op is atomic in the single-threaded memory store.
+  function append(person: Person, profile: Person["profile"], source: ProfileSource, createdBy: string, at: string, proposalId?: string) {
+    const v: ProfileVersion = { personId: person.personId, version: current(person) + 1, profile: clone(profile), createdAt: at, createdBy, source, ...(proposalId ? { proposalId } : {}) };
+    versions.push(v);
+    person.profile = clone(profile);
+    person.profileVersion = v.version;
+    for (const o of proposals.values()) if (o.personId === person.personId && o.status === "proposed") Object.assign(o, { status: "stale", decidedAt: at });
+    return v;
+  }
 }
+
+const current = (p: Person) => p.profileVersion ?? 1;
 
 // ponytail: in-memory default on globalThis (survives dev hot reload, lost on restart). Durable adapter replaces it.
 const g = globalThis as unknown as { __daybridgeCaregiverStore?: CaregiverStore };
