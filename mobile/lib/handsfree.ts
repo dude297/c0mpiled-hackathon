@@ -17,16 +17,15 @@ export const TUNING = {
   calibrateMs: 2000, // "look at the middle" step at start
 } as const;
 
-// Sign conventions, in one place so a device test can flip them with one character.
+// Positive always means the user's OWN right (Yes), independent of the CSS-mirrored preview.
 // Gaze: MediaPipe blendshapes follow ARKit naming (the subject's own left/right eye), so
 // "looking to my right" is already "looking at the screen's right" — no flip.
-// Tilt: landmarks are in raw (un-mirrored) camera pixels, where the person's right side is on the
-// image's left, so tilting toward the screen's right makes the raw roll negative — flip it.
 export const GAZE_SIGN = 1;
-// Yaw uses raw, un-mirrored landmarks too: a turn toward screen right moves the nose left
-// in the camera image. The mirrored preview is CSS-only; flip the raw offset exactly once.
-export const YAW_SIGN = -1;
-export const TILT_SIGN = -1;
+// Raw camera: own right moves the nose image-left. Use eye midpoint MINUS nose below.
+export const YAW_SIGN = 1;
+// Reverse the previous roll mapping per the iPhone repro. The panel also offers a persisted
+// Swap sides override because camera/landmark orientation needs confirmation on each device.
+export const TILT_SIGN = 1;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -44,7 +43,7 @@ export function gazeFromBlendshapes(b: Record<string, number>): number {
 export function yawFromLandmarks(nose: { x: number; y: number }, p33: { x: number; y: number }, p263: { x: number; y: number }, aspect = 1): number {
   const eyeDistance = Math.hypot((p263.x - p33.x) * aspect, p263.y - p33.y);
   if (eyeDistance < 1e-6) return 0;
-  const offset = (nose.x - (p33.x + p263.x) / 2) * aspect;
+  const offset = ((p33.x + p263.x) / 2 - nose.x) * aspect;
   return clamp((YAW_SIGN * offset) / eyeDistance, -1, 1);
 }
 
@@ -123,8 +122,8 @@ var TUNING = {
   calibrateMs: 2000
 };
 var GAZE_SIGN = 1;
-var YAW_SIGN = -1;
-var TILT_SIGN = -1;
+var YAW_SIGN = 1;
+var TILT_SIGN = 1;
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 function gazeFromBlendshapes(b) {
   function g(k) { return b[k] == null ? 0 : b[k]; }
@@ -136,7 +135,7 @@ function yawFromLandmarks(nose, p33, p263, aspect) {
   if (aspect == null) aspect = 1;
   var eyeDistance = Math.hypot((p263.x - p33.x) * aspect, p263.y - p33.y);
   if (eyeDistance < 1e-6) return 0;
-  var offset = (nose.x - (p33.x + p263.x) / 2) * aspect;
+  var offset = ((p33.x + p263.x) / 2 - nose.x) * aspect;
   return clamp((YAW_SIGN * offset) / eyeDistance, -1, 1);
 }
 function lookFromSignals(gaze, yaw, baseline) {
