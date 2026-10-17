@@ -1,4 +1,4 @@
-import { CoordinationError, createCoordinator, type Coordinator } from "@/domain/coordination/coordinator";
+import { CoordinationError, createCoordinator, type Coordinator, type SystemCaller } from "@/domain/coordination/coordinator";
 import { createMockProvider } from "@/domain/coordination/provider";
 import { createMemoryStore } from "@/domain/coordination/store";
 import { getUserId } from "@/lib/supabase/auth";
@@ -45,6 +45,23 @@ export function systemCoordinator(): Coordinator | null {
   if (!localDemo()) return null;
   return (g.__daybridgeCoordinator ??= createCoordinator({ provider: createMockProvider(), store: createMemoryStore() }));
 }
+
+// Caregiver lane facade. caregiver/_lib checks grants BEFORE calling it, so plan reads act for the system.
+// Cloud plans are owned by the creating caregiver (the durable store requires a real owner); local plans stay
+// unowned so /coordinate keeps working in the demo. Commands/ingest run as the unowned (null) caller: that reaches
+// local-demo plans only; a cloud plan always has an owner, so they 404 there (no system-level writes).
+const SYSTEM: SystemCaller = { system: true };
+const need = () => {
+  const c = systemCoordinator();
+  if (!c) throw new CoordinationError(503, HOSTED_DISABLED);
+  return c;
+};
+export const coordinator = {
+  create: (input: Parameters<Coordinator["create"]>[0], ownerId?: string | null) => need().create(input, supabaseConfigured() ? ownerId : null),
+  get: (id: string) => need().get(id, SYSTEM),
+  command: (id: string, cmd: Parameters<Coordinator["command"]>[1]) => need().command(id, cmd, null),
+  ingest: (id: string, ev: Parameters<Coordinator["ingest"]>[1]) => need().ingest(id, ev, null),
+};
 
 export async function context(req: Request): Promise<Ctx | Response> {
   const coordinator = systemCoordinator();

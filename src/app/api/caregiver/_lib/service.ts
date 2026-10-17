@@ -31,7 +31,7 @@ export const reply = (body: object, status = 200) => Response.json({ ...body, la
 
 /** Hosted production without the local-demo flag fails closed (503) before identity is even read. */
 export async function resolveCaller(req: Request): Promise<{ userId: string } | Response> {
-  if (!demoEventsEnabled()) return reply({ error: CAREGIVER_HOSTED_DISABLED }, 503);
+  if (!supabaseConfigured() && !demoEventsEnabled()) return reply({ error: CAREGIVER_HOSTED_DISABLED }, 503);
   const userId = await ports.caller.resolve(req);
   return userId ? { userId } : reply({ error: "Missing or invalid caller (x-daybridge-user)" }, 401);
 }
@@ -170,7 +170,7 @@ export async function revokeGrant(userId: string, personId: string, target: stri
 export async function createPlan(userId: string, personId: string, req: Request) {
   const { person } = await access(personId, userId, "manage");
   const input = await body(req, CreatePersonPlanInput);
-  const res = await coordinator.create({ profile: person.profile, activityId: input.activityId, contacts: input.contacts });
+  const res = await coordinator.create({ profile: person.profile, activityId: input.activityId, contacts: input.contacts }, userId);
   const linked = await ports.store.linkPlan({ personId, planId: res.plan.id, linkedAt: new Date().toISOString(), linkedBy: userId, profileVersion: person.profileVersion ?? 1 });
   if (linked !== "ok") throw new CaregiverError(409, "Plan is already linked to a person");
   return reply({ planId: res.plan.id, state: res.plan.state, profileVersion: person.profileVersion ?? 1 }, 201);

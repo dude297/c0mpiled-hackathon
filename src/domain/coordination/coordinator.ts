@@ -459,7 +459,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
     });
   }
 
-  async function get(id: string, ownerId?: string | null): Promise<{ plan: CoordinationPlan; events: CoordinationEvent[] }> {
+  async function get(id: string, ownerId?: string | null | SystemCaller): Promise<{ plan: CoordinationPlan; events: CoordinationEvent[] }> {
     const e = await entry(id, ownerId); // already a private copy
     return { plan: e.plan, events: e.log };
   }
