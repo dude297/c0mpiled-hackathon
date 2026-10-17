@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { ArrowLeft, Heart, X } from "lucide-react";
+import { ArrowLeft, Check, Heart, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Profile } from "@/lib/schema";
 
@@ -99,6 +99,28 @@ export function answersToProfile(answers: Answer[], name: string): Profile {
   };
 }
 
+type InterestKey = Profile["interests"][number];
+export const INTEREST_COUNT = INTEREST_META.length;
+
+export function toggleKey(picked: readonly InterestKey[], key: InterestKey): InterestKey[] {
+  return picked.includes(key) ? picked.filter((k) => k !== key) : [...picked, key];
+}
+
+export function likedInterests(history: readonly (Answer | null)[]): InterestKey[] {
+  return history.flatMap((a) => (a?.kind === "interest" && a.liked ? [a.key] : []));
+}
+
+// Grid picks -> one interest answer per card, in deck order. Covers at least the first
+// `answeredCount` cards and every picked tile, so switching views never drops a pick.
+export function pickedToHistory(picked: readonly InterestKey[], answeredCount: number): Answer[] {
+  const lastPicked = Math.max(-1, ...INTEREST_META.map((m, i) => (picked.includes(m.key) ? i : -1)));
+  return INTEREST_META.slice(0, Math.max(answeredCount, lastPicked + 1)).map((m) => ({
+    kind: "interest",
+    key: m.key,
+    liked: picked.includes(m.key),
+  }));
+}
+
 export const SWIPE_THRESHOLD = 48;
 
 export function swipeDirection(distance: number): 1 | -1 | null {
@@ -178,6 +200,54 @@ function ActionRow({ onLike, onDislike, disabled, bigButtons }: {
   );
 }
 
+function InterestGrid({ picked, onToggle, onClear, onContinue, disabled }: {
+  picked: readonly InterestKey[];
+  onToggle: (key: InterestKey) => void;
+  onClear: () => void;
+  onContinue: () => void;
+  disabled: boolean;
+}) {
+  const pill = "min-h-12 rounded-full border-2 border-[#121212] px-6 text-lg font-semibold disabled:opacity-50 dark:border-white";
+  return (
+    <section aria-labelledby="interest-grid-heading">
+      <h2 id="interest-grid-heading" className="mb-4 text-xl font-semibold md:text-2xl">
+        What do you enjoy? Pick as many as you like.
+      </h2>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
+        {INTEREST_META.map((m) => {
+          const on = picked.includes(m.key);
+          return (
+            <button
+              key={m.key}
+              type="button"
+              aria-pressed={on}
+              disabled={disabled}
+              onClick={() => onToggle(m.key)}
+              className={`relative flex min-h-24 min-w-0 flex-col items-center justify-center gap-1 rounded-xl p-3 text-center text-lg font-bold leading-tight break-words transition-colors motion-reduce:transition-none md:text-xl ${on ? "bg-[#5a594e] text-white" : "bg-[#efefe6] text-[#121212] hover:bg-[#e2e2d6]"}`}
+            >
+              {on && <Check aria-hidden="true" className="absolute right-2 top-2 size-6" strokeWidth={3} />}
+              <span aria-hidden="true" className="text-3xl">{m.emoji}</span>
+              <span>{m.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="mt-4 text-center font-medium" aria-live="polite">{picked.length} picked</p>
+      <div className="mt-3 flex flex-wrap justify-center gap-3">
+        <button type="button" className={`${pill} bg-transparent`} onClick={onClear} disabled={disabled || picked.length === 0}>
+          Clear all
+        </button>
+        <button type="button" className={`${pill} bg-[#121212] text-white dark:bg-white dark:text-[#121212]`} onClick={onContinue} disabled={disabled}>
+          Continue
+        </button>
+      </div>
+      {picked.length === 0 && (
+        <p className="mt-2 text-center text-base text-muted-foreground">Not sure? Continue and we&apos;ll start you with learning new things.</p>
+      )}
+    </section>
+  );
+}
+
 export function CardDeck({
   onComplete,
   initialName = "",
@@ -190,14 +260,29 @@ export function CardDeck({
   const cards = useMemo(() => buildCards(), []);
   const [history, setHistory] = useState<(Answer | null)[]>([]);
   const [bigButtons, setBigButtons] = useState(false);
+  const [picked, setPicked] = useState<InterestKey[]>([]);
   const index = history.length;
+  const showGrid = bigButtons && index < INTEREST_COUNT;
   const answers = history.filter((answer): answer is Answer => answer !== null);
   const [name, setName] = useState(initialName);
 
   const record = (answer: Answer | null) => {
     if (!loading) setHistory((prev) => [...prev, answer]);
   };
-  const back = () => setHistory(undoAnswer);
+  const back = () => {
+    if (bigButtons && index === INTEREST_COUNT) {
+      // Easier view: Back from the times card reopens the grid with picks kept.
+      setPicked(likedInterests(history));
+      setHistory([]);
+    } else setHistory(undoAnswer);
+  };
+  const toggleView = () => {
+    if (index < INTEREST_COUNT) {
+      if (bigButtons) setHistory(pickedToHistory(picked, index));
+      else setPicked(likedInterests(history));
+    }
+    setBigButtons((value) => !value);
+  };
 
   const swipeCard = (dir: 1 | -1, interest: CardDef & { type: "interest" }) => {
     record({ kind: "interest", key: interest.interest.key, liked: dir > 0 });
@@ -220,6 +305,7 @@ export function CardDeck({
           className="min-h-11 rounded-xl px-3 text-base underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           onClick={() => {
             setHistory([]);
+            setPicked([]);
           }}
         >
           Start over
@@ -229,20 +315,29 @@ export function CardDeck({
   }
 
   const card = cards[index];
-  const progress = Math.round((index / cards.length) * 100);
+  // In the easier view the 10 interest cards collapse into one grid step.
+  const stepCount = bigButtons ? cards.length - INTEREST_COUNT + 1 : cards.length;
+  const step = bigButtons ? Math.max(0, index - INTEREST_COUNT + 1) : index;
+  const progress = Math.round((step / stepCount) * 100);
 
   return (
-    <div className="mx-auto w-full min-w-0 max-w-md overflow-x-clip p-4 text-base md:text-lg [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-offset-2 [&_button]:focus-visible:outline-ring">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <Button size="lg" variant="outline" onClick={back} disabled={index === 0 || loading}>
+    <div className={`mx-auto w-full min-w-0 ${showGrid ? "max-w-3xl" : "max-w-md"} overflow-x-clip p-4 text-base md:text-lg [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-offset-2 [&_button]:focus-visible:outline-ring`}>
+      <Button
+        size="lg"
+        variant={bigButtons ? "default" : "outline"}
+        aria-pressed={bigButtons}
+        onClick={toggleView}
+        className="mb-3 min-h-14 w-full rounded-xl text-lg"
+      >
+        {bigButtons && <Check aria-hidden="true" />} Easier view (big tiles): {bigButtons ? "on" : "off"}
+      </Button>
+      <div className="mb-3">
+        <Button size="lg" variant="outline" onClick={back} disabled={index === 0 || showGrid || loading}>
           <ArrowLeft aria-hidden="true" /> Back
         </Button>
-        <Button size="lg" variant="outline" aria-pressed={bigButtons} onClick={() => setBigButtons((value) => !value)}>
-          Big buttons{bigButtons ? ": on" : ": off"}
-        </Button>
       </div>
-      <p className="mb-2 font-medium" aria-live="polite">Card {index + 1} of {cards.length}</p>
-      <div role="progressbar" aria-label="Cards completed" aria-valuemin={0} aria-valuemax={cards.length} aria-valuenow={index} className="mb-4 h-3 overflow-hidden rounded-full bg-muted">
+      <p className="mb-2 font-medium" aria-live="polite">{bigButtons ? "Step" : "Card"} {step + 1} of {stepCount}</p>
+      <div role="progressbar" aria-label="Cards completed" aria-valuemin={0} aria-valuemax={stepCount} aria-valuenow={step} className="mb-4 h-3 overflow-hidden rounded-full bg-muted">
         <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
       </div>
 
@@ -257,7 +352,19 @@ export function CardDeck({
         />
       </label>
 
-      {card.type === "interest" && (
+      {showGrid && (
+        <InterestGrid
+          picked={picked}
+          disabled={loading}
+          onToggle={(key) => setPicked((prev) => toggleKey(prev, key))}
+          onClear={() => setPicked([])}
+          onContinue={() => {
+            if (!loading) setHistory(pickedToHistory(picked, INTEREST_COUNT));
+          }}
+        />
+      )}
+
+      {!showGrid && card.type === "interest" && (
         <div
           tabIndex={0}
           role="group"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answersToProfile, swipeDirection, undoAnswer, type Answer } from "@/components/onboarding/CardDeck";
+import { answersToProfile, INTEREST_COUNT, likedInterests, pickedToHistory, swipeDirection, toggleKey, undoAnswer, type Answer } from "@/components/onboarding/CardDeck";
 import { Profile, type Profile as ProfileType } from "@/lib/schema";
 
 describe("answersToProfile", () => {
@@ -117,5 +117,45 @@ describe("undoAnswer", () => {
     const history: Answer[] = [{ kind: "travel", min: 90 }];
     const revised = [...undoAnswer(history), { kind: "travel", min: 15 } as Answer];
     expect(answersToProfile(revised.filter((a): a is Answer => a !== null), "A").maxTravelMin).toBe(15);
+  });
+});
+
+describe("easier view interest grid", () => {
+  it("toggles a tile on and off", () => {
+    expect(toggleKey([], "music")).toEqual(["music"]);
+    expect(toggleKey(["music", "tech"], "music")).toEqual(["tech"]);
+  });
+
+  it("Continue records one answer per tile and maps picks into the profile", () => {
+    const history = pickedToHistory(["tech", "gardening", "faith"], INTEREST_COUNT);
+    expect(history).toHaveLength(INTEREST_COUNT);
+    expect(history.every((a) => a.kind === "interest")).toBe(true);
+    const profile = answersToProfile([...history, { kind: "times", keys: ["evening"] }], "Rosa");
+    expect([...profile.interests].sort()).toEqual(["faith", "gardening", "tech"]);
+    expect(Profile.safeParse(profile).success).toBe(true);
+  });
+
+  it("allows zero picks and falls back to the learning default", () => {
+    const history = pickedToHistory([], INTEREST_COUNT);
+    expect(history).toHaveLength(INTEREST_COUNT);
+    expect(answersToProfile(history, "A").interests).toEqual(["learning"]);
+  });
+
+  it("round-trips picks so Back to the grid keeps selections", () => {
+    const history = pickedToHistory(["cooking", "music"], INTEREST_COUNT);
+    expect([...likedInterests(history)].sort()).toEqual(["cooking", "music"]);
+  });
+
+  it("keeps swipe answers when switching to the grid and grid picks when switching back", () => {
+    const swiped: Answer[] = [
+      { kind: "interest", key: "music", liked: true },
+      { kind: "interest", key: "gardening", liked: false },
+    ];
+    const seeded = likedInterests(swiped);
+    expect(seeded).toEqual(["music"]);
+    const back = pickedToHistory(toggleKey(seeded, "crafts"), swiped.length);
+    // crafts is card 5, so the swipe deck resumes after it with nothing lost
+    expect(back).toHaveLength(5);
+    expect(answersToProfile(back, "A").interests).toEqual(["music", "crafts"]);
   });
 });
