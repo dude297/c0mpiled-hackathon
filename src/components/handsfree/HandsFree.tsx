@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { initialDwell, stepDwell, type DwellState } from "@/lib/handsfree/dwell";
 import {
   classifyZone,
+  combineLook,
   gazeFromBlendshapes,
   initialCalibration,
   MODE_CONFIG,
   REARM_MS,
   rollFromEyeCorners,
   stepCalibration,
+  yawFromLandmarks,
   type Blendshape,
   type HandsFreeMode,
   type Point,
@@ -77,7 +79,7 @@ function forgetLandmarker(load: Promise<Landmarker>) {
   if (landmarkerPromise === load) landmarkerPromise = null;
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("timeout")), ms);
     promise.then(
@@ -85,6 +87,22 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
       (e) => (clearTimeout(timer), reject(e)),
     );
   });
+}
+
+// Shared browser lifecycle boundary; injectable event targets let tests cover cleanup without a camera.
+export function watchTrackingInterruptions(
+  page: Pick<Document, "hidden" | "addEventListener" | "removeEventListener">,
+  tracks: Pick<MediaStreamTrack, "addEventListener" | "removeEventListener">[],
+  onHidden: () => void,
+  onEnded: () => void,
+): () => void {
+  const visibility = () => { if (page.hidden) onHidden(); };
+  page.addEventListener("visibilitychange", visibility);
+  tracks.forEach((track) => track.addEventListener("ended", onEnded));
+  return () => {
+    page.removeEventListener("visibilitychange", visibility);
+    tracks.forEach((track) => track.removeEventListener("ended", onEnded));
+  };
 }
 
 const STILL_WORKS = "The Yes and No buttons still work.";
@@ -144,8 +162,8 @@ const useReducedMotion = () =>
 type Phase = "idle" | "starting" | "calibrating" | "running" | "error";
 
 const MODE_HELP: Record<HandsFreeMode, string> = {
-  look: "Look at ❤️ on the right for yes, or ✕ on the left for no, and hold your gaze for a moment.",
-  tilt: "Tilt your head toward ❤️ on the right for yes, or toward ✕ on the left for no, and hold it briefly.",
+  look: "Look or turn your head toward the right for Yes, or the left for No. Hold for a moment, then look back at the middle before answering again.",
+  tilt: "Tilt your head toward the right for Yes, or the left for No. Hold briefly, then return to the middle before answering again.",
 };
 
 export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => void; label: string }) {
@@ -162,6 +180,7 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef(0);
+  const cleanupTracksRef = useRef<() => void>(() => {});
   const runRef = useRef(0); // bumps on every Start/Stop so stale async work bails out
   const phaseRef = useRef<Phase>("idle");
   const modeRef = useRef<HandsFreeMode>("look");
@@ -191,6 +210,8 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
 
   const stopCamera = useCallback(() => {
     runRef.current += 1;
+    cleanupTracksRef.current();
+    cleanupTracksRef.current = () => {};
     cancelAnimationFrame(rafRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -228,6 +249,7 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
     stopCamera();
     setError(message);
     setFaceFound(false);
+    resetDwell();
     goto("error");
   };
 
@@ -237,6 +259,21 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
     resetDwell();
     goto("idle");
   };
+
+  useEffect(() => {
+    // Also cancels a pending permission/model request: returning to the tab requires a new tap.
+    return watchTrackingInterruptions(document, [], () => {
+      if (phaseRef.current === "idle" || phaseRef.current === "error") return;
+      stopCamera();
+      dwellRef.current = initialDwell();
+      zoneRef.current = "center";
+      setView({ side: null, progress: 0 });
+      setFaceFound(false);
+      phaseRef.current = "error";
+      setPhase("error");
+      setError(`Hands-free stopped because this page was hidden. Press Turn on camera to continue. ${STILL_WORKS}`);
+    }, () => {});
+  }, [stopCamera]);
 
   const start = async () => {
     stopCamera();
@@ -268,13 +305,17 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
       return;
     }
     streamRef.current = stream;
+    cleanupTracksRef.current = watchTrackingInterruptions(document, stream.getVideoTracks(), () => {}, () => {
+      if (run === runRef.current)
+        fail(`The camera disconnected or its permission changed. Press Turn on camera to try again. ${STILL_WORKS}`);
+    });
 
     let landmarker: Landmarker;
     try {
       const video = videoRef.current;
       if (!video) throw new Error("no video element");
       video.srcObject = stream;
-      await video.play();
+      await withTimeout(video.play(), 10000);
       landmarker = await withTimeout(modelLoad, LOAD_TIMEOUT_MS);
     } catch {
       forgetLandmarker(modelLoad); // a hung load must not be reused by "Try again"
@@ -285,43 +326,67 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
     if (run !== runRef.current) return;
 
     let calib = initialCalibration();
-    let base = { gaze: 0, tilt: 0 };
+    let base = { gaze: 0, yaw: 0, tilt: 0 };
     let dwellLabel = labelRef.current;
     let lastVideoTime = -1;
+    let lastFrameAt = performance.now();
     let lastFace: boolean | null = null;
     let lastCalibLeft = -1;
     let lastView = { side: null as Side | null, progress: 0 };
     setCalibLeft(2);
     goto("calibrating");
 
+    const invalidateFrame = () => {
+      dwellRef.current = initialDwell();
+      zoneRef.current = "center";
+      if (lastFace !== false) { lastFace = false; setFaceFound(false); }
+      if (lastView.side !== null || lastView.progress !== 0) {
+        lastView = { side: null, progress: 0 };
+        setView(lastView);
+      }
+      // Do not count interrupted calibration time on recovery.
+      calib = { ...calib, lastT: null };
+    };
+
     const tick = () => {
       if (run !== runRef.current) return;
       rafRef.current = requestAnimationFrame(tick);
       const video = videoRef.current;
-      if (!video || video.readyState < 2 || video.currentTime === lastVideoTime) return;
-      lastVideoTime = video.currentTime;
       const now = performance.now();
+      if (!video || video.readyState < 2 || video.currentTime === lastVideoTime) {
+        if (now - lastFrameAt > 500) invalidateFrame();
+        if (now - lastFrameAt > 5000)
+          fail(`The camera stopped sending pictures. Press Turn on camera to try again. ${STILL_WORKS}`);
+        return;
+      }
+      lastVideoTime = video.currentTime;
+      lastFrameAt = now;
 
       let result: FaceResult;
       try {
         result = landmarker.detectForVideo(video, now);
       } catch {
-        return; // a single bad frame should never break the session
+        invalidateFrame(); // an unusable frame is never evidence of a continued answer
+        return;
       }
       const points = result.faceLandmarks?.[0];
       const shapes = result.faceBlendshapes?.[0]?.categories;
-      const face = Boolean(points?.[33] && points?.[263] && shapes);
+      const aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 4 / 3;
+      const rawYaw = points?.[1] && points?.[33] && points?.[263]
+        ? yawFromLandmarks(points[1], points[33], points[263], aspect)
+        : null;
+      const face = rawYaw !== null && Boolean(shapes);
       if (face !== lastFace) {
         lastFace = face;
         setFaceFound(face);
       }
-      const aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 4 / 3;
       const gaze = face ? gazeFromBlendshapes(shapes!) : 0;
+      const yaw = rawYaw ?? 0;
       const tilt = face ? rollFromEyeCorners(points![33], points![263], aspect) : 0;
 
       if (phaseRef.current === "calibrating") {
         // Only face-in-view time counts, so the baseline is a full 2 s of real samples.
-        const c = stepCalibration(calib, now, face ? { gaze, tilt } : null);
+        const c = stepCalibration(calib, now, face ? { gaze, yaw, tilt } : null);
         calib = c.calib;
         if (c.secondsLeft !== lastCalibLeft) {
           lastCalibLeft = c.secondsLeft;
@@ -347,7 +412,7 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
 
       const cfg = MODE_CONFIG[modeRef.current];
       const sign = swapRef.current ? -1 : 1;
-      const value = sign * (modeRef.current === "look" ? gaze - base.gaze : tilt - base.tilt);
+      const value = sign * (modeRef.current === "look" ? combineLook({ gaze, yaw }, base) : tilt - base.tilt);
       const zone = face ? classifyZone(value, zoneRef.current, cfg.threshold, cfg.hysteresis) : null;
       zoneRef.current = zone ?? "center";
       const step = stepDwell(dwellRef.current, zone, now, cfg.dwellMs, REARM_MS);
@@ -442,9 +507,9 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
       <p className="min-h-7 text-lg font-semibold">{announce && `✓ ${announce}`}</p>
 
       {phase === "running" && (
-        <div className="flex justify-between gap-4 md:contents">
-          <Target side="left" progress={ring("left")} reducedMotion={reducedMotion} label={label} onPress={() => answer(false)} />
-          <Target side="right" progress={ring("right")} reducedMotion={reducedMotion} label={label} onPress={() => answer(true)} />
+        <div aria-hidden="true" className="pointer-events-none flex justify-between gap-4">
+          <DwellFeedback side="left" active={view.side === "left"} progress={ring("left")} reducedMotion={reducedMotion} />
+          <DwellFeedback side="right" active={view.side === "right"} progress={ring("right")} reducedMotion={reducedMotion} />
         </div>
       )}
     </section>
@@ -454,31 +519,33 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
 const R = 52;
 const C = 2 * Math.PI * R;
 
-function Target({ side, progress, reducedMotion, label, onPress }: {
+function DwellFeedback({ side, active, progress, reducedMotion }: {
   side: Side;
+  active: boolean;
   progress: number;
   reducedMotion: boolean;
-  label: string;
-  onPress: () => void;
 }) {
   const yes = side === "right";
+  const fade = reducedMotion ? "transition-none" : "transition-opacity duration-200 motion-reduce:transition-none";
+  const visibility = `${active ? "opacity-100" : "opacity-0"} ${fade}`;
   return (
-    <button
-      type="button"
-      onClick={onPress}
-      aria-label={yes ? `Yes, I'd enjoy ${label}` : `No, skip ${label}`}
-      className={`relative grid size-28 shrink-0 place-items-center rounded-full border-2 bg-background shadow-lg md:fixed md:top-1/2 md:z-40 md:-translate-y-1/2 ${FOCUS} ${yes ? "border-green-800 md:right-4" : "border-red-800 md:left-4"}`}
-    >
-      <svg viewBox="0 0 120 120" className="absolute inset-0 size-full -rotate-90" aria-hidden="true">
-        <circle cx="60" cy="60" r={R} fill="none" strokeWidth="10" className="stroke-muted" />
-        <circle
-          cx="60" cy="60" r={R} fill="none" strokeWidth="10" strokeLinecap="round"
-          strokeDasharray={C}
-          strokeDashoffset={C * (1 - progress)}
-          className={`${yes ? "stroke-green-700" : "stroke-red-700"} ${reducedMotion ? "" : "transition-[stroke-dashoffset] duration-100"}`}
-        />
-      </svg>
-      <span aria-hidden="true" className={`text-5xl ${yes ? "" : "font-bold text-red-800"}`}>{yes ? "❤️" : "✕"}</span>
-    </button>
+    <div className="pointer-events-none">
+      {/* Behind page content: the tint never paints over the card or its Yes/No buttons.
+          Fixed positioning keeps it full-height without changing the normal card layout. */}
+      <div className={`pointer-events-none fixed inset-y-0 -z-10 w-1/2 ${visibility} ${yes ? "right-0 bg-green-500/10" : "left-0 bg-red-500/10"}`} />
+      {/* Feedback stays in the hands-free panel, so it cannot cover the card's tap targets. */}
+      <div className={`relative grid size-20 shrink-0 place-items-center ${visibility}`}>
+        <svg viewBox="0 0 120 120" className="absolute inset-0 size-full -rotate-90" aria-hidden="true">
+          <circle cx="60" cy="60" r={R} fill="none" strokeWidth="10" className="stroke-muted" />
+          <circle
+            cx="60" cy="60" r={R} fill="none" strokeWidth="10" strokeLinecap="round"
+            strokeDasharray={C}
+            strokeDashoffset={C * (1 - progress)}
+            className={`${yes ? "stroke-green-700" : "stroke-red-700"} ${reducedMotion ? "" : "transition-[stroke-dashoffset] duration-100 motion-reduce:transition-none"}`}
+          />
+        </svg>
+        <span className={`text-sm font-semibold ${yes ? "text-green-800 dark:text-green-300" : "text-red-800 dark:text-red-300"}`}>{yes ? "Yes…" : "No…"}</span>
+      </div>
+    </div>
   );
 }

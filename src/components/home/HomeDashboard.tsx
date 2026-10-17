@@ -8,6 +8,7 @@ import { ProfileGate } from "@/components/shell/ProfileGate";
 import { FOCUS } from "@/components/shell/focus";
 import { personLabel, personName, useDeviceStore, usePlanStatus } from "@/components/shell/store";
 import { whenText, withoutFallbackName } from "@/components/views/copy";
+import { AppDiscovery } from "@/components/views/AppDiscovery";
 import { writeProfileHandoff } from "./handoff";
 import {
   activityHref, aiLabel, attentionRows, plainExplanation, greeting, homePrimary, nextOuting, noMatchReason, todayIndex, travelLine, weekItems, weekLine, weekStrip,
@@ -148,6 +149,8 @@ function HomeContent() {
           </div>
         </div>
       )}
+      {/* Public listings wait for the person's own week: they must not stand in for it, then jump down when it lands. */}
+      {(s.result || !s.analyzing) && <AppDiscovery compact />}
     </div>
   );
 }

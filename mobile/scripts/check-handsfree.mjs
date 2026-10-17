@@ -20,10 +20,10 @@ const pageSource = readFileSync(join(here, '../lib/handsfreePage.ts'), 'utf8');
 const pageOut = ts.transpileModule(pageSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } });
 const pageFile = join(dir, 'handsfreePage.mjs');
 writeFileSync(pageFile, pageOut.outputText.replace("from './handsfree'", "from './handsfree.mjs'"));
-const { buildHandsFreeHtml } = await import(pathToFileURL(pageFile).href);
+const { buildHandsFreeHtml, handsFreeModeScript, parsePageMessage } = await import(pathToFileURL(pageFile).href);
 rmSync(dir, { recursive: true, force: true });
 
-const names = ['TUNING', 'GAZE_SIGN', 'YAW_SIGN', 'TILT_SIGN', 'gazeFromBlendshapes', 'yawFromLandmarks', 'lookFromSignals', 'tiltFromLandmarks', 'classify', 'initialDwell', 'rearmDwell', 'stepDwell'];
+const names = ['TUNING', 'GAZE_SIGN', 'TILT_SIGN', 'gazeFromBlendshapes', 'lookFromSignals', 'smoothLook', 'tiltFromLandmarks', 'classify', 'initialDwell', 'rearmDwell', 'stepDwell'];
 const jsImpl = new Function(`${tsImpl.HANDSFREE_CORE_JS}; return { ${names.join(', ')} };`)();
 
 let n = 0;
@@ -35,92 +35,67 @@ const same = (label, a, b) => {
 same('TUNING', jsImpl.TUNING, tsImpl.TUNING);
 same('GAZE_SIGN', jsImpl.GAZE_SIGN, tsImpl.GAZE_SIGN);
 same('TILT_SIGN', jsImpl.TILT_SIGN, tsImpl.TILT_SIGN);
-same('YAW_SIGN', jsImpl.YAW_SIGN, tsImpl.YAW_SIGN);
+same(jsImpl.YAW_SIGN, tsImpl.YAW_SIGN);
 
 for (const impl of [tsImpl, jsImpl]) {
-  const { gazeFromBlendshapes, yawFromLandmarks, lookFromSignals, tiltFromLandmarks, classify, initialDwell, rearmDwell, stepDwell, TUNING } = impl;
+  const { gazeFromBlendshapes, lookFromSignals, smoothLook, tiltFromLandmarks, classify, initialDwell, rearmDwell, stepDwell, TUNING } = impl;
 
   // Gaze: looking to the person's right (= screen right, ❤️) is positive; clamped to [-1, 1].
   assert.ok(gazeFromBlendshapes({ eyeLookInLeft: 0.6, eyeLookOutRight: 0.6 }) > 0.5);
   assert.ok(gazeFromBlendshapes({ eyeLookOutLeft: 0.6, eyeLookInRight: 0.6 }) < -0.5);
   assert.equal(gazeFromBlendshapes({}), 0);
+  assert.equal(gazeFromBlendshapes({ eyeBlinkLeft: 1, eyeBlinkRight: 1, eyeLookUpLeft: 1, eyeLookDownRight: 1 }), 0, 'only the four horizontal eye-gaze blendshapes contribute');
   assert.equal(gazeFromBlendshapes({ eyeLookInLeft: 9, eyeLookOutRight: 9 }), 1);
 
-  // Tilt: raw image, person's right eye corner (33) on the image left. Tilting toward the screen's
-  // right drops 33 lower in the image (bigger y) → positive (❤️).
+  // Tilt fixtures follow the reported iPhone roll direction. The old mapping gave No for
+  // this positive eye-line angle; the persisted override covers differing device orientation.
   assert.ok(Math.abs(tiltFromLandmarks({ x: 0.3, y: 0.5 }, { x: 0.7, y: 0.5 })) < 1e-9);
-  assert.ok(tiltFromLandmarks({ x: 0.3, y: 0.6 }, { x: 0.7, y: 0.4 }) > 15);
-  assert.ok(tiltFromLandmarks({ x: 0.3, y: 0.4 }, { x: 0.7, y: 0.6 }) < -15);
+  assert.ok(tiltFromLandmarks({ x: 0.3, y: 0.4 }, { x: 0.7, y: 0.6 }) > 15);
+  assert.ok(tiltFromLandmarks({ x: 0.3, y: 0.6 }, { x: 0.7, y: 0.4 }) < -15);
 
   // Aspect ratio: a real 15° roll in a 480x640 portrait frame (pixels) must read as 15°, not ~11.5°
   // (and in a 640x480 landscape frame, not ~19.7°).
   const rollFrame = (deg, w, h) => {
     const r = (deg * Math.PI) / 180, cx = w / 2, cy = h / 2, half = 60; // eye corners 120 px apart
-    // Positive = toward the screen's right = 33 lower in the raw image (see TILT_SIGN).
-    return [{ x: (cx - half * Math.cos(r)) / w, y: (cy + half * Math.sin(r)) / h }, { x: (cx + half * Math.cos(r)) / w, y: (cy - half * Math.sin(r)) / h }];
+    return [{ x: (cx - half * Math.cos(r)) / w, y: (cy - half * Math.sin(r)) / h }, { x: (cx + half * Math.cos(r)) / w, y: (cy + half * Math.sin(r)) / h }];
   };
   for (const [w, h] of [[480, 640], [640, 480], [720, 1280]]) {
     const [a, b] = rollFrame(15, w, h);
     assert.ok(Math.abs(tiltFromLandmarks(a, b, w / h) - 15) < 1e-6, `15° roll reads 15° at ${w}x${h}`);
     assert.ok(Math.abs(tiltFromLandmarks(a, b) - 15) > 2, `uncorrected ${w}x${h} is off (proves the fix matters)`);
   }
-  assert.equal(classify(tiltFromLandmarks(...rollFrame(14, 480, 640), 480 / 640), 'center', TUNING.tilt.threshold, TUNING.tilt.hysteresis), 'center');
-  assert.equal(classify(tiltFromLandmarks(...rollFrame(16, 480, 640), 480 / 640), 'center', TUNING.tilt.threshold, TUNING.tilt.hysteresis), 'right');
+  assert.equal(classify(tiltFromLandmarks(...rollFrame(9, 480, 640), 480 / 640), 'center', TUNING.tilt.threshold, TUNING.tilt.hysteresis), 'center');
+  assert.equal(classify(tiltFromLandmarks(...rollFrame(11, 480, 640), 480 / 640), 'center', TUNING.tilt.threshold, TUNING.tilt.hysteresis), 'right');
 
-  // Yaw: turning toward screen right moves the nose LEFT in the raw camera image.
-  const eyes = [{ x: 0.3, y: 0.5 }, { x: 0.7, y: 0.5 }];
-  assert.ok(Math.abs(yawFromLandmarks({ x: 0.5, y: 0.6 }, ...eyes)) < 1e-9);
-  assert.ok(Math.abs(yawFromLandmarks({ x: 0.46, y: 0.6 }, ...eyes) - 0.1) < 1e-9);
-  assert.ok(Math.abs(yawFromLandmarks({ x: 0.54, y: 0.6 }, ...eyes) + 0.1) < 1e-9);
-  assert.equal(yawFromLandmarks({ x: -9, y: 0.6 }, ...eyes), 1);
-  assert.equal(yawFromLandmarks({ x: 9, y: 0.6 }, ...eyes), -1);
-  assert.equal(yawFromLandmarks({ x: 0.4, y: 0.6 }, eyes[0], eyes[0]), 0);
-  // Same pixel geometry, including a non-horizontal eye line, in portrait and landscape.
-  for (const [w, h] of [[480, 640], [640, 480], [720, 1280]]) {
-    const a = { x: (w / 2 - 60) / w, y: (h / 2 + 20) / h };
-    const b = { x: (w / 2 + 60) / w, y: (h / 2 - 20) / h };
-    const nose = { x: (w / 2 - 16) / w, y: (h / 2 + 40) / h };
-    assert.ok(Math.abs(yawFromLandmarks(nose, a, b, w / h) - 16 / Math.hypot(120, 40)) < 1e-9);
-  }
-  // Translating/scaling the face doesn't change normalized yaw.
-  assert.ok(Math.abs(yawFromLandmarks({ x: 0.68, y: 0.6 }, { x: 0.6, y: 0.5 }, { x: 0.8, y: 0.5 }) - 0.1) < 1e-9);
-
-  // New Look tuning; Tilt and the return-to-center gate retain their original settings.
+  // Phone-distance eyes-only tuning; Tilt and the center gate retain their original settings.
   const L = TUNING.look;
-  assert.equal(L.threshold, 0.14);
-  assert.equal(L.hysteresis, 0.04);
-  assert.equal(L.dwellMs, 1200);
-  assert.equal(L.yawWeight, 1.5);
-  assert.deepEqual(TUNING.tilt, { dwellMs: 800, threshold: 15, hysteresis: 3 });
+  assert.deepEqual(L, { threshold: 0.09, hysteresis: 0.03, dwellMs: 1000, alpha: 0.35 });
+  assert.deepEqual(TUNING.tilt, { dwellMs: 800, threshold: 10, hysteresis: 3 });
   assert.equal(TUNING.rearmMs, 400);
   assert.equal(TUNING.calibrateMs, 2000);
   const zoneOf = (v, prev = 'center') => classify(v, prev, L.threshold, L.hysteresis);
   assert.equal(zoneOf(0), 'center');
-  assert.equal(zoneOf(0.15), 'right');
-  assert.equal(zoneOf(-0.15), 'left');
-  assert.equal(zoneOf(0.14), 'center'); // not enough to enter
-  assert.equal(zoneOf(-0.14), 'center');
-  assert.equal(zoneOf(0.12, 'right'), 'right'); // enough to stay
-  assert.equal(zoneOf(-0.12, 'left'), 'left');
-  assert.equal(zoneOf(0.09, 'right'), 'center');
-  assert.equal(zoneOf(-0.09, 'left'), 'center');
-  assert.equal(zoneOf(-0.15, 'right'), 'left');
+  assert.equal(zoneOf(0.10), 'right');
+  assert.equal(zoneOf(-0.10), 'left');
+  assert.equal(zoneOf(0.09), 'center'); // not enough to enter
+  assert.equal(zoneOf(-0.09), 'center');
+  assert.equal(zoneOf(0.07, 'right'), 'right'); // enough to stay
+  assert.equal(zoneOf(-0.07, 'left'), 'left');
+  assert.equal(zoneOf(0.05, 'right'), 'center');
+  assert.equal(zoneOf(-0.05, 'left'), 'center');
+  assert.equal(zoneOf(-0.10, 'right'), 'left');
   assert.equal(classify(20, 'center', 15, 3), 'right');
 
-  // Eyes alone, head alone, or two small movements can select either screen side.
   for (const direction of [-1, 1]) {
     const wanted = direction === 1 ? 'right' : 'left';
-    assert.equal(zoneOf(lookFromSignals(direction * 0.15, 0)), wanted);
-    assert.equal(zoneOf(lookFromSignals(0, direction * 0.1)), wanted);
-    assert.equal(zoneOf(lookFromSignals(direction * 0.06, direction * 0.06)), wanted);
+    assert.equal(zoneOf(lookFromSignals(direction * 0.10)), wanted);
+    assert.equal(zoneOf(lookFromSignals(0.2 + direction * 0.10, 0.2)), wanted);
   }
-  assert.equal(zoneOf(lookFromSignals(0.06, 0)), 'center');
-  assert.equal(zoneOf(lookFromSignals(0, 0.06)), 'center');
-  const baseline = { gaze: 0.2, yaw: -0.1 };
-  assert.equal(lookFromSignals(baseline.gaze, baseline.yaw, baseline), 0);
-  assert.equal(zoneOf(lookFromSignals(0.26, -0.04, baseline)), 'right');
-  assert.equal(zoneOf(lookFromSignals(0.14, -0.16, baseline)), 'left');
-  assert.ok(Math.abs(lookFromSignals(0.15, -0.1)) < 1e-9, 'opposing gaze and yaw cancel');
+  assert.equal(lookFromSignals(0.2, 0.2), 0);
+  assert.equal(zoneOf(lookFromSignals(0.25, 0.2)), 'center');
+  assert.ok(Math.abs(smoothLook(0.1, 0) - 0.035) < 1e-9);
+  assert.ok(Math.abs(smoothLook(0.1, 0.035) - 0.05775) < 1e-9);
+  assert.equal(zoneOf(smoothLook(0.2, 0)), 'center', 'one eye spike is smoothed below threshold');
 
   // Dwell machine, driven at 10 ms ticks.
   const run = (zones, dwellMs, rearmMs = TUNING.rearmMs) => {
@@ -144,12 +119,12 @@ for (const impl of [tsImpl, jsImpl]) {
   const mid = log.find((r) => r.side === 'right' && r.progress > 0.45 && r.progress < 0.55);
   assert.ok(mid, 'progress passes 0.5 on the way');
 
-  // Look fires at 1.2 seconds, never before, and needs the center before another answer.
+  // Look fires at 1 second, never before, and needs the center before another answer.
   let exact = stepDwell(initialDwell(), 'right', 0, L.dwellMs, TUNING.rearmMs);
-  exact = stepDwell(exact.state, 'right', 1199, L.dwellMs, TUNING.rearmMs);
+  exact = stepDwell(exact.state, 'right', 999, L.dwellMs, TUNING.rearmMs);
   assert.equal(exact.fired, null);
   assert.ok(exact.progress > 0.99);
-  exact = stepDwell(exact.state, 'right', 1200, L.dwellMs, TUNING.rearmMs);
+  exact = stepDwell(exact.state, 'right', 1000, L.dwellMs, TUNING.rearmMs);
   assert.equal(exact.fired, 'right');
   assert.equal(exact.state.needsCenter, true);
 
@@ -219,35 +194,54 @@ same('tilt', jsImpl.tiltFromLandmarks({ x: 0.31, y: 0.52 }, { x: 0.69, y: 0.47 }
 for (const asp of [0.5625, 0.75, 1, 1.3333])
   same(`tilt aspect ${asp}`, jsImpl.tiltFromLandmarks({ x: 0.31, y: 0.52 }, { x: 0.69, y: 0.47 }, asp), tsImpl.tiltFromLandmarks({ x: 0.31, y: 0.52 }, { x: 0.69, y: 0.47 }, asp));
 same('rearmDwell', jsImpl.rearmDwell(), tsImpl.rearmDwell());
-for (const asp of [0.5625, 0.75, 1, 1.3333])
-  for (const x of [0.4, 0.5, 0.6])
-    same(`yaw ${x} aspect ${asp}`, jsImpl.yawFromLandmarks({ x, y: 0.6 }, { x: 0.3, y: 0.52 }, { x: 0.7, y: 0.47 }, asp), tsImpl.yawFromLandmarks({ x, y: 0.6 }, { x: 0.3, y: 0.52 }, { x: 0.7, y: 0.47 }, asp));
-for (const baseline of [undefined, { gaze: 0.2, yaw: -0.1 }])
+for (const baseline of [undefined, 0.2])
   for (const gaze of [-0.2, 0, 0.2])
-    for (const yaw of [-0.1, 0, 0.1])
-      same(`look ${gaze} ${yaw}`, jsImpl.lookFromSignals(gaze, yaw, baseline), tsImpl.lookFromSignals(gaze, yaw, baseline));
-
+    same(`look ${gaze} baseline ${baseline}`, jsImpl.lookFromSignals(gaze, baseline), tsImpl.lookFromSignals(gaze, baseline));
+let tsSmoothed = 0, jsSmoothed = 0;
+for (const value of [0, 0.12, 0.12, 0.12, -0.15, 0, 0, 0.3]) {
+  tsSmoothed = tsImpl.smoothLook(value, tsSmoothed);
+  jsSmoothed = jsImpl.smoothLook(value, jsSmoothed);
+  same(`EMA trace ${value}`, jsSmoothed, tsSmoothed);
+}
 
 // Exercise the generated page's real calibration/frame handler without opening a camera or
 // downloading a model. Only replace auto-start with a test hook; the detection code is unchanged.
-for (const mode of ['look', 'tilt']) {
+function cameraPage(mode, storage = new Map()) {
   const scripts = [...buildHandsFreeHtml(mode).matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   assert.equal(scripts.length, 3);
   assert.ok(scripts[2].includes('  start();'));
   scripts[2] = scripts[2].replace('  start();', '  window.testFrames = { handle: handle, calibrate: startCalib };');
   const messages = [];
-  const window = { ReactNativeWebView: { postMessage: (m) => messages.push(JSON.parse(m)) }, addEventListener() {} };
+  const window = {
+    ReactNativeWebView: { postMessage: (m) => messages.push(JSON.parse(m)) }, addEventListener() {},
+    localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
+  };
   const document = { getElementById: () => ({ videoWidth: 480, videoHeight: 640 }) };
   new Function('window', 'document', scripts.join('\n'))(window, document);
+  return { window, messages, storage };
+}
+
+for (const mode of ['look', 'tilt']) {
+  const { window, messages, storage } = cameraPage(mode);
+  const setMode = (m) => new Function('window', handsFreeModeScript(m))(window);
   const answers = () => messages.filter((m) => m.type === 'answer').map((m) => m.liked);
+  const latest = () => messages.filter((m) => m.type === 'progress').at(-1);
+  assert.deepEqual(messages.find((m) => m.type === 'ready'), { type: 'ready', swapSides: false });
+  // The ready handshake must override a stale initial HTML mode before calibration too.
+  setMode(mode === 'look' ? 'tilt' : 'look');
+  assert.equal(latest().mode, mode === 'look' ? 'tilt' : 'look');
+  setMode(mode);
+  assert.equal(latest().mode, mode);
   let now = 0;
-  const neutral = { gaze: 0.18, yaw: -0.08, tilt: 0 };
+  let neutral = { gaze: 0.18, yaw: -0.08, tilt: 4 };
   const frame = (signal) => {
     const lm = [];
     const dy = Math.tan(signal.tilt * Math.PI / 180) * 0.4 * (480 / 640) / 2;
-    lm[33] = { x: 0.3, y: 0.5 + dy };
-    lm[263] = { x: 0.7, y: 0.5 - dy };
-    lm[1] = { x: 0.5 - signal.yaw * 0.4, y: 0.6 };
+    lm[33] = { x: 0.3, y: 0.5 - dy };
+    lm[263] = { x: 0.7, y: 0.5 + dy };
+    // User's own right moves the nose toward image-LEFT in raw front-camera frames.
+    const eyeDistance = Math.hypot(0.4 * (480 / 640), 2 * dy);
+    lm[1] = { x: 0.5 - signal.yaw * eyeDistance / (480 / 640), y: 0.6 };
     const categories = (signal.gaze >= 0 ? ['eyeLookInLeft', 'eyeLookOutRight'] : ['eyeLookOutLeft', 'eyeLookInRight'])
       .map((categoryName) => ({ categoryName, score: Math.abs(signal.gaze) }));
     return { faceLandmarks: [lm], faceBlendshapes: [{ categories }] };
@@ -257,33 +251,135 @@ for (const mode of ['look', 'tilt']) {
       window.testFrames.handle(frame({ ...neutral, ...signal }), now += 100);
   };
   window.testFrames.calibrate();
+  // Brief outliers must not bias the median baseline.
+  hold({ gaze: 0.8, yaw: 0.7, tilt: 35 }, 200);
   hold({}, 2200);
   assert.ok(messages.some((m) => m.state === 'tracking'), 'calibration completes');
   hold({}, 1500);
-  assert.deepEqual(answers(), [], 'calibrated gaze and yaw offset must stay neutral');
-  const right = mode === 'look' ? { gaze: neutral.gaze + 0.06, yaw: neutral.yaw + 0.06 } : { tilt: 16 };
-  const left = mode === 'look' ? { yaw: neutral.yaw - 0.1 } : { tilt: -16 };
+  assert.deepEqual(answers(), [], 'calibrated active signal must stay neutral');
+  assert.ok(Math.abs(latest().reading) < 1e-9, 'median calibration rejects outliers');
+  // Each foreign signal, alone and combined, must never answer in either direction.
+  const foreign = mode === 'look'
+    ? [{ tilt: 35 }, { yaw: 0.7 }, { tilt: -35 }, { yaw: -0.7 }, { tilt: 30, yaw: 0.7 }]
+    : [{ gaze: 0.7 }, { gaze: -0.7 }, { yaw: 0.7 }, { gaze: 0.7, yaw: -0.7 }];
+  for (const movement of foreign) {
+    hold(movement, 2000);
+    assert.deepEqual(answers(), [], `${mode}: ignore ${JSON.stringify(movement)}`);
+    assert.equal(latest().zone, 'center');
+    assert.ok(Math.abs(latest().reading) < 1e-9);
+  }
+  hold({}, 1200);
+  hold(mode === 'look' ? { gaze: neutral.gaze + 0.03 } : { tilt: neutral.tilt + 3 }, 100);
+  assert.ok(latest().signal > 0 && latest().signal < 1, 'live meter reacts below dwell threshold');
+  assert.ok(Math.abs(latest().reading - (mode === 'look' ? 0.03 * 0.35 : 3)) < 1e-9, 'meter uses the active signal, including Look EMA');
+  assert.equal(latest().zone, 'center');
+  assert.equal(latest().mode, mode);
+  assert.equal(latest().value, 0);
+  hold({}, 1200);
+  const right = mode === 'look' ? { gaze: neutral.gaze + 0.10 } : { tilt: neutral.tilt + 16 };
+  const left = mode === 'look' ? { gaze: neutral.gaze - 0.10 } : { tilt: neutral.tilt - 16 };
   const dwellMs = tsImpl.TUNING[mode].dwellMs;
+  const settleMs = mode === 'look' ? 600 : 100;
   hold(right, dwellMs);
   assert.deepEqual(answers(), [], `${mode}: no early answer`);
-  hold(right, 100);
-  assert.deepEqual(answers(), [true], `${mode}: screen right = Yes`);
+  hold(right, settleMs);
+  assert.deepEqual(answers(), [true], `${mode}: user's own right = Yes`);
   assert.ok(messages.some((m) => m.type === 'progress' && m.side === 'right' && m.value > 0.4 && m.value < 0.8));
+  const previousReading = latest().reading;
+  hold(mode === 'look' ? { gaze: neutral.gaze + 0.25 } : { tilt: neutral.tilt + 30 }, 100);
+  assert.ok(latest().reading > previousReading + 0.02, 'numeric reading keeps updating beyond the visual meter limit');
   hold(right, 1500);
   hold(left, 1500);
   assert.deepEqual(answers(), [true], 'holding or switching sides never re-arms');
   hold({}, 300);
   hold(left, 1500);
   assert.deepEqual(answers(), [true], 'brief center cannot re-arm');
-  hold({}, 500);
-  hold(left, dwellMs + 100);
-  assert.deepEqual(answers(), [true, false], `${mode}: screen left = No after re-arm`);
-  if (mode === 'look') {
-    hold({}, 500);
-    hold({ gaze: neutral.gaze + 0.15 }, dwellMs + 100);
-    assert.deepEqual(answers(), [true, false, true], 'eyes alone can answer after re-arm');
-  }
+  hold({}, 1200);
+  hold(left, dwellMs + settleMs);
+  assert.deepEqual(answers(), [true, false], `${mode}: user's own left = No after re-arm`);
+
+  // Switching sources starts fresh calibration without reloading the WebView. Reset the
+  // calibration in flight too, proving the old signal's samples/time cannot leak across modes.
+  const nextMode = mode === 'look' ? 'tilt' : 'look';
+  const beforeSwitch = answers().length;
+  setMode(nextMode);
+  assert.equal(latest().mode, nextMode);
+  assert.equal(latest().signal, 0);
+  assert.equal(latest().reading, 0);
+  assert.equal(messages.at(-1).state, 'calibrating');
+  hold({ gaze: 0.8, tilt: 35 }, 1200);
+  setMode(mode);
+  hold({ gaze: -0.8, tilt: -35 }, 1200);
+  setMode(nextMode);
+  neutral = { gaze: -0.12, yaw: 0.2, tilt: -6 };
+  hold({}, 1200);
+  assert.equal(messages.filter((m) => m.type === 'status').at(-1).state, 'calibrating', 'mode switch resets the calibration window');
+  hold({}, 1000);
+  assert.equal(messages.filter((m) => m.type === 'status').at(-1).state, 'tracking');
+  const nextRight = nextMode === 'look' ? { gaze: neutral.gaze + 0.10 } : { tilt: neutral.tilt + 17 };
+  const nextSettleMs = nextMode === 'look' ? 600 : 100;
+  hold(nextRight, 2000);
+  assert.equal(answers().length, beforeSwitch, 'mode change re-arms only after center');
+  assert.equal(latest().zone, 'right', 'meter sees the held direction even while re-arming');
+  assert.equal(latest().side, null);
+  hold({}, 1200);
+  assert.ok(Math.abs(latest().reading) < 0.005, 'new mode uses its fresh median baseline and cleared EMA (within meter rounding)');
+  // Movement from the old mode no longer works (test with the new neutral baseline).
+  hold(mode === 'look' ? { gaze: neutral.gaze + 0.4, yaw: -0.7 } : { tilt: neutral.tilt + 35, yaw: 0.7 }, 2000);
+  assert.equal(answers().length, beforeSwitch, 'mode switch changes the actual signal source');
+  assert.equal(latest().zone, 'center');
+  hold({}, 1200);
+  hold(nextRight, tsImpl.TUNING[nextMode].dwellMs + nextSettleMs);
+  assert.equal(answers().at(-1), true);
+  assert.equal(answers().length, beforeSwitch + 1);
+  assert.equal(latest().mode, nextMode);
+
+  // Swap applies AFTER baseline subtraction to meter, zone and answer, with the same center gate.
+  window.__hf.setSwapSides(true);
+  assert.equal([...storage.values()][0], 'true');
+  hold(nextRight, 2000);
+  assert.equal(answers().length, beforeSwitch + 1, 'swap also requires center');
+  assert.equal(latest().zone, 'left');
+  assert.equal(latest().signal, -1);
+  hold({}, 1200);
+  hold(nextRight, tsImpl.TUNING[nextMode].dwellMs + nextSettleMs);
+  assert.equal(answers().at(-1), false, 'Swap sides reverses the answer');
+  const restarted = cameraPage(nextMode, storage);
+  assert.equal(restarted.messages.find((m) => m.type === 'ready').swapSides, true, 'swap survives a page remount');
+  restarted.window.__hf.setSwapSides(false);
+  assert.equal(cameraPage(mode, storage).messages.find((m) => m.type === 'ready').swapSides, false);
+
+  // Losing a face clears the diagnostic instead of leaving a stale right/left reading.
+  window.testFrames.handle({ faceLandmarks: [] }, now += 100);
+  assert.equal(latest().signal, 0);
+  assert.equal(latest().reading, 0);
+  assert.equal(latest().zone, 'center');
+  for (const message of messages) assert.ok(parsePageMessage(JSON.stringify(message)), 'every emitted message passes the native parser');
   n++;
 }
+
+// Native mode taps and readiness replay share the tested injection command and current ref.
+const panelSource = readFileSync(join(here, '../components/onboarding/HandsFree.tsx'), 'utf8');
+assert.match(panelSource, /modeRef.current = m/);
+assert.match(panelSource, /injectJavaScript\(handsFreeModeScript\(modeRef.current\)\)/);
+assert.match(panelSource, /if \(m.mode !== modeRef.current\) return/);
+assert.match(panelSource, /if \(m.mode === modeRef.current\) answer\(m.liked\)/);
+assert.match(panelSource, /Seeing: \{meter.zone\}/);
+assert.match(panelSource, /Look \(eyes\)/);
+assert.match(panelSource, /Tilt \(head\)/);
+assert.match(panelSource, /'Eyes' : 'Tilt'/);
+assert.match(panelSource, /meter.reading.toFixed\(2\)/);
+assert.doesNotMatch(pageSource, /yawFromLandmarks|lm\[1\]/, 'head yaw never enters either signal');
+assert.match(pageSource, /outputFaceBlendshapes: true/);
+assert.match(pageSource, /detectForVideo\(video, now\)/, 'MediaPipe receives raw video, not CSS-mirrored pixels');
+const progress = { type: 'progress', side: null, value: 0, signal: 0.2, reading: 0.018, zone: 'center', mode: 'look' };
+assert.deepEqual(parsePageMessage(JSON.stringify(progress)), progress);
+assert.equal(parsePageMessage(JSON.stringify({ ...progress, mode: 'bogus' })), null);
+assert.equal(parsePageMessage(JSON.stringify({ ...progress, signal: null })), null);
+assert.equal(parsePageMessage(JSON.stringify({ ...progress, reading: null })), null);
+assert.deepEqual(parsePageMessage('{"type":"answer","liked":true,"mode":"look"}'), { type: 'answer', liked: true, mode: 'look' });
+assert.equal(parsePageMessage('{"type":"answer","liked":true,"mode":"bogus"}'), null);
+assert.equal(parsePageMessage('{"type":"progress","side":null,"value":0,"signal":1e999,"zone":"center","mode":"look"}'), null);
+n++;
 
 console.log(`handsfree: all checks passed (${n} parity/behaviour groups, TS + injected JS)`);

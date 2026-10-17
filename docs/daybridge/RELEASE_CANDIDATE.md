@@ -44,8 +44,8 @@ npm run demo:check            # optional pre-flight against http://localhost:300
 1. `/` → **Load demo: Margaret**. The plan cards appear, and **Why not these?** shows the choir blocked: stairs + walker.
 2. Open `/coordinate` (or click **Get me there** on a card with a ride) → **Load demo: Maya**, for Sunday Fellowship Lunch.
 3. The plan offers **a ride from Dan + an invite to Elaine** (it's a big group). **Accept plan.**
-4. Show the consent cards: **exactly what's shared** for each action. Click **Send** first, and it's refused (no approval). Then **Approve** both and **Send**.
-5. The confirmations show ⏳ waiting (requested ≠ booked). Simulate **Elaine accepts**, then **Ride confirmed** → **READY ✓**.
+4. Show the consent cards: **exactly what's shared** for each action. **Send** only appears once both actions are approved (the refusal of an unapproved send is shown by `demo:check` step 2). **Approve** both, then **Send**.
+5. The confirmations show ⏳ waiting (requested ≠ booked). Click **Sample contact (Elaine) accepts (simulated)**, then **Ride confirmed (simulated)** → **READY ✓**.
 6. Simulate **Ride cancelled** → **NEEDS_REPLAN**: READY revoked, paratransit proposed, Elaine still confirmed.
 7. **Accept**, then **Approve** the new ride (the old approval doesn't carry over), **Send**, and **Ride confirmed** → **READY ✓**.
 8. **Mark as attended** → **Too far** (*not* "Too crowded": Maya already prefers small groups) → "I heard: max travel 20 min" → **Confirm** → profile v2.
@@ -53,7 +53,7 @@ npm run demo:check            # optional pre-flight against http://localhost:300
 
 ## Remaining blockers (none block the local demo)
 - **No persistence and no auth on `/api/coordination/*`. Do not deploy publicly as-is.** See `PERSISTENCE_AUTH_PROPOSAL.md`.
-- "Save & share" calls `/api/plans`, which doesn't exist (it fails soft with "not available yet"). Don't click it during the demo.
+- Share works (in-memory, expires on restart); on `next start` it needs `SHARE_STORE=memory`.
 - Browser click-through not yet done by an agent.
 
 ## Recommended merge sequence (each step needs lead approval)

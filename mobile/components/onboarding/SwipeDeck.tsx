@@ -1,7 +1,7 @@
 // Tinder-style interest deck: the top card follows the finger, tilts, shows LIKE / NOPE stamps,
 // and flings off past 30% of the screen width or a fast flick. Every gesture has a button twin.
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useEffect, useImperativeHandle, useRef, type ReactNode, type Ref } from 'react';
+import { useEffect, useImperativeHandle, useRef, type ComponentRef, type ReactNode, type Ref } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -19,7 +19,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { INTEREST_META } from '@/lib/onboarding';
 import { colors, radius, shadow, space, type } from '@/lib/theme';
 
-import { CircleButton, haptic } from './ui';
+import { CircleButton, haptic, useHeadingFocus } from './ui';
 
 type Interest = (typeof INTEREST_META)[number];
 type Dir = 1 | -1;
@@ -30,13 +30,14 @@ const FLICK_VELOCITY = 800;
 const tick = haptic.tick; // plain function so the gesture worklet can schedule it on the JS thread
 const MAX_ROTATE = 12;
 
-function CardFace({ interest, compact = false }: { interest: Interest; compact?: boolean }) {
+function CardFace({ interest, compact = false, presenterHint }: { interest: Interest; compact?: boolean; presenterHint?: string }) {
   return (
     <View style={[st.card, compact && st.compactCard]}>
-      <Text style={[type.heading, { color: colors.textMuted }, compact && st.compactPrompt]}>Would you enjoy this?</Text>
+      <Text accessibilityRole="header" style={[type.heading, { color: colors.textMuted }, compact && st.compactPrompt]}>Would you enjoy this?</Text>
       <View style={[st.center, compact && st.compactCenter]}>
         <Text style={[st.emoji, compact && st.compactEmoji]} importantForAccessibility="no">{interest.emoji}</Text>
         <Text style={[type.display, { color: colors.text, textAlign: 'center' }, compact && st.compactTitle]}>{interest.label}</Text>
+        {presenterHint ? <Text style={st.presenterHint}>{presenterHint}</Text> : null}
       </View>
       {!compact && <View style={st.hint} importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
         <Ionicons name="arrow-back" size={22} color={colors.textMuted} />
@@ -61,6 +62,7 @@ function SwipeCard({
   interest,
   compact,
   cardContent,
+  presenterHint,
   drag,
   enterFrom,
   reduceMotion,
@@ -70,12 +72,14 @@ function SwipeCard({
   interest: Interest;
   compact: boolean;
   cardContent?: ReactNode;
+  presenterHint?: string;
   drag: SharedValue<number>; // 0..1, how far the top card is toward a commit — drives the card behind
   enterFrom: Dir | null; // after Undo, slide back in from the side it left
   reduceMotion: boolean;
   onCommit: (dir: Dir) => void;
   ref: Ref<CardHandle>;
 }) {
+  const heading = useHeadingFocus<ComponentRef<typeof View>>();
   const { width } = useWindowDimensions();
   const threshold = width * 0.3;
   const offscreen = width * 1.4;
@@ -172,23 +176,24 @@ function SwipeCard({
   return (
     <GestureDetector gesture={pan}>
       <Animated.View
+        ref={heading}
         style={[{ flex: 1, minHeight: 0 }, cardStyle]}
         accessible={!cardContent}
-        accessibilityLabel={`${interest.label}. Would you enjoy this?`}
-        accessibilityHint="Swipe right for yes, left for no, or use the Yes and No buttons below."
+        accessibilityLabel={`${interest.label}. Would you enjoy this?${presenterHint ? ` ${presenterHint}` : ''}`}
+        accessibilityHint="Use the Yes or No actions, or the Yes and No buttons below."
         accessibilityActions={[
-          { name: 'like', label: 'Yes, I would enjoy this' },
-          { name: 'nope', label: 'No thanks' },
+          { name: 'like', label: `Yes, I would enjoy ${interest.label}` },
+          { name: 'nope', label: `No, not ${interest.label}` },
         ]}
         onAccessibilityAction={(e) => {
           if (e.nativeEvent.actionName === 'like') swipe(1);
           else if (e.nativeEvent.actionName === 'nope') swipe(-1);
         }}>
-        {cardContent ?? <CardFace interest={interest} compact={compact} />}
-        <Animated.View style={[st.stampSpot, { left: space.lg }, likeStyle]} pointerEvents="none">
+        {cardContent ?? <CardFace interest={interest} compact={compact} presenterHint={presenterHint} />}
+        <Animated.View style={[st.stampSpot, { left: space.lg }, likeStyle]} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
           <Stamp like />
         </Animated.View>
-        <Animated.View style={[st.stampSpot, { right: space.lg }, nopeStyle]} pointerEvents="none">
+        <Animated.View style={[st.stampSpot, { right: space.lg }, nopeStyle]} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
           <Stamp like={false} />
         </Animated.View>
       </Animated.View>
@@ -197,22 +202,28 @@ function SwipeCard({
 }
 
 export function SwipeDeck({
+  sampleInterests,
   cursor,
   enterFrom,
   canBack,
   compact = false,
   cardContent,
+  header,
+  contentOverlay,
   onAnswer,
   onBack,
   left,
   right,
   ref,
 }: {
+  sampleInterests?: readonly Interest['key'][];
   cursor: number; // index into INTEREST_META of the top card
   enterFrom: Dir | null;
   canBack: boolean;
   compact?: boolean; // hands-free presentation; gestures and answers stay the same
   cardContent?: ReactNode; // optional hands-free card face; still uses the same swipe/commit path
+  header?: ReactNode; // optional hands-free camera/status panel above the card
+  contentOverlay?: ReactNode; // visual feedback above the content, outside the answer bar
   onAnswer: (key: Interest['key'], liked: boolean) => void;
   onBack: () => void;
   left?: ReactNode; // hands-free No / Yes targets replace the action buttons in the bottom row
@@ -240,35 +251,40 @@ export function SwipeDeck({
 
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
-      <View style={st.cardArea}>
-        <View style={[st.stack, compact && st.compactStack]}>
-          {next && !compact && (
-            <Animated.View
-              style={[StyleSheet.absoluteFill, behindStyle]}
-              importantForAccessibility="no-hide-descendants"
-              accessibilityElementsHidden>
-              <CardFace interest={next} />
-            </Animated.View>
-          )}
-          {top && (
-            <SwipeCard
-              key={top.key}
-              ref={cardRef}
-              interest={top}
-              compact={compact}
-              cardContent={cardContent}
-              drag={drag}
-              enterFrom={enterFrom}
-              reduceMotion={reduceMotion}
-              onCommit={commit}
-            />
-          )}
+      <View style={{ flex: 1, minHeight: 0 }}>
+        {header}
+        <View style={st.cardArea}>
+          <View style={[st.stack, compact && st.compactStack]}>
+            {next && !compact && (
+              <Animated.View
+                style={[StyleSheet.absoluteFill, behindStyle]}
+                importantForAccessibility="no-hide-descendants"
+                accessibilityElementsHidden>
+                <CardFace interest={next} />
+              </Animated.View>
+            )}
+            {top && (
+              <SwipeCard
+                key={top.key}
+                ref={cardRef}
+                interest={top}
+                compact={compact}
+                cardContent={cardContent}
+                presenterHint={sampleInterests ? `Margaret would say: ${sampleInterests.includes(top.key) ? 'Yes' : 'No'}` : undefined}
+                drag={drag}
+                enterFrom={enterFrom}
+                reduceMotion={reduceMotion}
+                onCommit={commit}
+              />
+            )}
+          </View>
         </View>
+        {contentOverlay}
       </View>
       <View style={[st.bar, compact && st.compactBar]}>
-        <CircleButton icon="arrow-undo" label="Back" a11yLabel="Back: undo last answer" color={colors.text} size={60} disabled={!canBack} onPress={onBack} />
         {left ?? <CircleButton icon="close" label="No" a11yLabel={top ? `No, not ${top.label}` : 'No'} color={colors.hard} size={84} onPress={() => cardRef.current?.swipe(-1)} />}
-        {right ?? <CircleButton icon="heart" label="Yes" a11yLabel={top ? `Yes, I'd enjoy ${top.label}` : 'Yes'} color={colors.like} size={84} onPress={() => cardRef.current?.swipe(1)} />}
+        <CircleButton icon="arrow-undo" label="Back" a11yLabel="Back: undo last answer" color={colors.text} size={60} disabled={!canBack} onPress={onBack} />
+        {right ??<CircleButton icon="heart" label="Yes" a11yLabel={top ? `Yes, I'd enjoy ${top.label}` : 'Yes'} color={colors.like} size={84} onPress={() => cardRef.current?.swipe(1)} />}
       </View>
     </View>
   );
@@ -297,6 +313,7 @@ const st = StyleSheet.create({
   },
   center: { alignItems: 'center', gap: space.md },
   emoji: { fontSize: 104, lineHeight: 124 },
+  presenterHint: { fontSize: 15, lineHeight: 20, textAlign: 'center', color: colors.textMuted },
   hint: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   stampSpot: { position: 'absolute', top: space.xl },
   stamp: {

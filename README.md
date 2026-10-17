@@ -12,7 +12,7 @@ DayBridge helps older adults discover activities that match their interests and 
 - **Discover opportunities:** Browse public UC Berkeley event listings where live discovery is enabled. Public events are **not automatically verified** for accessibility, eligibility, price or suitability.
 - **Get me there:** Review a proposed ride/invitation, approve specific actions, and follow coordination status.
 - **Recover from changes:** Simulate a cancelled ride and watch the plan return to a needs-attention state rather than incorrectly remain ready.
-- **Caregiver view:** Explore a same-device demo of a person's week and items needing attention.
+- **Caregiver view:** Explore the local caregiver API demo with fictional people, sharing scopes, check-ins and redacted notes. An explicitly labeled same-device view is available when that API is unavailable.
 - **Accessible input:** Use easier-view onboarding; opt-in hands-free camera input is also available. The separate Expo mobile app lives in `mobile/`.
 
 ## Try the web demo locally
@@ -27,13 +27,21 @@ npm run dev
 
 Open **http://localhost:3000**. On Windows PowerShell use `Copy-Item .env.example .env.local` instead.
 
+For a local production build, run `npm run build`, set `DAYBRIDGE_DEMO_EVENTS=1` in `.env.local`, then run `npm start`. This enables simulated coordination and the caregiver API. Set `SHARE_STORE=memory` only if demonstrating sharing. These demo settings are for local use only.
+
 **Suggested three-minute walkthrough**
 
-1. Open the app and use a demo profile, or complete onboarding.
-2. Review the suggested activities and the explanation of fit or barriers.
-3. Select **Get me there**, review approvals, then simulate the provider responses to reach **READY**.
-4. Simulate a ride cancellation and show how DayBridge revokes readiness and proposes recovery.
-5. Optionally show the week/calendar and caregiver view.
+Use a fresh private browser window, or first select **Margaret** in the person menu at `/home` before starting.
+
+1. At `/`, choose **Demo: Margaret**. Show the actual mock/live explanation label and why the choir's stairs and garden's cost block those outings.
+2. On **Dominoes & Pinochle Lounge**, select **Get me there**. Margaret's bus trip would exceed her 30-minute limit; a 15-minute family ride fits.
+3. Accept the proposal, review and approve the ride to the sample contact, then send the simulated request. It stays pending until **Ride confirmed (simulated)** makes it **READY**.
+4. Select **Ride cancelled (simulated)**. Show **NEEDS_REPLAN**, choose **Central Library Community Room Cards** from the offered alternatives, then **Confirm my plan**. Margaret can use the 15-minute bus route; no replacement ride is invented.
+5. Optionally show Margaret's saved activities in Calendar. At `/care`, select Dana and open the separate fictional Margaret record, loading demo records if needed.
+
+**Get me there** carries Margaret's profile into coordination. Keep this same-person flow for the walkthrough: a bare `/coordinate` URL loads a different developer fixture. After the cancelled ride, Margaret has no configured paratransit fallback; recovery changes the outing with her confirmation.
+
+Calendar shows saved activities; it does not automatically reflect this coordination demo's final state. The caregiver Margaret record has its own plans and time zone, so present it as a separate sharing example.
 
 Provider responses in this walkthrough are **simulations**, not actual messages, rides, bookings or attendance confirmations. The demo coordinator uses local process memory, so restarting the server may clear plans.
 
@@ -41,19 +49,20 @@ Provider responses in this walkthrough are **simulations**, not actual messages,
 
 ```bash
 npm run check
-npm run build -- --webpack
+npm run build
 npm run demo:check
 ```
 
 ### Live demo checklist
 
-- Start the production server with demo events on: `DAYBRIDGE_DEMO_EVENTS=1 npx next start -p 3000` (PowerShell: `$env:DAYBRIDGE_DEMO_EVENTS='1'; npx next start -p 3000`). Without the flag `/events` returns 403 in production.
+- Start the production server with demo events and sharing on: `SHARE_STORE=memory DAYBRIDGE_DEMO_EVENTS=1 npx next start -p 3000` (PowerShell: `$env:SHARE_STORE='memory'; $env:DAYBRIDGE_DEMO_EVENTS='1'; npx next start -p 3000`). In production, `/events` returns 403 without the events flag and **Share** returns 503 without `SHARE_STORE=memory`. `npm run dev` has both on.
 - Run `npm run demo:check` against it once before presenting.
 - **Uber/Lyft buttons: tap them on a phone with the app installed.** They open the app with the destination filled in and the pickup set to the phone's location. On desktop, Uber redirects to a generic web page and drops the destination; say "opens the Uber app" rather than expecting a prefilled page. Nothing is booked either way.
+- Uber/Lyft/calendar buttons only appear when venue enrichment finds the venue (`DAYBRIDGE_ENRICH=1` plus `DAYBRIDGE_VENUE_PLACE_IDS` and a Places key). With no place ids set, plan cards show no handoff links, so don't promise them.
 - Sign the demo browser into Google so calendar links skip the sign-in screen.
 - **Analyze** calls live providers when keys are set (about 2 s); on unreliable venue Wi-Fi, use the demo profiles.
 
-The demo smoke check expects the application to be running; see `scripts/demo-smoke.mjs` for its behavior. The Webpack build option can be useful when local Turbopack worker permissions interfere with builds.
+The demo smoke check expects the application to be running with simulated coordination enabled; see `scripts/demo-smoke.mjs` for its behavior. Use the default build command, which includes the configured Turbopack stylesheet loader.
 
 ## How it works
 
@@ -72,7 +81,8 @@ The planner is deterministic: unknown or unmet requirements are not treated as c
 
 **No API keys are required for the local simulated demo.** Copy `.env.example` for optional integrations and see [environment setup](docs/integrations/ENV_SETUP.md).
 
-- Live public events are optional and depend on source availability and feature flags.
+- Set `DAYBRIDGE_EVENTS=1` for optional live UC Berkeley listings. Discovery preserves unknown suitability fields and may use a five-minute source cache; it does not add events to the personalized week.
+- Caregiver demo identities are not sign-in. Hosted caregiver requests return 503 without the local-demo flag; the UI labels any independent same-device fallback. Authorization failures do not enable that fallback.
 - Google Maps venue enrichment and Uber fare estimates require optional credentials and appropriate provider access; calendar and map handoff links do not book anything.
 - No real SMS/email, rideshare booking, payment processing, or automatic attendance verification.
 - Cloud authentication/persistence is experimental and **not** part of the approved local demo. Do not expose state-changing coordination endpoints as a public service without proper authentication and persistence.

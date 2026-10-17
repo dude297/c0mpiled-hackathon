@@ -17,8 +17,14 @@ so it must never hold a secret.
 `npm run dev` with an empty (or no) `.env.local`. You get seeded data, labeled mock AI
 explanations, and coordination/sharing with in-memory stores. Nothing external is called.
 
-To run the production build locally (`npm run build && npm start`) with coordination and
-sharing still working, set `DAYBRIDGE_DEMO_EVENTS=1` and `SHARE_STORE=memory`. Local only.
+To run a production build locally, run `npm run build`, then `npm start` with
+`DAYBRIDGE_DEMO_EVENTS=1` in `.env.local` for simulated coordination and the caregiver API.
+Set `SHARE_STORE=memory` only if demonstrating sharing. Local only; do not enable these on a public host.
+
+At `/care`, demo identities select fictional callers, not verified accounts. Load the fictional
+caregiver demo as Dana if no records exist; sharing scopes control reads and check-ins, and notes
+are visible only to their reporter and managers. A 503 or network failure can show an explicitly
+labeled, independent same-device fallback. A 401, 403 or 404 remains an access error.
 
 ## 2. Live AI (RunAnywhere)
 
@@ -42,19 +48,22 @@ AI_TIMEOUT_MS=60000                  # CPU inference ~25s per explanation
 If the AI call fails or times out, the app falls back to labeled mock explanations. AI only
 explains; deterministic results come from `src/domain/`.
 
-## 3. Live discovery (PR #11, not on main yet)
+## 3. Live discovery and integrations (on main)
 
 All off by default. Turn on per feature:
 
 | Variable | Effect |
 | --- | --- |
+| `DAYBRIDGE_EVENTS=1` | Live UC Berkeley public listings in Discover; no API key required |
 | `DAYBRIDGE_ENRICH=1` | Live enrichment in `/api/analyze` |
 | `DAYBRIDGE_LUMA=1` | Luma public events |
 | `GOOGLE_MAPS_API_KEY` | Google Places venue lookups (server-only) |
 | `DAYBRIDGE_VENUE_PLACE_IDS` | JSON map of reviewed venue Place IDs |
 | `UBER_API_TOKEN` | Uber price estimates (optional, fails soft) |
 
-`DAYBRIDGE_EVENTS` was requested in review but no code reads it yet.
+Discovery may use a five-minute source cache. Listings remain separate from personalized matches;
+cost, accessibility and eligibility are shown as unknown and need confirmation with the source.
+With the flag unset, no public-event retrieval is attempted.
 
 Need **no keys**: UC Berkeley public events feed, Open-Meteo weather, Google Calendar
 template links, Uber/Lyft deep links.
@@ -75,7 +84,7 @@ hosted coordination returns 503 and hosted sharing returns 503 (unless the demo 
 | --- | --- |
 | `AI_BASE_URL`, `AI_MODEL`, `AI_TIMEOUT_MS` | `DAYBRIDGE_DEMO_EVENTS` (opens simulated provider endpoints) |
 | `AI_API_KEY` (mark Sensitive) | `SHARE_STORE` (in-memory store loses data across instances) |
-| PR #11 discovery vars, once merged | `VERCEL` (set automatically) |
+| Optional discovery/integration variables above | `VERCEL` (set automatically) |
 | | Any secret under a `NEXT_PUBLIC_` name |
 
 Deploys are manual and need explicit approval (see `CLAUDE.md`).

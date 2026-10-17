@@ -9,15 +9,11 @@ import { Interest, Mobility, TimeSlot, Transport, type AnalysisResult, type Prof
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto w-full max-w-3xl p-4 text-base md:p-6 md:text-lg">
-      <header className="mb-5">
-        <h1 className="flex items-center gap-2 text-3xl font-semibold">
-          <Sparkles className="size-7 text-primary" aria-hidden="true" />
-          DayBridge
-        </h1>
-        <p className="mt-1 text-lg text-muted-foreground md:text-xl">
-          A weekly social plan that fits their life — in one click.
-        </p>
+    <div className="dashboard-page mx-auto w-full max-w-5xl px-5 py-10 text-base md:px-8">
+      <header className="mb-8">
+        <p className="eyebrow">Discover & connect</p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">A week to look forward to.</h1>
+        <p className="mt-3 text-muted-foreground">Thoughtful matches, practical details, and a plan that fits your life.</p>
       </header>
       <div className="flex flex-col gap-4">{children}</div>
       <footer className="mt-8 text-center text-sm text-muted-foreground print:hidden">

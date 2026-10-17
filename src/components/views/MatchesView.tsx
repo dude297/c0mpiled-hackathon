@@ -11,6 +11,7 @@ import type { AnalysisResult, PlanItem } from "@/lib/schema";
 import { AnalyzeLine, HeadsUpRow, QUIET_LINK, SampleNote } from "./bits";
 import { cardHeadsUp, didntFitLabel, didntFitReason, metaLine, sortMatches } from "./format";
 import { writeProfileHandoff } from "@/components/home/handoff";
+import { AppDiscovery } from "./AppDiscovery";
 
 export function MatchesView() {
   return (
@@ -18,9 +19,16 @@ export function MatchesView() {
       <h1 className="text-[2.25rem] font-semibold leading-tight">Good matches for you</h1>
       <ProfileGate>
         <Matches />
+        <Discover />
       </ProfileGate>
     </div>
   );
+}
+
+/** Public listings wait for the person's own matches: they must not stand in for them, then jump down when they land. */
+function Discover() {
+  const { result, analyzing } = useDeviceStore();
+  return result || !analyzing ? <AppDiscovery /> : null;
 }
 
 function Matches() {

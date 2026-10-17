@@ -23,8 +23,34 @@ export function gazeFromBlendshapes(shapes: readonly Blendshape[], swap = false)
   const s = (name: string) => shapes.find((b) => b.categoryName === name)?.score ?? 0;
   const towardRight = s("eyeLookInLeft") + s("eyeLookOutRight");
   const towardLeft = s("eyeLookOutLeft") + s("eyeLookInRight");
-  const value = clamp1((towardRight - towardLeft) / 2);
+  const raw = (towardRight - towardLeft) / 2;
+  if (!Number.isFinite(raw)) return Number.NaN;
+  const value = clamp1(raw);
   return swap ? -value : value;
+}
+
+/**
+ * Horizontal head yaw: nose tip (1) relative to the midpoint of eye corners (33/263),
+ * divided by their distance in aspect-corrected image coordinates. In the raw camera
+ * frame a turn toward the screen's right moves the nose left, hence the minus sign.
+ * This is a relative signal, not an angle; calibration removes the resting offset.
+ * Invalid / coincident landmarks are unusable samples, never a centered face.
+ */
+export function yawFromLandmarks(nose: Point, a: Point, b: Point, aspect = 4 / 3): number | null {
+  if (![nose.x, nose.y, a.x, a.y, b.x, b.y, aspect].every(Number.isFinite) || aspect <= 0) return null;
+  const eyeDistance = Math.hypot((b.x - a.x) * aspect, b.y - a.y);
+  if (!Number.isFinite(eyeDistance) || eyeDistance < 1e-6) return null;
+  const yaw = -((nose.x - (a.x + b.x) / 2) * aspect) / eyeDistance;
+  return Number.isFinite(yaw) ? yaw : null;
+}
+
+export type LookSignal = { gaze: number; yaw: number };
+
+/** Eye movement and head turning contribute together; their combined sign selects the side. */
+export function combineLook(sample: LookSignal, base: LookSignal): number {
+  const value = (sample.gaze - base.gaze) + (sample.yaw - base.yaw);
+  // Preserve unusable input as invalid, so classifyZone drops tracking instead of arming at center.
+  return Number.isFinite(value) ? clamp1(value) : Number.NaN;
 }
 
 /**
@@ -42,7 +68,8 @@ export function rollFromEyeCorners(a: Point, b: Point, aspect = 4 / 3, swap = fa
 }
 
 /** Zone with hysteresis: enter a side past +/-threshold, return to center only below threshold - hysteresis. */
-export function classifyZone(value: number, prev: Zone, threshold: number, hysteresis: number): Zone {
+export function classifyZone(value: number, prev: Zone, threshold: number, hysteresis: number): Zone | null {
+  if (!Number.isFinite(value)) return null;
   if (value > threshold) return "right";
   if (value < -threshold) return "left";
   if (prev === "right" && value > threshold - hysteresis) return "right";
@@ -60,17 +87,18 @@ export function median(values: readonly number[]): number {
 export type HandsFreeMode = "look" | "tilt";
 
 export const MODE_CONFIG: Record<HandsFreeMode, { threshold: number; hysteresis: number; dwellMs: number }> = {
-  look: { threshold: 0.25, hysteresis: 0.07, dwellMs: 1500 },
+  look: { threshold: 0.14, hysteresis: 0.04, dwellMs: 1200 },
   tilt: { threshold: 15, hysteresis: 4, dwellMs: 800 },
 };
 
 export const CALIBRATION_MS = 2000;
 export const REARM_MS = 400;
 
-export type Calibration = { faceMs: number; lastT: number | null; gaze: number[]; tilt: number[] };
-export type CalibrationStep = { calib: Calibration; secondsLeft: number; base: { gaze: number; tilt: number } | null };
+export type SignalSample = LookSignal & { tilt: number };
+export type Calibration = { faceMs: number; lastT: number | null; gaze: number[]; yaw: number[]; tilt: number[] };
+export type CalibrationStep = { calib: Calibration; secondsLeft: number; base: SignalSample | null };
 
-export const initialCalibration = (): Calibration => ({ faceMs: 0, lastT: null, gaze: [], tilt: [] });
+export const initialCalibration = (): Calibration => ({ faceMs: 0, lastT: null, gaze: [], yaw: [], tilt: [] });
 
 /**
  * "Look at the middle" baseline. Only time with a face in view counts toward CALIBRATION_MS, so a
@@ -81,19 +109,20 @@ export const initialCalibration = (): Calibration => ({ faceMs: 0, lastT: null, 
 export function stepCalibration(
   c: Calibration,
   t: number,
-  sample: { gaze: number; tilt: number } | null,
+  sample: SignalSample | null,
 ): CalibrationStep {
   const left = (ms: number) => Math.max(1, Math.ceil((CALIBRATION_MS - ms) / 1000));
-  if (!sample) {
+  if (!sample || !Number.isFinite(t) || t < 0 || (c.lastT !== null && t < c.lastT)
+    || ![sample.gaze, sample.yaw, sample.tilt].every(Number.isFinite)) {
     const calib = { ...c, lastT: null };
     return { calib, secondsLeft: left(c.faceMs), base: null };
   }
   const faceMs = c.faceMs + (c.lastT === null ? 0 : Math.min(100, Math.max(0, t - c.lastT)));
-  const calib = { faceMs, lastT: t, gaze: [...c.gaze, sample.gaze], tilt: [...c.tilt, sample.tilt] };
+  const calib = { faceMs, lastT: t, gaze: [...c.gaze, sample.gaze], yaw: [...c.yaw, sample.yaw], tilt: [...c.tilt, sample.tilt] };
   const done = faceMs >= CALIBRATION_MS && calib.gaze.length >= 10;
   return {
     calib,
     secondsLeft: left(faceMs),
-    base: done ? { gaze: median(calib.gaze), tilt: median(calib.tilt) } : null,
+    base: done ? { gaze: median(calib.gaze), yaw: median(calib.yaw), tilt: median(calib.tilt) } : null,
   };
 }

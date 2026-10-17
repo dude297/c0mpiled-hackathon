@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { AnalysisResult } from "@/lib/schema";
-import { buildShareRequest, describeShareStatus, describeStopStatus, isMemoryStore } from "./request";
+import { buildShareRequest, describeShareStatus, describeStopStatus, isMemoryStore, resultForWeek } from "./request";
 
 const result: AnalysisResult = { summary: "Ana's plan", items: [], plan: [], blocked: [], evidence: [], explanation: "x", dataSource: "mock" };
 
 describe("buildShareRequest", () => {
+  it("shares only My week, preserving the analysis and supporting an empty week", () => {
+    const item = { activityId: "art", name: "Art", when: "Sat afternoon", travel: "walk", costPerWeek: 0, score: 1, barriers: [] };
+    const full = { ...result, plan: [item, { ...item, activityId: "music" }] };
+    const subset = resultForWeek(full, new Set(["music", "unknown"]));
+    expect(buildShareRequest(subset, false).result.plan.map((i) => i.activityId)).toEqual(["music"]);
+    expect(subset.summary).toBe(full.summary);
+    expect(full.plan).toHaveLength(2);
+    expect(resultForWeek(full, new Set()).plan).toEqual([]);
+  });
   it("has exactly {result, consent:true, firstNameOnly} and no profile", () => {
     const body = buildShareRequest(result, true);
     expect(Object.keys(body).sort()).toEqual(["consent", "firstNameOnly", "result"]);
