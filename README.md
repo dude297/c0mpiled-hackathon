@@ -31,13 +31,17 @@ For a local production build, run `npm run build`, set `DAYBRIDGE_DEMO_EVENTS=1`
 
 **Suggested three-minute walkthrough**
 
-1. At `/`, choose **Demo: Margaret** and show the matching activities, constraints and actual mock/live explanation label.
-2. Open `/coordinate` **without query parameters** for the separate fictional Maya/Fellowship scenario, which includes a ride and invitation.
-3. Accept the proposal, approve its specific actions, send simulated requests, then simulate the required replies to reach **READY**.
-4. Simulate a ride cancellation: readiness is revoked, and recovery needs new approval before the replacement ride can be confirmed.
-5. Optionally show the calendar or `/care`: select Dana and load the fictional caregiver demo if no records exist.
+Use a fresh private browser window, or first select **Margaret** in the person menu at `/home` before starting.
 
-**Get me there** from a match keeps that selected person's profile; some outings need no ride. The direct Maya fixture above is a separate scenario chosen to demonstrate coordination and recovery reliably.
+1. At `/`, choose **Demo: Margaret**. Show the actual mock/live explanation label and why the choir's stairs and garden's cost block those outings.
+2. On **Dominoes & Pinochle Lounge**, select **Get me there**. Margaret's bus trip would exceed her 30-minute limit; a 15-minute family ride fits.
+3. Accept the proposal, review and approve the ride to the sample contact, then send the simulated request. It stays pending until **Ride confirmed (simulated)** makes it **READY**.
+4. Select **Ride cancelled (simulated)**. Show **NEEDS_REPLAN**, choose **Central Library Community Room Cards** from the offered alternatives, then **Confirm my plan**. Margaret can use the 15-minute bus route; no replacement ride is invented.
+5. Optionally show Margaret's saved activities in Calendar. At `/care`, select Dana and open the separate fictional Margaret record, loading demo records if needed.
+
+**Get me there** carries Margaret's profile into coordination. Keep this same-person flow for the walkthrough: a bare `/coordinate` URL loads a different developer fixture. After the cancelled ride, Margaret has no configured paratransit fallback; recovery changes the outing with her confirmation.
+
+Calendar shows saved activities; it does not automatically reflect this coordination demo's final state. The caregiver Margaret record has its own plans and time zone, so present it as a separate sharing example.
 
 Provider responses in this walkthrough are **simulations**, not actual messages, rides, bookings or attendance confirmations. The demo coordinator uses local process memory, so restarting the server may clear plans.
 
