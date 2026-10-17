@@ -36,6 +36,8 @@ These are **reserved**, not available to an AI agent by default. If a change is 
 
 ### Claude Opus 5.5 — deterministic coordination engine and contracts
 
+**P0 PARALLEL-EXECUTION DIRECTIVE:** Read [OPUS_SUBAGENT_ADDENDUM.md](OPUS_SUBAGENT_ADDENDUM.md) before implementation. If subagent tooling exists, launch independent workers promptly for state transitions, consent, event idempotency, API handlers, adversarial unit tests and read-only review. Freeze the typed contract first, give each writer disjoint paths, and integrate centrally. Parent Opus remains accountable. Do not subdelegate into teammate/GLM/GPT Work paths or claim unavailable subagents were started.
+
 **Own:** `src/domain/coordination/**`, `src/app/api/coordination/**`, additive changes to `src/lib/schema.ts`, and unit tests colocated with the new coordinator. May write `docs/daybridge/COORDINATION_CONTRACT.md`.
 
 **Do not touch:** human-owned UI/catalog/integrations/AI/Supabase files, `src/simulation/**` (GLM), GPT Work documents, or existing `src/domain/engine.ts` unless the lead approves a narrow patch. Publish `ProviderPort` and event/approval contracts for Teammate B's external connections; adapters never determine authoritative READY themselves.
