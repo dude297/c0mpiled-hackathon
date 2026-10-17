@@ -3,7 +3,7 @@ import { ScrollView, Text, View } from 'react-native';
 
 import { colors, space, type } from '@/lib/theme';
 
-import { OptionRow, PillButton, s as ui } from './ui';
+import { OptionRow, PillButton, s as ui, useHeadingFocus } from './ui';
 
 export type ChoiceOption = { id: string; label: string; detail?: string; emoji?: string };
 
@@ -32,13 +32,14 @@ export function ChoiceStep({
   busy?: boolean;
   bottomInset: number;
 }) {
+  const heading = useHeadingFocus();
   return (
     <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={{ padding: space.md, gap: space.md }}>
-        <Text accessibilityRole="header" style={[type.title, { color: colors.text }]}>{title}</Text>
+        <Text ref={heading} accessibilityRole="header" style={[type.title, { color: colors.text }]}>{title}</Text>
         {subtitle ? <Text style={[type.body, { color: colors.textMuted }]}>{subtitle}</Text> : null}
         {multi ? <Text style={[type.bodyStrong, { color: colors.text }]}>Pick all that apply.</Text> : null}
-        <View accessibilityRole={multi ? undefined : 'radiogroup'} style={{ gap: space.md }}>
+        <View accessibilityRole={multi ? undefined : 'radiogroup'} accessibilityLabel={title} style={{ gap: space.md }}>
           {options.map((o) => (
             <OptionRow
               key={o.id}

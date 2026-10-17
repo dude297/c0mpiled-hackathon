@@ -4,6 +4,8 @@ import type { Profile } from '@/lib/schema';
 
 type Interest = Profile['interests'][number];
 type TimeSlot = Profile['times'][number];
+type Mobility = Profile['mobility'];
+type Transport = Profile['transport'][number];
 
 export const INTEREST_META = [
   { key: 'music', emoji: '🎵', label: 'Music & singing' },
@@ -32,11 +34,22 @@ export const TRAVEL_BUCKETS = [
   { label: 'Distance is no big deal', detail: 'an hour or more', min: 90 },
 ] as const;
 
-export const STAIR_OPTIONS = [
-  { key: 'fine', label: 'No big deal', detail: 'Stairs are fine' },
-  { key: 'hassle', label: 'A hassle', detail: 'I can, but prefer not to' },
-  { key: 'avoid', label: 'Hard for me', detail: "I'd rather avoid them" },
-] as const;
+// Asked directly — never inferred from anything else. Maps 1:1 to Profile['mobility'].
+export const MOBILITY_OPTIONS = [
+  { key: 'full', label: 'No, I walk on my own' },
+  { key: 'cane', label: 'A cane' },
+  { key: 'walker', label: 'A walker' },
+  { key: 'wheelchair', label: 'A wheelchair' },
+] as const satisfies readonly { key: Mobility; label: string }[];
+
+// Asked directly (pick all that apply) — never inferred. Maps 1:1 to Profile['transport'].
+export const TRANSPORT_OPTIONS = [
+  { key: 'drive', emoji: '🚗', label: 'I drive myself' },
+  { key: 'bus', emoji: '🚌', label: 'Bus or train' },
+  { key: 'paratransit', emoji: '🚐', label: 'Senior shuttle (paratransit)' },
+  { key: 'family', emoji: '👨‍👩‍👧', label: 'Family or friends drive me' },
+  { key: 'walk', emoji: '🚶', label: 'I walk there' },
+] as const satisfies readonly { key: Transport; emoji: string; label: string }[];
 
 export const BUDGET_OPTIONS = [
   { amount: 0, label: 'Free only', detail: '$0 a week' },
@@ -48,16 +61,19 @@ export const BUDGET_OPTIONS = [
 export type Answer =
   | { kind: 'interest'; key: Interest; liked: boolean }
   | { kind: 'travel'; min: number }
-  | { kind: 'mobility'; key: (typeof STAIR_OPTIONS)[number]['key'] }
+  | { kind: 'mobility'; key: Mobility }
+  | { kind: 'transport'; keys: Transport[] }
   | { kind: 'times'; keys: TimeSlot[] }
   | { kind: 'budget'; amount: number };
 
-// Card order, same as web: one card per interest, then times, travel, stairs, budget.
+// Card order, same as web: one card per interest, then times, travel, walking aid, how you get places,
+// budget, then a review of every answer before matching.
 export type CardDef =
   | { type: 'interest'; interest: (typeof INTEREST_META)[number] }
   | { type: 'times' }
   | { type: 'travel' }
   | { type: 'mobility' }
+  | { type: 'transport' }
   | { type: 'budget' };
 
 export const CARDS: CardDef[] = [
@@ -65,33 +81,110 @@ export const CARDS: CardDef[] = [
   { type: 'times' },
   { type: 'travel' },
   { type: 'mobility' },
+  { type: 'transport' },
   { type: 'budget' },
 ];
 
-export function answersToProfile(answers: Answer[], name: string): Profile {
+// Fields that may fall back to a default. Mobility and transport never do: they must be answered.
+export type DefaultField = 'interests' | 'times' | 'travel' | 'budget';
+export type RequiredField = 'mobility' | 'transport';
+export type ProfileResult =
+  | { ok: true; profile: Profile; defaulted: DefaultField[] }
+  | { ok: false; missing: RequiredField[] };
+
+const DEFAULTS = { interests: ['learning'] as Interest[], times: ['morning', 'afternoon'] as TimeSlot[], travel: 30, budget: 10 };
+const MOBILITY_KEYS: readonly string[] = MOBILITY_OPTIONS.map((o) => o.key);
+const TRANSPORT_KEYS: readonly string[] = TRANSPORT_OPTIONS.map((o) => o.key);
+
+function pick<K extends Answer['kind']>(answers: readonly Answer[], kind: K) {
+  return answers.find((a): a is Extract<Answer, { kind: K }> => a.kind === kind);
+}
+
+function readAnswers(answers: readonly Answer[]) {
   const likedInterests = answers
     .filter((a): a is Extract<Answer, { kind: 'interest' }> => a.kind === 'interest' && a.liked)
     .map((a) => a.key);
   const times = new Set<TimeSlot>();
   for (const a of answers) if (a.kind === 'times') a.keys.forEach((k) => times.add(k));
-  const travel = answers.find((a): a is Extract<Answer, { kind: 'travel' }> => a.kind === 'travel');
-  const mobility = answers.find((a): a is Extract<Answer, { kind: 'mobility' }> => a.kind === 'mobility');
-  const budget = answers.find((a): a is Extract<Answer, { kind: 'budget' }> => a.kind === 'budget');
-
-  const mobilityValue: Profile['mobility'] =
-    mobility?.key === 'avoid' ? 'walker' : mobility?.key === 'hassle' ? 'cane' : 'full';
-
+  const mobilityKey = pick(answers, 'mobility')?.key;
+  const mobility = mobilityKey && MOBILITY_KEYS.includes(mobilityKey) ? mobilityKey : null;
+  // Keep option order and drop anything that isn't a real choice.
+  const chosen = new Set<string>(pick(answers, 'transport')?.keys ?? []);
+  const transport = TRANSPORT_OPTIONS.map((o) => o.key).filter((k) => chosen.has(k));
   return {
-    name: name.trim() || 'Friend',
-    interests: likedInterests.length ? likedInterests : ['learning'],
-    mobility: mobilityValue,
-    transport: mobilityValue === 'full' ? ['drive', 'walk', 'bus'] : ['bus', 'paratransit', 'family'],
-    maxTravelMin: travel?.min ?? 30,
-    times: times.size ? [...times] : ['morning', 'afternoon'],
-    budgetPerWeek: budget?.amount ?? 10,
-    hearingImpaired: false,
-    prefersSmallGroups: false,
+    interests: likedInterests.length ? likedInterests : null,
+    times: times.size ? [...times] : null,
+    travel: pick(answers, 'travel')?.min ?? null,
+    budget: pick(answers, 'budget')?.amount ?? null,
+    mobility,
+    transport: transport.length ? transport : null,
   };
+}
+
+// Mobility and transport come ONLY from the explicit answers. If either is missing, nothing is
+// invented: the result says what's missing and the caller must ask before analyzing.
+export function answersToProfile(answers: readonly Answer[], name: string): ProfileResult {
+  const r = readAnswers(answers);
+  const missing: RequiredField[] = [];
+  if (!r.mobility) missing.push('mobility');
+  if (!r.transport) missing.push('transport');
+  if (!r.mobility || !r.transport) return { ok: false, missing };
+
+  const defaulted: DefaultField[] = [];
+  if (!r.interests) defaulted.push('interests');
+  if (!r.times) defaulted.push('times');
+  if (r.travel === null) defaulted.push('travel');
+  if (r.budget === null) defaulted.push('budget');
+  return {
+    ok: true,
+    defaulted,
+    profile: {
+      name: name.trim() || 'Friend',
+      interests: r.interests ?? DEFAULTS.interests,
+      mobility: r.mobility,
+      transport: r.transport,
+      maxTravelMin: r.travel ?? DEFAULTS.travel,
+      times: r.times ?? DEFAULTS.times,
+      budgetPerWeek: r.budget ?? DEFAULTS.budget,
+      hearingImpaired: false,
+      prefersSmallGroups: false,
+    },
+  };
+}
+
+// "Here's what we heard": every answer in plain words, in card order. `text` carries "(default)"
+// when the value wasn't chosen; `field` is the card the Change button jumps back to.
+export type ReviewField = DefaultField | RequiredField;
+export type ReviewRow = { field: ReviewField; title: string; value: string; isDefault: boolean; text: string };
+
+const labelOf = <T extends { key: string; label: string }>(opts: readonly T[], keys: readonly string[]) =>
+  opts.filter((o) => keys.includes(o.key)).map((o) => o.label).join(', ');
+const travelText = (min: number) => {
+  const b = TRAVEL_BUCKETS.find((x) => x.min === min);
+  return b ? `${b.label} (${b.detail})` : `About ${min} minutes`;
+};
+const budgetText = (amount: number) => {
+  const b = BUDGET_OPTIONS.find((x) => x.amount === amount);
+  return b ? `${b.label} (${b.detail})` : `Up to $${amount} a week`;
+};
+
+export function reviewRows(answers: readonly Answer[]): ReviewRow[] {
+  const r = readAnswers(answers);
+  const row = (field: ReviewField, title: string, value: string, isDefault: boolean): ReviewRow => ({
+    field,
+    title,
+    value,
+    isDefault,
+    text: isDefault ? `${value} (default)` : value,
+  });
+  return [
+    row('interests', 'What sounds fun', labelOf(INTEREST_META, r.interests ?? DEFAULTS.interests), !r.interests),
+    row('times', "When you're free", labelOf(TIME_OPTIONS, r.times ?? DEFAULTS.times), !r.times),
+    row('travel', 'How far is too far', travelText(r.travel ?? DEFAULTS.travel), r.travel === null),
+    row('mobility', 'Help with walking', r.mobility ? labelOf(MOBILITY_OPTIONS, [r.mobility]) : 'Not answered yet', false),
+    row('transport', 'How you get places', r.transport ? labelOf(TRANSPORT_OPTIONS, r.transport) : 'Not answered yet', false),
+    row('budget', 'Weekly budget', budgetText(r.budget ?? DEFAULTS.budget), r.budget === null),
+  ];
 }
 
 // A null entry records a skipped card, so Back always undoes exactly one card.

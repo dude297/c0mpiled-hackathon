@@ -1,9 +1,11 @@
 // Native onboarding. Same questions, order and mapping as web CardDeck:
-// name → 10 interests → times → travel → stairs → budget → answersToProfile → analyze → Matches.
+// name → 10 interests → times → travel → walking aid → how you get places → budget → review
+// ("Here's what we heard", each answer with Change) → answersToProfile → analyze → Matches.
+// Walking aid and transport are always asked, never inferred; analyze can't run until both are answered.
 // Interests: swipe deck (default), the Easier view grid, or Hands-free (look / head tilt answers the
 // same swipe cards). Switching modes keeps every answer.
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -11,25 +13,31 @@ import { ChoiceStep } from '@/components/onboarding/ChoiceStep';
 import { HandsFreeDeck } from '@/components/onboarding/HandsFree';
 import { InterestGrid } from '@/components/onboarding/InterestGrid';
 import { NameStep } from '@/components/onboarding/NameStep';
+import { ReviewStep } from '@/components/onboarding/ReviewStep';
 import { SwipeDeck } from '@/components/onboarding/SwipeDeck';
 import { PillButton, s as ui } from '@/components/onboarding/ui';
 import {
   answersToProfile,
   BUDGET_OPTIONS,
   INTEREST_META,
-  STAIR_OPTIONS,
+  MOBILITY_OPTIONS,
+  reviewRows,
   TIME_OPTIONS,
+  TRANSPORT_OPTIONS,
   TRAVEL_BUCKETS,
   type Answer,
+  type ReviewField,
 } from '@/lib/onboarding';
 import { useApp } from '@/lib/store';
 import { colors, radius, space, tap, type } from '@/lib/theme';
 
 type Key = (typeof INTEREST_META)[number]['key'];
 type TimeSlot = (typeof TIME_OPTIONS)[number]['key'];
-type StairKey = (typeof STAIR_OPTIONS)[number]['key'];
+type MobilityKey = (typeof MOBILITY_OPTIONS)[number]['key'];
+type TransportKey = (typeof TRANSPORT_OPTIONS)[number]['key'];
 
-const STEPS = ['name', 'interests', 'times', 'travel', 'mobility', 'budget'] as const;
+const STEPS = ['name', 'interests', 'times', 'travel', 'mobility', 'transport', 'budget', 'review'] as const;
+const stepOf = (f: (typeof STEPS)[number]) => STEPS.indexOf(f);
 const VIEWS = [
   { key: 'swipe', label: 'Swipe', hint: 'One card at a time. Swipe or use the No and Yes buttons.' },
   { key: 'easy', label: 'Easier view', hint: 'Shows every idea at once as tap tiles instead of swipe cards' },
@@ -51,15 +59,24 @@ export default function Onboarding() {
   const [enterFrom, setEnterFrom] = useState<1 | -1 | null>(null);
   const [times, setTimes] = useState<TimeSlot[]>([]);
   const [travel, setTravel] = useState<number | null>(null);
-  const [mobility, setMobility] = useState<StairKey | null>(null);
+  const [mobility, setMobility] = useState<MobilityKey | null>(null);
+  const [transport, setTransport] = useState<TransportKey[]>([]);
   const [budget, setBudget] = useState<number | null>(null);
+  const [editing, setEditing] = useState(false); // came from the review's Change: Continue returns there
+  const submitting = useRef(false); // double-tap lockout for See my matches
 
   const current = STEPS[step];
-  const next = () => setStep((i) => Math.min(i + 1, STEPS.length - 1));
+  const next = () => {
+    if (editing) {
+      setEditing(false);
+      return setStep(stepOf('review'));
+    }
+    setStep((i) => Math.min(i + 1, STEPS.length - 1));
+  };
 
-  // "3 of 15" in swipe mode (name + 10 cards + 4 questions); "3 of 6" in easier view.
+  // "3 of 17" in swipe mode (name + 10 cards + 5 questions + review); "3 of 8" in easier view.
   const interestSpan = easy ? 1 : INTEREST_META.length;
-  const total = 1 + interestSpan + 4;
+  const total = 1 + interestSpan + STEPS.length - 2;
   const pos = current === 'name' ? 1 : current === 'interests' ? 2 + (easy ? 0 : cursor) : interestSpan + step;
 
   const undoCard = (to: number) => {
@@ -70,6 +87,7 @@ export default function Onboarding() {
   };
 
   const back = () => {
+    setEditing(false);
     if (current === 'interests' && !easy && cursor > 0) return undoCard(cursor - 1);
     if (current === 'times' && !easy) {
       undoCard(LAST);
@@ -94,18 +112,42 @@ export default function Onboarding() {
     if (!v && cursor > LAST) setCursor(LAST); // back to cards: show the last one, answers kept
   };
 
+  const answers = (): Answer[] => [
+    ...INTEREST_META.filter((i) => liked[i.key] !== undefined).map(
+      (i): Answer => ({ kind: 'interest', key: i.key, liked: !!liked[i.key] }),
+    ),
+    ...(times.length ? [{ kind: 'times', keys: times } as const] : []),
+    ...(travel !== null ? [{ kind: 'travel', min: travel } as const] : []),
+    ...(mobility ? [{ kind: 'mobility', key: mobility } as const] : []),
+    ...(transport.length ? [{ kind: 'transport', keys: transport } as const] : []),
+    ...(budget !== null ? [{ kind: 'budget', amount: budget } as const] : []),
+  ];
+
+  // Change on the review: jump to that card with every other answer kept; Continue comes back here.
+  const change = (field: ReviewField) => {
+    setEditing(true);
+    if (field === 'interests') {
+      setEnterFrom(null);
+      setCursor(0); // swipe mode re-asks from the first card, overwriting one answer at a time
+    }
+    setStep(stepOf(field));
+  };
+
   const finish = async () => {
-    const answers: Answer[] = [
-      ...INTEREST_META.filter((i) => liked[i.key] !== undefined).map(
-        (i): Answer => ({ kind: 'interest', key: i.key, liked: !!liked[i.key] }),
-      ),
-      ...(times.length ? [{ kind: 'times', keys: times } as const] : []),
-      ...(travel !== null ? [{ kind: 'travel', min: travel } as const] : []),
-      ...(mobility ? [{ kind: 'mobility', key: mobility } as const] : []),
-      ...(budget !== null ? [{ kind: 'budget', amount: budget } as const] : []),
-    ];
-    await analyze(answersToProfile(answers, name));
-    router.replace('/(tabs)/matches');
+    if (submitting.current || loading) return;
+    const result = answersToProfile(answers(), name);
+    if (!result.ok) {
+      // Never guess walking aid or transport: go ask the first missing one.
+      setEditing(true);
+      return setStep(stepOf(result.missing[0]));
+    }
+    submitting.current = true;
+    try {
+      await analyze(result.profile);
+      router.replace('/(tabs)/matches');
+    } finally {
+      submitting.current = false;
+    }
   };
 
   const bottom = insets.bottom;
@@ -221,11 +263,27 @@ export default function Onboarding() {
 
       {current === 'mobility' && (
         <ChoiceStep
-          title="What about stairs?"
-          subtitle="So we can match you with places that are easy to get into."
-          options={STAIR_OPTIONS.map((o) => ({ id: o.key, label: o.label, detail: o.detail }))}
+          title="Do you use anything to help you walk?"
+          options={MOBILITY_OPTIONS.map((o) => ({ id: o.key, label: o.label }))}
           selected={mobility ? [mobility] : []}
-          onToggle={(id) => setMobility(id as StairKey)}
+          onToggle={(id) => setMobility(id as MobilityKey)}
+          onContinue={next}
+          bottomInset={bottom}
+        />
+      )}
+
+      {current === 'transport' && (
+        <ChoiceStep
+          title="How do you usually get places?"
+          subtitle="We'll only plan trips you can actually make."
+          multi
+          options={TRANSPORT_OPTIONS.map((o) => ({ id: o.key, label: o.label, emoji: o.emoji }))}
+          selected={transport}
+          onToggle={(id) =>
+            setTransport((p) =>
+              p.includes(id as TransportKey) ? p.filter((k) => k !== id) : [...p, id as TransportKey],
+            )
+          }
           onContinue={next}
           bottomInset={bottom}
         />
@@ -238,11 +296,13 @@ export default function Onboarding() {
           options={BUDGET_OPTIONS.map((b) => ({ id: String(b.amount), label: b.label, detail: b.detail }))}
           selected={budget === null ? [] : [String(budget)]}
           onToggle={(id) => setBudget(Number(id))}
-          onContinue={finish}
-          continueLabel="See my matches"
-          busy={loading}
+          onContinue={next}
           bottomInset={bottom}
         />
+      )}
+
+      {current === 'review' && (
+        <ReviewStep rows={reviewRows(answers())} onChange={change} onConfirm={finish} busy={loading} bottomInset={bottom} />
       )}
     </KeyboardAvoidingView>
   );

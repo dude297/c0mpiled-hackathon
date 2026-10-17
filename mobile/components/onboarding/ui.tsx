@@ -1,7 +1,8 @@
 // Small shared pieces for onboarding: haptics, pill buttons, round action buttons, option rows.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Haptics from 'expo-haptics';
-import { Platform, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { useEffect, useRef, type ComponentRef } from 'react';
+import { AccessibilityInfo, Platform, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 import { colors, radius, shadow, space, tap, type } from '@/lib/theme';
 
@@ -17,8 +18,28 @@ export const haptic = {
   },
 };
 
+// Moves screen-reader (and web keyboard) focus to a new card's heading when the card appears.
+export function useHeadingFocus() {
+  const ref = useRef<ComponentRef<typeof Text>>(null);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    try {
+      if (Platform.OS === 'web') {
+        const el = node as unknown as HTMLElement;
+        el.setAttribute?.('tabindex', '-1');
+        el.focus?.({ preventScroll: true });
+      } else AccessibilityInfo.sendAccessibilityEvent(node, 'focus');
+    } catch {
+      // focus is a nicety; never block the card on it
+    }
+  }, []);
+  return ref;
+}
+
 export function PillButton({
   label,
+  a11yLabel,
   onPress,
   variant = 'primary',
   icon,
@@ -27,6 +48,7 @@ export function PillButton({
   style,
 }: {
   label: string;
+  a11yLabel?: string;
   onPress: () => void;
   variant?: 'primary' | 'outline';
   icon?: IconName;
@@ -38,7 +60,7 @@ export function PillButton({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={a11yLabel ?? label}
       accessibilityHint={hint}
       aria-disabled={!!disabled}
       disabled={disabled}
