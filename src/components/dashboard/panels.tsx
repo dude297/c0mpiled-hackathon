@@ -1,11 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Ban, Calendar, Check, ChevronDown, CircleX, Hand, LoaderCircle, MapPin, Printer, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { Ban, Calendar, Check, ChevronDown, CircleX, Hand, LoaderCircle, MapPin, Printer, ShieldCheck, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Interest, Mobility, TimeSlot, Transport, type AnalysisResult, type Profile } from "@/lib/schema";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
@@ -309,56 +308,6 @@ export function EvidencePanel({ result }: { result: AnalysisResult | null }) {
               ))}
           </div>
         </details>
-      </CardContent>
-    </Card>
-  );
-}
-
-// Teammate slots — endpoints the lead is building. Each shows "coming soon" until wired.
-export function IntakeSlot({ onIntake }: { onIntake: (text: string) => Promise<void> }) {
-  const [value, setValue] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const available = false; // flip when POST /api/intake exists
-  async function submit() {
-    if (!value.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await onIntake(value.trim());
-      setValue("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not read that.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-xl">
-          <Users className="size-5 text-primary" aria-hidden="true" />
-          Describe them in your own words
-        </CardTitle>
-        <CardDescription className="text-sm md:text-base">
-          e.g. “Margaret is 82, uses a walker, loves choir and gardening, can spend $10 a week, and rides the bus.”
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Textarea
-          aria-label="Describe the person in your own words"
-          className="min-h-20 text-base md:text-lg"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="Type a sentence about them…"
-        />
-        <div className="flex items-center gap-3">
-          <Button size="lg" onClick={submit} disabled={busy || !value.trim() || !available}>
-            {busy ? "Reading…" : "Fill the form"}
-          </Button>
-          {!available && <span className="text-sm text-muted-foreground md:text-base">Coming soon.</span>}
-          {error && <p role="alert" className="text-destructive">{error}</p>}
-        </div>
       </CardContent>
     </Card>
   );

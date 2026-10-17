@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CircleX, LoaderCircle, Printer, RotateCcw, Share2 } from "lucide-react";
-import { DashboardShell, EvidencePanel, IntakeSlot, ProfilePanel } from "@/components/dashboard/panels";
+import { DashboardShell, EvidencePanel, ProfilePanel } from "@/components/dashboard/panels";
+import { IntakeReview } from "@/components/intake/IntakeReview";
 import { WeekCalendar, weekSummary } from "@/components/calendar/WeekCalendar";
 import { MatchFeed, hardBarriers, toggleInSet } from "@/components/feed/MatchFeed";
 import { CardDeck } from "@/components/onboarding/CardDeck";
@@ -86,18 +87,6 @@ export default function Home() {
     run(p);
   }
 
-  async function intake(text: string) {
-    const res = await fetch("/api/intake", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error ?? "Request failed");
-    setProfile(data.profile);
-    run(data.profile);
-  }
-
   async function savePlan() {
     if (!result) return;
     const res = await fetch("/api/plans", {
@@ -174,7 +163,7 @@ export default function Home() {
   const details = (
     <>
       <ProfilePanel value={profile} onChange={setProfile} onSubmit={() => run()} onDemo={demo} loading={loading} error={null} hasResult={result !== null} />
-      <IntakeSlot onIntake={intake} />
+      <IntakeReview base={profile} disabled={loading} onConfirm={(p) => { setProfile(p); run(p); }} />
       {result && <EvidencePanel result={result} />}
     </>
   );
