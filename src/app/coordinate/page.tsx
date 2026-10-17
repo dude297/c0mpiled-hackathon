@@ -66,6 +66,15 @@ const FIELD_LABELS: Record<string, string> = {
   when: "date and time",
 };
 
+function storedProfile(): unknown {
+  try {
+    const raw = sessionStorage.getItem("daybridge:profile");
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function CoordinatePage() {
   return (
     <Suspense fallback={
@@ -156,7 +165,8 @@ function CoordinateInner() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           activityId: params.get("activityId") ?? "fellowship",
-          profile: {
+          // integration: opened from the planner's "Get me there" → same person; otherwise the Maya demo.
+          profile: (params.get("activityId") && storedProfile()) || {
             name: "Maya",
             interests: ["faith"],
             mobility: "walker",
