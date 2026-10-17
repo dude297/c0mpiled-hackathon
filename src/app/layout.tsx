@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "c0mpiled Starter",
-  description: "Hackathon starter",
+  title: "DayBridge",
+  description: "Weekly social plans for older adults that work around real-life barriers.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -1,5 +1,5 @@
 import { runScenario } from "@/domain/engine";
-import { getAiAdapter } from "@/lib/ai/adapter";
+import { getAiAdapter, mockAdapter } from "@/lib/ai/adapter";
 import { ScenarioInput, type AnalysisResult } from "@/lib/schema";
 
 export async function POST(req: Request) {
@@ -10,9 +10,13 @@ export async function POST(req: Request) {
   }
 
   const output = runScenario(parsed.data);
-  const ai = getAiAdapter();
-  // AI failure must not break the deterministic result.
-  const explanation = await ai.explain(parsed.data, output).catch(() => "Explanation unavailable.");
+  let ai = getAiAdapter();
+  // AI failure must not break the deterministic result; fall back to mock so the badge stays honest.
+  const explanation = await ai.explain(parsed.data, output).catch((e) => {
+    console.error("AI explain failed, using mock:", e instanceof Error ? e.message : e);
+    ai = mockAdapter;
+    return mockAdapter.explain(parsed.data, output);
+  });
 
   const result: AnalysisResult = { ...output, explanation, dataSource: ai.name };
   return Response.json(result);
