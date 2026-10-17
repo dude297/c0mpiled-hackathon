@@ -23,6 +23,8 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
+        "android.permission.CAMERA",
+        "android.permission.CAMERA",
         "android.permission.CAMERA"
       ]
     },
@@ -58,6 +60,9 @@
     },
     "updates": {
       "url": "https://u.expo.dev/2a05e56a-99a8-40b9-bec1-3421b250593d"
+    },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
     }
   }
 }
