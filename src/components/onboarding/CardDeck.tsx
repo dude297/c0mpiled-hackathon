@@ -558,7 +558,7 @@ export function CardDeck({
 
   return (
     <div ref={rootRef} className={`mx-auto w-full min-w-0 ${showGrid ? "max-w-3xl" : "max-w-md"} overflow-x-clip p-4 text-base md:text-lg`}>
-      {onDemo && index === 0 && !showGrid && (
+      {onDemo && index === 0 && editing === null && (
         <div className="mb-3 grid grid-cols-2 gap-2">
           <Button size="lg" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("margaret")} disabled={loading}>Demo: Margaret</Button>
           <Button size="lg" variant="outline" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("harold")} disabled={loading}>Demo: Harold</Button>
