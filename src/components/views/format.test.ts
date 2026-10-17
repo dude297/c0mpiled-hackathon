@@ -21,7 +21,7 @@ describe("plain words", () => {
     expect(travelPlain("paratransit, 30 min").text).toBe("Senior shuttle, about 30 min");
     expect(travelPlain("odd").text).toBe("Odd");
   });
-  it("meta line, no chips", () => expect(metaLine(item("a", "Wed afternoon", [], 5))).toBe("Wed afternoon · Bus, about 15 min · $5 a week"));
+  it("meta line, no chips", () => expect(metaLine(item("a", "Wed afternoon", [], 5))).toBe("Wednesday afternoon · Bus, about 15 min · $5 a week"));
   it("heads-up text", () => {
     expect(headsUpText(soft("transport", "Paratransit, 30 min", "Book the ride 24 hours ahead"))).toEqual({
       detail: "Senior shuttle, about 30 min", tip: "Book the ride 24 hours ahead",
@@ -40,11 +40,11 @@ describe("cardHeadsUp", () => {
 });
 
 describe("didntFitReason", () => {
-  it("too far", () => expect(didntFitReason([hard("transport", "Fastest option is bus at 45 min; limit is 30 min")])).toBe("Too far: 45 min, your limit is 30"));
+  it("too far", () => expect(didntFitReason([hard("transport", "Fastest option is bus at 45 min; limit is 30 min")])).toBe("Too far: the bus takes about 45 min, over your 30-minute limit"));
   it("no route", () => expect(didntFitReason([hard("transport", "No way to get there using bus/family")])).toBe("No way to get there by bus or family ride"));
-  it("time", () => expect(didntFitReason([hard("time", "Meets Thu evening; Margaret is only available morning/afternoon")])).toBe("Meets Thu evening, outside the times you picked"));
+  it("time", () => expect(didntFitReason([hard("time", "Meets Thu evening; Margaret is only available morning/afternoon")])).toBe("Meets Thursday evenings. You're free mornings and afternoons"));
   it("stairs", () => expect(didntFitReason([hard("access", "Entrance has stairs; Margaret uses a walker")])).toBe("Entrance has stairs, no step-free way in"));
-  it("cost", () => expect(didntFitReason([hard("cost", "$15/week exceeds the $10 budget")])).toBe("Costs $15 a week, over the $10 budget"));
+  it("cost", () => expect(didntFitReason([hard("cost", "$15/week exceeds the $10 budget")])).toBe("Costs $15 a week, over your $10 budget"));
   it("first hard one wins, soft ignored", () => expect(didntFitReason([soft("s", "soft"), hard("x", "Something else")])).toBe("Something else"));
   it("count label", () => {
     expect(didntFitLabel(1)).toBe("1 activity didn't fit — see why");

@@ -6,7 +6,8 @@ import { useState } from "react";
 import { PlanStatusLabel } from "@/components/shell/PlanStatusLabel";
 import { ProfileGate } from "@/components/shell/ProfileGate";
 import { FOCUS } from "@/components/shell/focus";
-import { personLabel, useDeviceStore, usePlanStatus } from "@/components/shell/store";
+import { personLabel, personName, useDeviceStore, usePlanStatus } from "@/components/shell/store";
+import { whenText, withoutFallbackName } from "@/components/views/copy";
 import { writeProfileHandoff } from "./handoff";
 import {
   activityHref, aiLabel, attentionRows, greeting, homePrimary, nextOuting, noMatchReason, todayIndex, travelLine, weekItems, weekLine, weekStrip,
@@ -29,20 +30,23 @@ function HomeContent() {
   // Mounted only after the store is ready (client), so reading the clock here never runs during prerender.
   const [now] = useState(() => new Date());
   const name = personLabel(s);
+  // Real first name or null: a blank name is "you", never the "Friend" fallback.
+  const person = personName(s);
   const handoff = () => writeProfileHandoff(s.profile);
 
   const items = weekItems(s.result, s.week);
   const today = todayIndex(now);
   const next = nextOuting(items, today);
   const primary = homePrimary(items, next, ps.statusFor, ps.unavailable);
-  const rows = attentionRows({ items, statusFor: ps.statusFor, viewFor: ps.viewFor, dropped: s.dropped, unavailable: ps.unavailable });
+  const rows = attentionRows({ items, statusFor: ps.statusFor, viewFor: ps.viewFor, dropped: s.dropped, unavailable: ps.unavailable, person });
   const moreMatches = s.result ? s.result.plan.filter((i) => !s.week.includes(i.activityId)).length : 0;
 
   return (
     <div className="space-y-8">
       <header className="space-y-1">
         <h1 className="text-[2.25rem] font-semibold leading-tight break-words">
-          {greeting(now.getHours())}, {name}
+          {greeting(now.getHours())}
+          {person ? `, ${person}` : ""}
         </h1>
         {s.person !== "me" && <p className="text-[1rem] text-muted-foreground">{name} is a sample person (demo data).</p>}
         {!s.storageOk && <p className="text-[1rem] text-muted-foreground">This browser won&apos;t remember your answers.</p>}
@@ -90,7 +94,7 @@ function HomeContent() {
                     {next.name}
                   </Link>
                   <p className="text-lg text-foreground/80">
-                    {next.when} · {travelLine(next.travel)}
+                    {whenText(next.when)} · {travelLine(next.travel)}
                   </p>
                   {ps.unavailable ? (
                     <p className="text-[1rem] text-muted-foreground">Live status and Get me there aren&apos;t available on this server.</p>
@@ -138,7 +142,7 @@ function HomeContent() {
             {s.result.explanation.trim() && (
               <Disclosure summary="Why these?">
                 <p className="text-[1rem] text-muted-foreground">{aiLabel(s.result.dataSource)}</p>
-                <p className="text-lg whitespace-pre-line">{s.result.explanation}</p>
+                <p className="text-lg whitespace-pre-line">{withoutFallbackName(s.result.explanation, person)}</p>
               </Disclosure>
             )}
           </div>

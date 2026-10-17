@@ -6,7 +6,7 @@ import Link from "next/link";
 import { Check, CircleX } from "lucide-react";
 import { FOCUS } from "@/components/shell/focus";
 import { ProfileGate } from "@/components/shell/ProfileGate";
-import { coordinateHref, useDeviceStore, usePlanStatus } from "@/components/shell/store";
+import { coordinateHref, personName, useDeviceStore, usePlanStatus } from "@/components/shell/store";
 import type { AnalysisResult, PlanItem } from "@/lib/schema";
 import { AnalyzeLine, HeadsUpRow, QUIET_LINK, SampleNote } from "./bits";
 import { cardHeadsUp, didntFitLabel, didntFitReason, metaLine, sortMatches } from "./format";
@@ -24,7 +24,9 @@ export function MatchesView() {
 }
 
 function Matches() {
-  const { result, week, toggleWeek, profile } = useDeviceStore();
+  const store = useDeviceStore();
+  const { result, week, toggleWeek, profile } = store;
+  const person = personName(store);
   const ps = usePlanStatus();
   // Order is fixed per result so a card doesn't jump away when it's added.
   const [order, setOrder] = useState<{ result: AnalysisResult | null; ids: string[] }>({ result: null, ids: [] });
@@ -83,7 +85,7 @@ function Matches() {
                     <CircleX className="mt-1 size-5 shrink-0 text-red-700 dark:text-red-400" aria-hidden="true" />
                     <span>
                       <span className="font-medium">Didn&apos;t fit: </span>
-                      {didntFitReason(b.barriers)}
+                      {didntFitReason(b.barriers, person)}
                     </span>
                   </p>
                 </div>

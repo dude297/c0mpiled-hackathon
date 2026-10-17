@@ -3,13 +3,13 @@
 // Small pieces shared by the Matches, Calendar and Profile views.
 import { TriangleAlert } from "lucide-react";
 import { FOCUS } from "@/components/shell/focus";
-import { personLabel, useDeviceStore } from "@/components/shell/store";
+import { personLabel, personName, useDeviceStore } from "@/components/shell/store";
 import type { Barrier } from "@/lib/schema";
 import { headsUpText } from "./format";
 
 /** Heads-up row: white, 4px amber left rule, icon + word. Never an amber fill. */
 export function HeadsUpRow({ barrier }: { barrier: Barrier }) {
-  const { detail, tip } = headsUpText(barrier);
+  const { detail, tip } = headsUpText(barrier, personName(useDeviceStore()));
   return (
     <p className="flex items-start gap-2 border-l-4 border-amber-600 py-1 pl-3 dark:border-amber-400">
       <TriangleAlert className="mt-1 size-5 shrink-0 text-amber-700 dark:text-amber-400" aria-hidden="true" />

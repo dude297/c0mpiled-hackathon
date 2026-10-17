@@ -1,32 +1,20 @@
 // Plain-words formatting for U3 Matches, U4 Calendar and U6 Profile. Pure: unit-tested in format.test.ts.
 import { DAYS, placeOnWeek, type Day, type Slot } from "@/components/calendar/WeekCalendar";
-import { DAY_NAMES, MODE_WORDS, costWords, money, softBarrierText, weekItems } from "@/components/home/home-model";
+import { DAY_NAMES, costWords, money, softBarrierText, weekItems } from "@/components/home/home-model";
 import { INTEREST_META, TRANSPORT_OPTIONS, TRAVEL_BUCKETS, WALKING_AID_OPTIONS } from "@/components/onboarding/CardDeck";
 import type { Barrier, PlanItem, Profile } from "@/lib/schema";
+import { NO_NAME, barrierText, realName, travelPlain, whenText } from "./copy";
 
 // Day names, mode words, cost and the week list are shared with Home / Activity (home-model) so every screen says the same thing.
-export { DAY_NAMES, weekItems };
+// Engine strings become plain words in copy.ts (one place, unit-tested).
+export { DAY_NAMES, weekItems, travelPlain };
 export const SLOT_WORDS: Record<Slot, string> = { morning: "Morning", afternoon: "Afternoon", evening: "Evening" };
-
-const MODE_PHRASE: Record<string, string> = {
-  drive: "driving", bus: "bus", paratransit: "senior shuttle", family: "family ride", walk: "walking",
-};
-
-const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 /** "Free" or "$5 a week". */
 export const costPlain = costWords;
 
-/** Engine travel "bus, 25 min" → { mode: "Bus", text: "Bus, about 25 min" }. Unknown shapes are shown as given. */
-export function travelPlain(travel: string): { mode: string; text: string } {
-  const m = /^\s*([a-z]+)\s*,\s*(\d+)\s*min/i.exec(travel ?? "");
-  if (!m) return { mode: cap(travel ?? ""), text: cap(travel ?? "") };
-  const mode = MODE_WORDS[m[1].toLowerCase() as keyof typeof MODE_WORDS] ?? cap(m[1]);
-  return { mode, text: `${mode}, about ${m[2]} min` };
-}
-
-/** One meta line for a match card: "Wed afternoon · Bus, about 15 min · Free". */
-export const metaLine = (item: PlanItem) => [item.when, travelPlain(item.travel).text, costPlain(item.costPerWeek)].join(" · ");
+/** One meta line for a match card: "Wednesday afternoon · Bus, about 15 min · Free". */
+export const metaLine = (item: PlanItem) => [whenText(item.when), travelPlain(item.travel).text, costPlain(item.costPerWeek)].join(" · ");
 
 /** A soft barrier in plain words: what to expect + what helps (same words as Home and Activity). */
 export const headsUpText = softBarrierText;
@@ -37,23 +25,10 @@ export function cardHeadsUp(item: PlanItem): { first: Barrier | null; more: numb
   return { first: soft[0] ?? null, more: Math.max(0, soft.length - 1) };
 }
 
-/** First hard reason an activity didn't fit, in plain words ("Too far: 45 min, your limit is 30"). */
-export function didntFitReason(barriers: Barrier[]): string {
+/** First hard reason an activity didn't fit, in plain words ("Costs $20 a week, over your $10 budget"). `person` = real name or null. */
+export function didntFitReason(barriers: Barrier[], person: string | null = null): string {
   const b = barriers.find((x) => x.severity === "hard");
-  if (!b) return "Didn't fit your answers";
-  const far = /Fastest option is \w+ at (\d+) min; limit is (\d+) min/.exec(b.detail);
-  if (far) return `Too far: ${far[1]} min, your limit is ${far[2]}`;
-  const noWay = /No way to get there using (.+)$/.exec(b.detail);
-  if (noWay) {
-    const modes = noWay[1].split("/").map((m) => MODE_PHRASE[m.trim()] ?? m.trim());
-    return `No way to get there by ${modes.join(" or ")}`;
-  }
-  const time = /^Meets (\w+) (morning|afternoon|evening);/.exec(b.detail);
-  if (time) return `Meets ${time[1]} ${time[2]}, outside the times you picked`;
-  if (/^Entrance has stairs/.test(b.detail)) return "Entrance has stairs, no step-free way in";
-  const cost = /^\$(\S+)\/week exceeds the \$(\S+) budget/.exec(b.detail);
-  if (cost) return `Costs $${cost[1]} a week, over the $${cost[2]} budget`;
-  return b.detail;
+  return b ? barrierText(b, person) : `Didn't fit ${person ? `${person}'s` : "your"} answers`;
 }
 
 /** Matches not yet in the week first; otherwise the engine's order. */
@@ -111,7 +86,7 @@ export function budgetText(amount: number): string {
 /** Answers as plain rows. Labels match the onboarding review ("Here's what we heard"). */
 export function profileRows(p: Profile): ProfileRow[] {
   return [
-    { field: "name", label: "Name", value: p.name, optional: false },
+    { field: "name", label: "Name", value: realName(p.name) ?? "Not given", optional: false },
     { field: "interests", label: "What you enjoy", value: labelsOf(INTEREST_META, p.interests), optional: false },
     { field: "times", label: "When you're free", value: labelsOf(TIME_CHOICES, p.times), optional: false },
     { field: "maxTravelMin", label: "How far", value: travelText(p.maxTravelMin), optional: false },
@@ -131,5 +106,5 @@ export function draftProblem(p: Profile): string | null {
   return null;
 }
 
-/** Blank name → "Friend" (same rule as onboarding). */
-export const cleanName = (name: string) => name.trim().slice(0, 60) || "Friend";
+/** Blank name is stored as the onboarding fallback (the schema needs one); screens never show it (see copy.ts realName). */
+export const cleanName = (name: string) => name.trim().slice(0, 60) || NO_NAME;

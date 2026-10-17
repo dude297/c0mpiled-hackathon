@@ -4,6 +4,7 @@ import { coordinateHref, type DroppedOuting, type Mode, type PlanStatus, type St
 import type { Activity } from "@/domain/activities";
 import { money } from "@/components/feed/MatchFeed";
 import type { AnalysisResult, Barrier, PlanItem, Profile } from "@/lib/schema";
+import { TRAVEL_WORDS, barrierText, headsUp, travelPlain, travelText } from "@/components/views/copy";
 
 export { money };
 
@@ -12,16 +13,9 @@ export const DAY_NAMES: Record<Day, string> = {
 };
 
 type Transport = Profile["transport"][number];
-export const MODE_WORDS: Record<Transport, string> = {
-  drive: "Driving",
-  bus: "Bus",
-  paratransit: "Senior shuttle",
-  family: "Ride from family",
-  walk: "Walking",
-};
+export const MODE_WORDS = TRAVEL_WORDS as Record<Transport, string>;
 
 const lowerFirst = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s);
-const trimDot = (s: string) => s.trim().replace(/\.+$/, "");
 
 /** "Free" or "$5 a week" (U5 header). */
 export const costWords = (n: number) => (n === 0 ? "Free" : `${money(n)} a week`);
@@ -34,19 +28,10 @@ export function weekLine(items: Pick<PlanItem, "costPerWeek">[]): string {
 }
 
 /** Engine travel "bus, 15 min" → "Bus, about 15 min". Unknown shapes pass through. */
-export function travelLine(travel: string): string {
-  const m = /^\s*([a-z]+),\s*(\d+)\s*min\s*$/i.exec(travel);
-  if (!m) return travel;
-  const mode = m[1].toLowerCase() as Transport;
-  return `${MODE_WORDS[mode] ?? m[1]}, about ${m[2]} min`;
-}
+export const travelLine = (travel: string) => travelPlain(travel).text;
 
-/** A soft barrier in plain words (same on every screen): what to expect + what helps. */
-export function softBarrierText(b: Pick<Barrier, "rule" | "detail" | "mitigation">): { detail: string; tip: string | null } {
-  const raw = trimDot(b.detail);
-  const detail = /^\s*[a-z]+,\s*\d+\s*min\s*$/i.test(raw) ? travelLine(raw) : b.rule === "social" ? "Large group" : raw;
-  return { detail, tip: b.mitigation ? trimDot(b.mitigation) : null };
-}
+/** A soft barrier in plain words (same on every screen): what to expect + what helps. `person` = real name or null ("you"). */
+export const softBarrierText = (b: Pick<Barrier, "rule" | "detail" | "mitigation">, person: string | null = null) => headsUp(b, person);
 
 export const travelMode = (travel: string): Transport | null => {
   const m = /^\s*([a-z]+),/i.exec(travel);
@@ -60,7 +45,7 @@ export function otherWays(activity: Pick<Activity, "travelMin">, chosen: Transpo
   return (Object.keys(MODE_WORDS) as Transport[])
     .filter((m) => m !== chosen && activity.travelMin[m] !== undefined && (m !== "walk" || canWalk))
     .sort((a, b) => activity.travelMin[a]! - activity.travelMin[b]!)
-    .map((m) => `${lowerFirst(MODE_WORDS[m])}, about ${activity.travelMin[m]} min`);
+    .map((m) => travelText(m, activity.travelMin[m]!));
 }
 
 /** Monday = 0 … Sunday = 6. */
@@ -138,8 +123,11 @@ export function attentionRows(opts: {
   viewFor: (activityId: string) => StatusView;
   dropped: DroppedOuting[];
   unavailable: boolean;
+  /** Real first name, or null to say "you". */
+  person?: string | null;
 }): AttentionRow[] {
   const { items, statusFor, viewFor, dropped, unavailable } = opts;
+  const person = opts.person ?? null;
   const rows: AttentionRow[] = [];
   if (!unavailable) {
     items
@@ -158,17 +146,17 @@ export function attentionRows(opts: {
   for (const d of dropped) {
     rows.push({
       key: `dropped-${d.activityId}`,
-      text: d.reason ? `${d.name} no longer fits: ${lowerFirst(trimDot(d.reason))}.` : `${d.name} no longer fits your answers.`,
+      text: d.reason ? `${d.name} no longer fits. ${barrierText({ detail: d.reason }, person)}.` : `${d.name} no longer fits ${person ? `${person}'s` : "your"} answers.`,
       link: { label: "See matches", href: "/matches", coordinate: false },
     });
   }
   for (const i of items) {
     const b = i.barriers.find((x) => x.severity === "soft");
     if (!b) continue;
-    const { detail, tip } = softBarrierText(b);
+    const { detail, tip } = softBarrierText(b, person);
     rows.push({
       key: `soft-${i.activityId}`,
-      text: `${i.name}: ${lowerFirst(detail)}.${tip ? ` ${tip}.` : ""}`,
+      text: `${i.name}: ${detail}.${tip ? ` ${tip}.` : ""}`,
       link: { label: "See details", href: activityHref(i.activityId, "home"), coordinate: false },
     });
     break;
@@ -209,16 +197,18 @@ export function backLink(from: string | null, mode: Mode): { label: string; href
 export const activityHref = (id: string, from?: BackTarget) => `/activity/${encodeURIComponent(id)}${from ? `?from=${from}` : ""}`;
 
 /** "How we checked" lines for one activity: evidence whose claim starts with "{name}: ". Never labeled "Verified". */
-export function checksFor(result: AnalysisResult | null, name: string): { text: string; passed: boolean }[] {
+export function checksFor(result: AnalysisResult | null, name: string, person: string | null = null): { text: string; passed: boolean }[] {
   if (!result) return [];
   const prefix = `${name}: `;
-  return result.evidence.filter((e) => e.claim.startsWith(prefix)).map((e) => ({ text: e.claim.slice(prefix.length), passed: e.verified }));
+  return result.evidence
+    .filter((e) => e.claim.startsWith(prefix))
+    .map((e) => ({ text: barrierText({ detail: e.claim.slice(prefix.length) }, person), passed: e.verified }));
 }
 
 /** First hard reason an activity didn't fit, if the last result says so. */
-export function didntFitReason(result: AnalysisResult | null, name: string): string | null {
+export function didntFitReason(result: AnalysisResult | null, name: string, person: string | null = null): string | null {
   const b = result?.blocked.find((x) => x.name === name)?.barriers.find((x) => x.severity === "hard");
-  return b ? trimDot(b.detail) : null;
+  return b ? barrierText(b, person) : null;
 }
 
 /** Plain access facts from ACTIVITIES (estimates). */

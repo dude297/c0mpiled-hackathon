@@ -7,7 +7,8 @@ import { useParams, useSearchParams } from "next/navigation";
 import { Check } from "lucide-react";
 import { PlanStatusLabel } from "@/components/shell/PlanStatusLabel";
 import { ProfileGate } from "@/components/shell/ProfileGate";
-import { coordinateHref, personLabel, useDeviceStore, usePlanStatus } from "@/components/shell/store";
+import { coordinateHref, personLabel, personName, useDeviceStore, usePlanStatus } from "@/components/shell/store";
+import { whenText } from "@/components/views/copy";
 import { ACTIVITIES } from "@/domain/activities";
 import { writeProfileHandoff } from "./handoff";
 import {
@@ -49,15 +50,16 @@ function Detail({ id, from }: { id: string; from: string | null }) {
   }
 
   const name = personLabel(s);
+  const person = personName(s);
   const caregiver = s.mode === "caregiver";
   const item = s.result?.plan.find((i) => i.activityId === id) ?? null;
   const inWeek = s.week.includes(id);
-  const when = item?.when ?? `${activity.day} ${activity.time}`;
+  const when = whenText(item?.when ?? `${activity.day} ${activity.time}`);
   const mode = item ? travelMode(item.travel) : null;
   const others = otherWays(activity, mode, s.profile?.mobility ?? null);
   const soft = item?.barriers.filter((b) => b.severity === "soft") ?? [];
-  const passed = checksFor(s.result, activity.name).filter((c) => c.passed);
-  const reason = item ? null : didntFitReason(s.result, activity.name);
+  const passed = checksFor(s.result, activity.name, person).filter((c) => c.passed);
+  const reason = item ? null : didntFitReason(s.result, activity.name, person);
 
   const view = ps.viewFor(id);
   const status = ps.statusFor(id);
@@ -80,7 +82,7 @@ function Detail({ id, from }: { id: string; from: string | null }) {
         {item && !ps.unavailable && <PlanStatusLabel view={view} className="text-lg" />}
         {!item && (
           <p className="text-lg">
-            Not in your matches{reason ? `: ${reason[0].toLowerCase()}${reason.slice(1)}` : ""}.
+            Not in your matches.{reason ? ` ${reason}.` : ""}
           </p>
         )}
       </header>
@@ -103,7 +105,7 @@ function Detail({ id, from }: { id: string; from: string | null }) {
           {soft.length ? (
             <ul className="space-y-4">
               {soft.map((b) => {
-                const { detail, tip } = softBarrierText(b);
+                const { detail, tip } = softBarrierText(b, person);
                 return (
                   <HeadsUpRow key={b.rule}>
                     <p className="text-lg">{detail}</p>

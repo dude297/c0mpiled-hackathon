@@ -36,12 +36,12 @@ describe("week lines", () => {
   it("turns engine travel into plain words", () => {
     expect(travelLine("bus, 15 min")).toBe("Bus, about 15 min");
     expect(travelLine("paratransit, 30 min")).toBe("Senior shuttle, about 30 min");
-    expect(travelLine("somehow")).toBe("somehow");
+    expect(travelLine("somehow")).toBe("Somehow");
   });
   it("lists other ways, never walking for a walker user", () => {
     const a = { travelMin: { drive: 6, bus: 15, walk: 20 } };
-    expect(otherWays(a, "bus", "full")).toEqual(["driving, about 6 min", "walking, about 20 min"]);
-    expect(otherWays(a, "bus", "walker")).toEqual(["driving, about 6 min"]);
+    expect(otherWays(a, "bus", "full")).toEqual(["Drive, about 6 min", "Walk, about 20 min"]);
+    expect(otherWays(a, "bus", "walker")).toEqual(["Drive, about 6 min"]);
   });
 });
 
@@ -122,20 +122,20 @@ describe("attentionRows", () => {
     expect(rows.map((r) => r.text)).toEqual([
       "Cards on Wednesday: needs a new plan.",
       "Choir on Tuesday: needs your OK.",
-      "Sewing no longer fits: entrance has stairs; Margaret uses a walker.",
+      "Sewing no longer fits. Entrance has stairs, no step-free way in.",
     ]);
     expect(rows[0].link).toEqual({ label: "Fix my plan", href: "/coordinate?activityId=cards&planId=p-cards", coordinate: true });
   });
   it("shows one soft barrier with what helps", () => {
     const rows = attentionRows({ items: [{ ...choir, barriers: [soft] }, { ...garden, barriers: [soft] }], statusFor: statuses({}), viewFor: views({}), dropped: [], unavailable: false });
     expect(rows).toHaveLength(1);
-    expect(rows[0].text).toBe("Choir: noisy room, no hearing loop. Sit near the leader.");
+    expect(rows[0].text).toBe("Choir: Noisy room, no hearing loop. Sit near the leader.");
     expect(rows[0].link.href).toBe("/activity/choir?from=home");
   });
   it("words a travel barrier the same way Matches does", () => {
     const ride = { rule: "transport", severity: "soft" as const, detail: "paratransit, 30 min." };
     const rows = attentionRows({ items: [{ ...choir, barriers: [ride] }], statusFor: statuses({}), viewFor: views({}), dropped: [], unavailable: false });
-    expect(rows[0].text).toBe("Choir: senior shuttle, about 30 min.");
+    expect(rows[0].text).toBe("Choir: Senior shuttle, about 30 min.");
     expect(softBarrierText({ rule: "social", detail: "large group; prefers small groups" })).toEqual({ detail: "Large group", tip: null });
   });
   it("hides status rows when live status is unavailable", () => {
@@ -161,7 +161,7 @@ describe("U5 helpers", () => {
     expect(checksFor(null, "Choir")).toEqual([]);
   });
   it("finds the first hard reason and the most common one", () => {
-    expect(didntFitReason(r, "Bridge")).toBe("Entrance has stairs; Margaret uses a walker");
+    expect(didntFitReason(r, "Bridge")).toBe("Entrance has stairs, no step-free way in");
     expect(didntFitReason(r, "Choir")).toBeNull();
     expect(noMatchReason(r)).toBe("Nothing fits yet: most were too far.");
     expect(noMatchReason(result([]))).toBe("Nothing fits yet.");

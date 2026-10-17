@@ -6,6 +6,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { FOCUS } from "@/components/shell/focus";
 import { StartHere } from "@/components/shell/ProfileGate";
+import { possessive } from "@/components/care/care-model";
 import { personLabel, useDeviceStore } from "@/components/shell/store";
 import { INTEREST_META, TRANSPORT_OPTIONS, TRAVEL_BUCKETS, WALKING_AID_OPTIONS } from "@/components/onboarding/CardDeck";
 import type { Profile } from "@/lib/schema";
@@ -18,7 +19,7 @@ export function ProfileView() {
   const [undo, setUndo] = useState<Snapshot | null>(null);
   const closeUndo = useCallback(() => setUndo(null), []);
   const caregiver = s.mode === "caregiver";
-  const title = s.ready && caregiver && s.profile ? `${personLabel(s)}'s answers` : "Your answers";
+  const title = s.ready && caregiver && s.profile ? `${possessive(personLabel(s))} answers` : "Your answers";
 
   return (
     <div className="space-y-6 pb-24">
@@ -107,7 +108,7 @@ function Answers({ onStartOver }: { onStartOver: (s: Snapshot) => void }) {
         >
           Start over
         </button>
-        <p className="text-base text-muted-foreground">Clears {personLabel(store)}&apos;s answers on this browser. Other people are kept.</p>
+        <p className="text-base text-muted-foreground">Clears {possessive(personLabel(store)).replace(/^Your$/, "your")} answers on this browser. Other people are kept.</p>
       </div>
     </div>
   );

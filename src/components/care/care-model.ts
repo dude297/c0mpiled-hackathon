@@ -1,20 +1,14 @@
 // C1 caregiver dashboard model (docs/product/SCREENS.md "C1", journeys/caregiver.md). Pure: no React, no window.
 import { ACTIVITIES } from "@/domain/activities";
 import type { AnalysisResult, CoordinationPlan, Dependency } from "@/lib/schema";
+import { barrierText, whenText } from "@/components/views/copy";
 import { coordinateHref, planStatusView, type PlanStatus, type StatusView } from "@/components/shell/helpers";
 
 const DAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
-const DAY_NAMES: Record<(typeof DAY_ORDER)[number], string> = {
-  mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday",
-};
 const SLOT_ORDER = ["morning", "afternoon", "evening"] as const;
 
 /** "Wed afternoon" → "Wednesday afternoon"; anything else is shown as given. */
-export function dayAndTime(when: string): string {
-  const m = /^\s*([a-z]{3})[a-z]*\s+(morning|afternoon|evening)\s*$/i.exec(when ?? "");
-  const day = m ? DAY_NAMES[m[1].toLowerCase() as keyof typeof DAY_NAMES] : undefined;
-  return day && m ? `${day} ${m[2].toLowerCase()}` : when;
-}
+export const dayAndTime = (when: string): string => whenText(when);
 
 /** Sort key: day of week, then time of day; unparseable times go last. */
 function whenRank(when: string): number {
@@ -137,7 +131,7 @@ export function buildCareModel(input: CareInput): CareModel {
     text: o.status.state === "NEEDS_REPLAN" ? replanText(o.status.plan, o.name) : `${o.name} can't go as planned.`,
     detail:
       o.status.state === "BLOCKED" && o.status.plan?.blockers[0]
-        ? `${o.whenLabel} · ${o.status.plan.blockers[0].detail}`
+        ? `${o.whenLabel} · ${barrierText(o.status.plan.blockers[0], name === "You" ? null : name)}`
         : o.whenLabel,
   }));
 

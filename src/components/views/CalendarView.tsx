@@ -8,6 +8,7 @@ import { SLOTS, placeOnWeek, weekSummary, type Day } from "@/components/calendar
 import { FOCUS } from "@/components/shell/focus";
 import { PlanStatusLabel } from "@/components/shell/PlanStatusLabel";
 import { ProfileGate } from "@/components/shell/ProfileGate";
+import { possessive } from "@/components/care/care-model";
 import { personLabel, useDeviceStore, usePlanStatus, type PlanStatusApi } from "@/components/shell/store";
 import type { PlanItem } from "@/lib/schema";
 import { AnalyzeLine, QUIET_LINK, SECONDARY_BTN, SampleNote } from "./bits";
@@ -26,7 +27,7 @@ function readView(): ViewChoice {
 
 export function CalendarView() {
   const s = useDeviceStore();
-  const title = s.ready && s.mode === "caregiver" && s.profile ? `${personLabel(s)}'s week` : "Your week";
+  const title = s.ready && s.mode === "caregiver" && s.profile ? `${possessive(personLabel(s))} week` : "Your week";
   return (
     <div className="space-y-6">
       <h1 className="text-[2.25rem] font-semibold leading-tight">{title}</h1>

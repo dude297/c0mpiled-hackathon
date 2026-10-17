@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { DEMO_PROFILES } from "@/domain/activities";
 import { createDeviceStore, INITIAL_STATE, type DeviceState, type DeviceStore } from "./device-store";
 import { NOT_STARTED, planStatusView, type PlanStatus, type StatusView } from "./helpers";
+import { realName } from "@/components/views/copy";
 
 export type { DeviceState, DeviceStore } from "./device-store";
 export type { Active, DroppedOuting, Mode, PersonKey, PlanMap, PlanStatus, StatusIcon, StatusView, StoredResult } from "./helpers";
@@ -76,11 +77,14 @@ export function useDeviceStore(): DeviceState & Omit<DeviceStore, "getState" | "
   };
 }
 
-/** Display name for the active person: their answers' name, else "You" / the sample's name. */
-export function personLabel(state: Pick<DeviceState, "person" | "profile">): string {
-  if (state.profile?.name) return state.profile.name;
-  return state.person === "me" ? "You" : DEMO_PROFILES[state.person]?.name ?? "You";
+/** The active person's real first name, or null when they left it blank (never the "Friend" fallback). */
+export function personName(state: Pick<DeviceState, "person" | "profile">): string | null {
+  if (state.profile) return realName(state.profile.name);
+  return state.person === "me" ? null : realName(DEMO_PROFILES[state.person]?.name);
 }
+
+/** Display name for the active person: their real name, else "You". */
+export const personLabel = (state: Pick<DeviceState, "person" | "profile">): string => personName(state) ?? "You";
 
 export type PlanStatusApi = {
   /** Status for an outing; Not started when there is no saved plan id. */
@@ -110,7 +114,7 @@ export function usePlanStatus(): PlanStatusApi {
     };
   }, [store, state.ready, state.person, planKey]);
 
-  const name = personLabel(state);
+  const name = personName(state) ?? "them";
   const statusFor = (activityId: string) => state.planStatus[activityId] ?? NOT_STARTED;
   return {
     statusFor,

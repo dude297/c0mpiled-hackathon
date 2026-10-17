@@ -139,7 +139,7 @@ export function planStatusView(state: PlanState | null, mode: Mode = "user", nam
   switch (state) {
     case "NEEDS_REPLAN": return { word: "Needs a new plan", icon: "alert", attention: 1, action: "Fix my plan", resume: true };
     case "BLOCKED": return { word: "Can't go as planned", icon: "alert", attention: 2, action: "See what's in the way", resume: true };
-    case "AWAITING_APPROVAL": return { word: mode === "caregiver" ? `Needs ${name}'s OK` : "Needs your OK", icon: "pending", attention: 3, action: "Continue my plan", resume: true };
+    case "AWAITING_APPROVAL": return { word: mode === "caregiver" ? `Needs ${name === "them" || name === "You" ? "their" : `${name}'s`} OK` : "Needs your OK", icon: "pending", attention: 3, action: "Continue my plan", resume: true };
     case "PROPOSED": return { word: "Plan started, not confirmed", icon: "pending", attention: 0, action: "Continue my plan", resume: true };
     case "PENDING_CONFIRMATION": return { word: "Waiting for replies", icon: "waiting", attention: 0, action: "See status", resume: true };
     case "READY": return { word: "Ready", icon: "check", attention: 0, action: "See plan", resume: true };
