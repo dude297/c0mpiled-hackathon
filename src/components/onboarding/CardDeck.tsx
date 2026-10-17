@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, Heart, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, Check, Heart, LoaderCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Profile } from "@/lib/schema";
 
@@ -121,6 +121,18 @@ export function pickedToHistory(picked: readonly InterestKey[], answeredCount: n
   }));
 }
 
+// Fast double-taps land on the next card's button (same spot), so ignore answers
+// arriving within this window of the previous one.
+export const ANSWER_LOCKOUT_MS = 350;
+
+export function isLockedOut(lastAt: number, now: number): boolean {
+  return now - lastAt < ANSWER_LOCKOUT_MS;
+}
+
+// Strong focus ring (outline-solid overrides the shadcn Button's outline-none).
+const RING =
+  "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-foreground";
+
 export const SWIPE_THRESHOLD = 48;
 
 export function swipeDirection(distance: number): 1 | -1 | null {
@@ -188,12 +200,13 @@ function ActionRow({ onLike, onDislike, disabled, bigButtons }: {
   disabled?: boolean;
   bigButtons: boolean;
 }) {
+  const size = bigButtons ? "min-h-20 text-2xl [&_svg]:!size-7" : "min-h-14 text-lg";
   return (
-    <div className="grid grid-cols-2 gap-3 py-4">
-      <Button variant="outline" size="lg" className={`${bigButtons ? "min-h-16" : "min-h-14"} rounded-xl text-lg`} onClick={onDislike} disabled={disabled}>
+    <div className={`grid ${bigButtons ? "grid-cols-1" : "grid-cols-2"} gap-3 py-4`}>
+      <Button variant="outline" size="lg" className={`${size} rounded-xl ${RING}`} onClick={onDislike} disabled={disabled}>
         <X aria-hidden="true" /> No
       </Button>
-      <Button size="lg" className={`${bigButtons ? "min-h-16" : "min-h-14"} rounded-xl text-lg`} onClick={onLike} disabled={disabled}>
+      <Button size="lg" className={`${size} rounded-xl ${RING}`} onClick={onLike} disabled={disabled}>
         <Heart aria-hidden="true" /> Yes
       </Button>
     </div>
@@ -207,10 +220,10 @@ function InterestGrid({ picked, onToggle, onClear, onContinue, disabled }: {
   onContinue: () => void;
   disabled: boolean;
 }) {
-  const pill = "min-h-12 rounded-full border-2 border-[#121212] px-6 text-lg font-semibold disabled:opacity-50 dark:border-white";
+  const pill = `min-h-12 shrink-0 whitespace-nowrap rounded-full border-2 border-[#121212] px-4 text-lg sm:px-6 font-semibold disabled:opacity-50 dark:border-white ${RING}`;
   return (
     <section aria-labelledby="interest-grid-heading">
-      <h2 id="interest-grid-heading" className="mb-4 text-xl font-semibold md:text-2xl">
+      <h2 id="interest-grid-heading" tabIndex={-1} data-step-focus className="mb-4 text-xl font-semibold outline-none md:text-2xl">
         What do you enjoy? Pick as many as you like.
       </h2>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
@@ -223,7 +236,9 @@ function InterestGrid({ picked, onToggle, onClear, onContinue, disabled }: {
               aria-pressed={on}
               disabled={disabled}
               onClick={() => onToggle(m.key)}
-              className={`relative flex min-h-24 min-w-0 flex-col items-center justify-center gap-1 rounded-xl p-3 text-center text-lg font-bold leading-tight break-words transition-colors motion-reduce:transition-none md:text-xl ${on ? "bg-[#5a594e] text-white" : "bg-[#efefe6] text-[#121212] hover:bg-[#e2e2d6]"}`}
+              // Tab doesn't scroll a tile that is already in the viewport, even when the sticky bar covers it.
+              onFocus={(e) => { if (e.currentTarget.matches(":focus-visible")) e.currentTarget.scrollIntoView({ block: "nearest" }); }}
+              className={`relative flex min-h-24 min-w-0 scroll-mb-32 flex-col items-center justify-center gap-1 rounded-xl p-3 text-center text-lg font-bold leading-tight break-words transition-colors motion-reduce:transition-none md:text-xl ${RING} ${on ? "bg-[#5a594e] text-white" : "bg-[#efefe6] text-[#121212] hover:bg-[#e2e2d6]"}`}
             >
               {on && <Check aria-hidden="true" className="absolute right-2 top-2 size-6" strokeWidth={3} />}
               <span aria-hidden="true" className="text-3xl">{m.emoji}</span>
@@ -232,18 +247,19 @@ function InterestGrid({ picked, onToggle, onClear, onContinue, disabled }: {
           );
         })}
       </div>
-      <p className="mt-4 text-center font-medium" aria-live="polite">{picked.length} picked</p>
-      <div className="mt-3 flex flex-wrap justify-center gap-3">
-        <button type="button" className={`${pill} bg-transparent`} onClick={onClear} disabled={disabled || picked.length === 0}>
+      {picked.length === 0 && (
+        <p className="mt-4 text-center text-base text-muted-foreground">Not sure? Continue and we&apos;ll start you with learning new things.</p>
+      )}
+      {/* Sticky so Continue stays on screen on short laptop viewports; tiles carry scroll-mb-32 so a keyboard-focused tile scrolls clear of this bar (WCAG 2.4.11). */}
+      <div className="sticky bottom-0 z-10 -mx-4 mt-4 flex items-center gap-2 border-t bg-background px-4 py-3 sm:gap-3">
+        <p className="mr-auto whitespace-nowrap font-medium" aria-live="polite">{picked.length} picked</p>
+        <button type="button" className={`${pill} bg-background`} onClick={onClear} disabled={disabled || picked.length === 0}>
           Clear all
         </button>
         <button type="button" className={`${pill} bg-[#121212] text-white dark:bg-white dark:text-[#121212]`} onClick={onContinue} disabled={disabled}>
           Continue
         </button>
       </div>
-      {picked.length === 0 && (
-        <p className="mt-2 text-center text-base text-muted-foreground">Not sure? Continue and we&apos;ll start you with learning new things.</p>
-      )}
     </section>
   );
 }
@@ -265,16 +281,33 @@ export function CardDeck({
   const showGrid = bigButtons && index < INTEREST_COUNT;
   const answers = history.filter((answer): answer is Answer => answer !== null);
   const [name, setName] = useState(initialName);
+  const lastRecordAt = useRef(-Infinity);
+  const rootRef = useRef<HTMLDivElement>(null);
+  // Set by user-driven step changes only, so first mount and view toggles never steal focus.
+  const moveFocus = useRef(false);
 
+  useEffect(() => {
+    if (!moveFocus.current) return;
+    moveFocus.current = false;
+    rootRef.current?.querySelector<HTMLElement>("[data-step-focus]")?.focus();
+  }, [history]);
+
+  const changeStep = (next: (Answer | null)[] | ((prev: (Answer | null)[]) => (Answer | null)[])) => {
+    moveFocus.current = true;
+    setHistory(next);
+  };
   const record = (answer: Answer | null) => {
-    if (!loading) setHistory((prev) => [...prev, answer]);
+    const now = Date.now();
+    if (loading || isLockedOut(lastRecordAt.current, now)) return;
+    lastRecordAt.current = now;
+    changeStep((prev) => [...prev, answer]);
   };
   const back = () => {
     if (bigButtons && index === INTEREST_COUNT) {
       // Easier view: Back from the times card reopens the grid with picks kept.
       setPicked(likedInterests(history));
-      setHistory([]);
-    } else setHistory(undoAnswer);
+      changeStep([]);
+    } else changeStep(undoAnswer);
   };
   const toggleView = () => {
     if (index < INTEREST_COUNT) {
@@ -290,21 +323,25 @@ export function CardDeck({
 
   if (index >= cards.length) {
     return (
-      <div className="mx-auto flex w-full max-w-md flex-col items-center gap-4 rounded-xl border bg-card p-6 text-center text-base md:text-lg">
-        <div className="text-5xl">🎉</div>
-        <p className="text-xl font-semibold">All set!</p>
-        <p className="text-muted-foreground">
-          We&apos;re finding {name.trim() || "your"} matches this week…
+      <div ref={rootRef} className="mx-auto flex w-full max-w-md flex-col items-center gap-4 rounded-xl border bg-card p-6 text-center text-base md:text-lg">
+        <div className="text-5xl" aria-hidden="true">🎉</div>
+        <h2 tabIndex={-1} data-step-focus className="text-xl font-semibold outline-none">All set!</h2>
+        <p className="flex items-center gap-2 text-muted-foreground" aria-live="polite">
+          {loading ? (
+            <><LoaderCircle aria-hidden="true" className="size-5 animate-spin motion-reduce:animate-none" /> Finding matches…</>
+          ) : (
+            <>Ready to see {name.trim() ? `${name.trim()}'s` : "your"} matches?</>
+          )}
         </p>
-        <Button size="lg" onClick={() => onComplete(answersToProfile(answers, name))} disabled={loading}>
-          {loading ? "Building plan…" : "See my matches"}
+        <Button size="lg" className={RING} onClick={() => onComplete(answersToProfile(answers, name))} disabled={loading}>
+          See my matches
         </Button>
-        <Button size="lg" variant="outline" onClick={back} disabled={loading}><ArrowLeft aria-hidden="true" /> Back</Button>
+        <Button size="lg" variant="outline" className={RING} onClick={back} disabled={loading}><ArrowLeft aria-hidden="true" /> Back</Button>
         <button
           disabled={loading}
-          className="min-h-11 rounded-xl px-3 text-base underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className={`min-h-11 rounded-xl px-3 text-base underline ${RING}`}
           onClick={() => {
-            setHistory([]);
+            changeStep([]);
             setPicked([]);
           }}
         >
@@ -319,20 +356,22 @@ export function CardDeck({
   const stepCount = bigButtons ? cards.length - INTEREST_COUNT + 1 : cards.length;
   const step = bigButtons ? Math.max(0, index - INTEREST_COUNT + 1) : index;
   const progress = Math.round((step / stepCount) * 100);
+  const option = `w-full rounded-xl border bg-background text-left hover:bg-accent ${RING} ${bigButtons ? "min-h-20 px-5 py-4 text-xl md:text-2xl" : "min-h-14 px-4 py-3"}`;
+  const optionDetail = `mt-1 block text-muted-foreground ${bigButtons ? "text-lg md:text-xl" : "text-base md:text-lg"}`;
 
   return (
-    <div className={`mx-auto w-full min-w-0 ${showGrid ? "max-w-3xl" : "max-w-md"} overflow-x-clip p-4 text-base md:text-lg [&_button]:focus-visible:outline-2 [&_button]:focus-visible:outline-offset-2 [&_button]:focus-visible:outline-ring`}>
+    <div ref={rootRef} className={`mx-auto w-full min-w-0 ${showGrid ? "max-w-3xl" : "max-w-md"} overflow-x-clip p-4 text-base md:text-lg`}>
       <Button
         size="lg"
         variant={bigButtons ? "default" : "outline"}
         aria-pressed={bigButtons}
         onClick={toggleView}
-        className="mb-3 min-h-14 w-full rounded-xl text-lg"
+        className={`mb-3 min-h-14 w-full rounded-xl text-lg ${RING}`}
       >
         {bigButtons && <Check aria-hidden="true" />} Easier view (big tiles): {bigButtons ? "on" : "off"}
       </Button>
       <div className="mb-3">
-        <Button size="lg" variant="outline" onClick={back} disabled={index === 0 || showGrid || loading}>
+        <Button size="lg" variant="outline" className={RING} onClick={back} disabled={index === 0 || showGrid || loading}>
           <ArrowLeft aria-hidden="true" /> Back
         </Button>
       </div>
@@ -344,7 +383,7 @@ export function CardDeck({
       <label className="mb-4 block">
         <span className="mb-1 block text-base md:text-lg font-medium">First, what should we call you?</span>
         <input
-          className="w-full min-h-11 rounded-xl border bg-background px-3 py-2 text-base md:text-lg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className={`w-full min-h-11 rounded-xl border bg-background px-3 py-2 text-base md:text-lg ${RING}`}
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Margaret"
@@ -359,7 +398,10 @@ export function CardDeck({
           onToggle={(key) => setPicked((prev) => toggleKey(prev, key))}
           onClear={() => setPicked([])}
           onContinue={() => {
-            if (!loading) setHistory(pickedToHistory(picked, INTEREST_COUNT));
+            const now = Date.now();
+            if (loading || isLockedOut(lastRecordAt.current, now)) return;
+            lastRecordAt.current = now;
+            changeStep(pickedToHistory(picked, INTEREST_COUNT));
           }}
         />
       )}
@@ -367,9 +409,10 @@ export function CardDeck({
       {!showGrid && card.type === "interest" && (
         <div
           tabIndex={0}
+          data-step-focus
           role="group"
           aria-label={`${card.interest.label}. Left arrow for no, right arrow for yes.`}
-          className="rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          className={`rounded-xl ${RING}`}
           onKeyDown={(event) => {
             if (loading || event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
             if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -399,28 +442,28 @@ export function CardDeck({
 
       {card.type === "times" && (
         <div className="rounded-xl border bg-card p-6 shadow-sm">
-          <p className="mb-4 text-xl font-semibold">When are you usually free?</p>
-          <TimeChoices onPick={(keys) => record({ kind: "times", keys })} disabled={loading} />
+          <h2 tabIndex={-1} data-step-focus className="mb-4 text-xl font-semibold outline-none">When are you usually free?</h2>
+          <TimeChoices onPick={(keys) => record({ kind: "times", keys })} disabled={loading} bigButtons={bigButtons} />
           <SkipRow onSkip={() => record(null)} />
         </div>
       )}
 
       {card.type === "travel" && (
         <div className="rounded-xl border bg-card p-6 shadow-sm">
-          <p className="mb-1 text-xl font-semibold">How far is too far?</p>
+          <h2 tabIndex={-1} data-step-focus className="mb-1 text-xl font-semibold outline-none">How far is too far?</h2>
           <p className="mb-4 text-base md:text-lg text-muted-foreground">Pick what feels right.</p>
           <div className="space-y-2">
             {TRAVEL_BUCKETS.map((b) => (
               <button
                 disabled={loading}
                 key={b.min}
-                className="w-full min-h-14 rounded-xl border bg-background px-4 py-3 text-left hover:bg-accent"
+                className={option}
                 onClick={() => {
                   record({ kind: "travel", min: b.min });
                 }}
               >
                 <span className="font-medium">{b.label}</span>
-                <span className="mt-1 block text-base md:text-lg text-muted-foreground">{b.detail}</span>
+                <span className={optionDetail}>{b.detail}</span>
               </button>
             ))}
           </div>
@@ -429,7 +472,7 @@ export function CardDeck({
 
       {card.type === "mobility" && (
         <div className="rounded-xl border bg-card p-6 shadow-sm">
-          <p className="mb-1 text-xl font-semibold">What about stairs?</p>
+          <h2 tabIndex={-1} data-step-focus className="mb-1 text-xl font-semibold outline-none">What about stairs?</h2>
           <p className="mb-4 text-base md:text-lg text-muted-foreground">
             Just so we can match you with places you&apos;ll find easy to get into.
           </p>
@@ -438,13 +481,13 @@ export function CardDeck({
               <button
                 disabled={loading}
                 key={s.key}
-                className="w-full min-h-14 rounded-xl border bg-background px-4 py-3 text-left hover:bg-accent"
+                className={option}
                 onClick={() => {
                   record({ kind: "mobility", key: s.key });
                 }}
               >
                 <span className="font-medium">{s.label}</span>
-                <span className="mt-1 block text-base md:text-lg text-muted-foreground">{s.detail}</span>
+                <span className={optionDetail}>{s.detail}</span>
               </button>
             ))}
           </div>
@@ -453,20 +496,20 @@ export function CardDeck({
 
       {card.type === "budget" && (
         <div className="rounded-xl border bg-card p-6 shadow-sm">
-          <p className="mb-1 text-xl font-semibold">What&apos;s a comfortable weekly budget?</p>
+          <h2 tabIndex={-1} data-step-focus className="mb-1 text-xl font-semibold outline-none">What&apos;s a comfortable weekly budget?</h2>
           <p className="mb-4 text-base md:text-lg text-muted-foreground">Many of the best activities are free.</p>
           <div className="space-y-2">
             {BUDGET_OPTIONS.map((b) => (
               <button
                 disabled={loading}
                 key={b.amount}
-                className="w-full min-h-14 rounded-xl border bg-background px-4 py-3 text-left hover:bg-accent"
+                className={option}
                 onClick={() => {
                   record({ kind: "budget", amount: b.amount });
                 }}
               >
                 <span className="font-medium">{b.label}</span>
-                <span className="mt-1 block text-base md:text-lg text-muted-foreground">{b.detail}</span>
+                <span className={optionDetail}>{b.detail}</span>
               </button>
             ))}
           </div>
@@ -476,22 +519,24 @@ export function CardDeck({
   );
 }
 
-function TimeChoices({ onPick, disabled }: {
+function TimeChoices({ onPick, disabled, bigButtons }: {
   onPick: (keys: Profile["times"][number][]) => void;
   disabled: boolean;
+  bigButtons: boolean;
 }) {
+  const size = bigButtons ? "min-h-20 text-xl md:text-2xl" : "min-h-14 text-base md:text-lg";
   const [selected, setSelected] = useState<Profile["times"][number][]>([]);
   return (
     <div className="space-y-3">
       {TIME_OPTIONS.map((option) => (
         <Button key={option.key} size="lg" variant={selected.includes(option.key) ? "default" : "outline"}
-          className="min-h-14 w-full justify-start rounded-xl text-base md:text-lg"
+          className={`${size} w-full justify-start rounded-xl ${RING}`}
           aria-pressed={selected.includes(option.key)} disabled={disabled}
           onClick={() => setSelected((prev) => prev.includes(option.key) ? prev.filter((key) => key !== option.key) : [...prev, option.key])}>
           <span aria-hidden="true">{option.emoji}</span> {option.label}
         </Button>
       ))}
-      <Button size="lg" className="min-h-11 w-full rounded-xl" disabled={disabled || selected.length === 0} onClick={() => onPick(selected)}>Next</Button>
+      <Button size="lg" className={`${bigButtons ? "min-h-20 text-xl md:text-2xl" : "min-h-11"} w-full rounded-xl ${RING}`} disabled={disabled || selected.length === 0} onClick={() => onPick(selected)}>Next</Button>
     </div>
   );
 }
@@ -499,7 +544,7 @@ function TimeChoices({ onPick, disabled }: {
 function SkipRow({ onSkip }: { onSkip: () => void }) {
   return (
     <div className="pt-2 text-center">
-      <button className="min-h-11 rounded-xl px-3 text-base underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring" onClick={onSkip}>
+      <button type="button" className={`min-h-11 rounded-xl px-3 text-base underline ${RING}`} onClick={onSkip}>
         Skip
       </button>
     </div>

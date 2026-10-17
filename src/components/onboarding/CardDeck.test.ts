@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answersToProfile, INTEREST_COUNT, likedInterests, pickedToHistory, swipeDirection, toggleKey, undoAnswer, type Answer } from "@/components/onboarding/CardDeck";
+import { ANSWER_LOCKOUT_MS, answersToProfile, INTEREST_COUNT, isLockedOut, likedInterests, pickedToHistory, swipeDirection, toggleKey, undoAnswer, type Answer } from "@/components/onboarding/CardDeck";
 import { Profile, type Profile as ProfileType } from "@/lib/schema";
 
 describe("answersToProfile", () => {
@@ -157,5 +157,14 @@ describe("easier view interest grid", () => {
     // crafts is card 5, so the swipe deck resumes after it with nothing lost
     expect(back).toHaveLength(5);
     expect(answersToProfile(back, "A").interests).toEqual(["music", "crafts"]);
+  });
+});
+
+describe("isLockedOut", () => {
+  it("blocks a second answer inside the lockout window, allows it after", () => {
+    expect(isLockedOut(-Infinity, 0)).toBe(false);
+    expect(isLockedOut(1000, 1000 + 120)).toBe(true);
+    expect(isLockedOut(1000, 1000 + ANSWER_LOCKOUT_MS - 1)).toBe(true);
+    expect(isLockedOut(1000, 1000 + ANSWER_LOCKOUT_MS)).toBe(false);
   });
 });
