@@ -268,10 +268,12 @@ export function CardDeck({
   onComplete,
   initialName = "",
   loading = false,
+  onDemo,
 }: {
   onComplete: (profile: Profile) => void;
   initialName?: string;
   loading?: boolean;
+  onDemo?: (key: string) => void;
 }) {
   const cards = useMemo(() => buildCards(), []);
   const [history, setHistory] = useState<(Answer | null)[]>([]);
@@ -361,6 +363,12 @@ export function CardDeck({
 
   return (
     <div ref={rootRef} className={`mx-auto w-full min-w-0 ${showGrid ? "max-w-3xl" : "max-w-md"} overflow-x-clip p-4 text-base md:text-lg`}>
+      {onDemo && index === 0 && (
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <Button size="lg" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("margaret")} disabled={loading}>Demo: Margaret</Button>
+          <Button size="lg" variant="outline" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("harold")} disabled={loading}>Demo: Harold</Button>
+        </div>
+      )}
       <Button
         size="lg"
         variant={bigButtons ? "default" : "outline"}

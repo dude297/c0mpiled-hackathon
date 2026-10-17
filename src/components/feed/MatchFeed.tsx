@@ -1,6 +1,7 @@
 "use client";
 
-import { Calendar, CircleX, MapPin, SearchX, ShieldCheck, Wallet } from "lucide-react";
+import Link from "next/link";
+import { Calendar, CircleX, Hand, MapPin, SearchX, ShieldCheck, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AnalysisResult, Barrier, PlanItem } from "@/lib/schema";
 
@@ -51,6 +52,13 @@ function MatchCard({ item, added, onToggle }: { item: PlanItem; added: boolean; 
         <span aria-hidden="true">{added ? "✓" : "❤️"}</span>
         {added ? "In my week" : "Add to my week"}
       </Button>
+      <Link
+        href={`/coordinate?activityId=${item.activityId}`}
+        className="mt-2 flex h-14 w-full items-center justify-center gap-2 rounded-xl bg-primary text-lg font-semibold text-primary-foreground transition-colors hover:bg-primary/80 focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-foreground print:hidden"
+      >
+        <Hand className="size-5" aria-hidden="true" />
+        Get me there →
+      </Link>
     </li>
   );
 }

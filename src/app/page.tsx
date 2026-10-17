@@ -133,6 +133,7 @@ export default function Home() {
             run(p);
           }}
           loading={loading}
+          onDemo={demo}
         />
         {error && <p className="mx-auto max-w-md text-center text-destructive">{error}</p>}
         <div className="pt-6 text-center">
@@ -169,10 +170,10 @@ export default function Home() {
     setMode("onboarding");
   }
 
-  // showError=false where the page already shows its own error box, so the message isn't announced twice.
-  const details = (showError: boolean) => (
+  // Errors are shown by the page's own error box / summary strip, so ProfilePanel doesn't announce them twice.
+  const details = (
     <>
-      <ProfilePanel value={profile} onChange={setProfile} onSubmit={() => run()} onDemo={demo} loading={loading} error={showError ? error : null} hasResult={result !== null} />
+      <ProfilePanel value={profile} onChange={setProfile} onSubmit={() => run()} onDemo={demo} loading={loading} error={null} hasResult={result !== null} />
       <IntakeSlot onIntake={intake} />
       {result && <EvidencePanel result={result} />}
     </>
@@ -202,7 +203,7 @@ export default function Home() {
         ) : (
           <p className="text-lg text-muted-foreground">Fill in the form below, or load a demo, then press Build plan.</p>
         )}
-        {!loading && details(false)}
+        {!loading && details}
       </DashboardShell>,
     );
   }
@@ -266,6 +267,12 @@ export default function Home() {
             We couldn&apos;t save a share link just now. You can still print the plan, or try again in a moment.
           </p>
         )}
+        {error && !loading && (
+          <p role="alert" className="mt-3 flex items-start gap-2 rounded-md bg-destructive/10 p-3 text-destructive">
+            <CircleX className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+            <span>We couldn&apos;t update the plan. {error} The plan below is your last one.</span>
+          </p>
+        )}
         {loading && (
           <p role="status" className="mt-3 flex items-center gap-2 text-muted-foreground">
             <LoaderCircle className="size-5 animate-spin" aria-hidden="true" />
@@ -303,7 +310,7 @@ export default function Home() {
               <Button size="lg" className={`mt-4 ${FOCUS}`} onClick={() => setTab("matches")}>See matches</Button>
             </div>
           ))}
-        {tab === "details" && details(true)}
+        {tab === "details" && details}
       </div>
 
       {/* Print-only: same output whichever tab is open. */}
