@@ -5,6 +5,8 @@ import { CircleX, LoaderCircle, Printer, RotateCcw } from "lucide-react";
 import { DashboardShell, EvidencePanel, ProfilePanel } from "@/components/dashboard/panels";
 import { IntakeReview } from "@/components/intake/IntakeReview";
 import { ShareControl } from "@/components/share/ShareControl";
+import { resultForWeek } from "@/components/share/request";
+import { analysisHandoff, PROFILE_SESSION_KEY } from "@/components/coordination/handoff";
 import { WeekCalendar, weekSummary } from "@/components/calendar/WeekCalendar";
 import { MatchFeed, hardBarriers, toggleInSet } from "@/components/feed/MatchFeed";
 import { CardDeck } from "@/components/onboarding/CardDeck";
@@ -49,10 +51,6 @@ export default function Home() {
   async function run(p: Profile = profile) {
     const id = ++reqId.current;
     const rebuilding = result !== null;
-    // integration: /coordinate reads this so "Get me there" plans for the same person (session-only, no PII leaves the browser).
-    try {
-      sessionStorage.setItem("daybridge:profile", JSON.stringify(p));
-    } catch {}
     setLoading(true);
     setError(null);
     setAnnounce("");
@@ -65,6 +63,10 @@ export default function Home() {
       const data = await res.json().catch(() => null);
       if (id !== reqId.current) return; // stale: start over or a newer run happened
       if (!res.ok || !data) throw new Error(FRIENDLY_ERROR);
+      // Only the successful, current analysis may replace the coordination handoff.
+      try {
+        sessionStorage.setItem(PROFILE_SESSION_KEY, JSON.stringify(analysisHandoff(p, data, new Date().toISOString())));
+      } catch {}
       setResult(data);
       setAdded(new Set((data as AnalysisResult).plan.map((i) => i.activityId)));
       setTab("matches");
@@ -92,6 +94,7 @@ export default function Home() {
     <>
       <p role="status" aria-live="polite" className="sr-only">{announce}</p>
       {node}
+      {!result && <div className="mx-auto w-full max-w-6xl px-4 pb-4 md:px-6"><ShareControl result={null} /></div>}
     </>
   );
 
@@ -249,7 +252,7 @@ export default function Home() {
         )}
       </section>
 
-      <ShareControl result={result} />
+      <ShareControl result={resultForWeek(result, added)} />
 
       <div role="tablist" aria-label="Plan views" onKeyDown={onTabKey} className="grid grid-cols-3 gap-1 rounded-xl bg-muted p-1 print:hidden">
         {TABS.map((t) => (
