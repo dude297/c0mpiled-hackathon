@@ -60,7 +60,7 @@ const rideReq = (p: Parameters<typeof currentActions>[0]) => currentActions(p).f
 const inviteReq = (p: Parameters<typeof currentActions>[0]) => currentActions(p).find((a) => a.scope.kind === "invite")!.providerRequestId!;
 
 async function approvePending(s: Sim, id: string) {
-  for (const a of currentActions(s.c.get(id).plan)) {
+  for (const a of currentActions((await s.c.get(id)).plan)) {
     if (a.status !== "proposed" && a.status !== "revoked") continue;
     ok(await s.c.command(id, { type: "approve", actionId: a.id, scope: a.scope, expiresAt: s.at(HOUR) }), `approve ${a.id}`);
   }
@@ -72,8 +72,8 @@ async function toReady(s: Sim) {
   ok(await s.c.command(id, { type: "accept_proposal" }), "accept");
   await approvePending(s, id);
   ok(await s.c.command(id, { type: "execute" }), "execute");
-  ok(await s.c.ingest(id, ev(inviteReq(s.c.get(id).plan), "invite.accepted")), "invite accepted");
-  const ready = ok(await s.c.ingest(id, ev(rideReq(s.c.get(id).plan), "ride.confirmed")), "ride confirmed");
+  ok(await s.c.ingest(id, ev(inviteReq((await s.c.get(id)).plan), "invite.accepted")), "invite accepted");
+  const ready = ok(await s.c.ingest(id, ev(rideReq((await s.c.get(id)).plan), "ride.confirmed")), "ride confirmed");
   return { id, ready };
 }
 
@@ -102,7 +102,7 @@ describe("final regression: consent & dispatch invariants (merged main engine)",
     const created = ok(await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS }), "create");
     const id = created.plan.id;
     ok(await s.c.command(id, { type: "accept_proposal" }), "accept");
-    const [ride, invite] = currentActions(s.c.get(id).plan);
+    const [ride, invite] = currentActions((await s.c.get(id)).plan);
     ok(await s.c.command(id, { type: "approve", actionId: ride.id, scope: ride.scope, expiresAt: s.at(60_000) }), "approve ride");
     ok(await s.c.command(id, { type: "approve", actionId: invite.id, scope: invite.scope, expiresAt: s.at(HOUR) }), "approve invite");
     s.advance(120_000); // ride approval lapses, invite is fine
@@ -121,7 +121,7 @@ describe("final regression: consent & dispatch invariants (merged main engine)",
     await Promise.all([s.c.command(id, { type: "execute" }), s.c.command(id, { type: "execute" })]);
     expect((await s.c.command(id, { type: "execute" })).outcome).toBe("duplicate");
     expect(s.provider.calls).toHaveLength(2); // one invite + one ride, never doubled
-    const rid = rideReq(s.c.get(id).plan);
+    const rid = rideReq((await s.c.get(id)).plan);
     const e1 = ev(rid, "ride.confirmed", 1, { idempotencyKey: "cb-x" });
     ok(await s.c.ingest(id, e1), "first cb");
     const dupe = await s.c.ingest(id, { ...ev(rid, "ride.cancelled", 2), idempotencyKey: "cb-x" });
@@ -135,7 +135,7 @@ describe("final regression: consent & dispatch invariants (merged main engine)",
     // forged requestId → rejected, state intact
     expect((await s.c.ingest(id, ev("forged-x", "ride.cancelled", 9))).outcome).toBe("rejected");
     // out-of-order stale sequence on a confirmed dep → ignored
-    const plan = s.c.get(id).plan;
+    const plan = (await s.c.get(id)).plan;
     const rideAction = currentActions(plan).find((a) => a.scope.kind === "ride")!;
     const dep = plan.dependencies.find((d) => d.actionId === rideAction.id)!;
     const stale = await s.c.ingest(id, ev(rideAction.providerRequestId!, "ride.cancelled", dep.lastSequence));
@@ -148,19 +148,19 @@ describe("final regression: consent & dispatch invariants (merged main engine)",
     const s = setup();
     const { id } = await toReady(s);
     ok(await s.c.command(id, { type: "cancel" }), "cancel");
-    expect(s.c.get(id).plan.state).toBe("CANCELLED");
-    const late = await s.c.ingest(id, ev(rideReq(s.c.get(id).plan), "ride.cancelled", 9));
+    expect((await s.c.get(id)).plan.state).toBe("CANCELLED");
+    const late = await s.c.ingest(id, ev(rideReq((await s.c.get(id)).plan), "ride.cancelled", 9));
     expect(late.outcome).toBe("ignored");
     expect((await s.c.command(id, { type: "execute" })).outcome).toBe("rejected");
     expect((await s.c.command(id, { type: "accept_proposal" })).outcome).toBe("rejected");
-    expect(s.c.get(id).plan.state).toBe("CANCELLED");
+    expect((await s.c.get(id)).plan.state).toBe("CANCELLED");
   });
 
   it("replanning preserves confirmed dependencies and never re-sends them", async () => {
     const s = setup();
     const { id } = await toReady(s);
-    const inviteActionBefore = currentActions(s.c.get(id).plan).find((a) => a.scope.kind === "invite")!;
-    const cancelled = ok(await s.c.ingest(id, ev(rideReq(s.c.get(id).plan), "ride.cancelled", 2)), "cancel after ready");
+    const inviteActionBefore = currentActions((await s.c.get(id)).plan).find((a) => a.scope.kind === "invite")!;
+    const cancelled = ok(await s.c.ingest(id, ev(rideReq((await s.c.get(id)).plan), "ride.cancelled", 2)), "cancel after ready");
     expect(cancelled.plan.state).toBe("NEEDS_REPLAN");
     const carriedInvite = currentActions(cancelled.plan).find((a) => a.scope.kind === "invite")!;
     expect(carriedInvite.id).toBe(inviteActionBefore.id);
@@ -175,7 +175,7 @@ describe("final regression: consent & dispatch invariants (merged main engine)",
   it("revised (new) actions always require fresh approval; old approvals are insufficient", async () => {
     const s = setup();
     const { id } = await toReady(s);
-    ok(await s.c.ingest(id, ev(rideReq(s.c.get(id).plan), "ride.cancelled", 2)), "cancel after ready");
+    ok(await s.c.ingest(id, ev(rideReq((await s.c.get(id)).plan), "ride.cancelled", 2)), "cancel after ready");
     ok(await s.c.command(id, { type: "accept_proposal" }), "accept recovery");
     // execute without approving the new ride must be refused
     const exec = await s.c.command(id, { type: "execute" });
@@ -250,14 +250,14 @@ describe("final regression: merged-code probes", () => {
     const created = ok(await c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS }), "create");
     const id = created.plan.id;
     ok(await c.command(id, { type: "accept_proposal" }), "accept");
-    for (const a of currentActions(c.get(id).plan)) ok(await c.command(id, { type: "approve", actionId: a.id, scope: a.scope, expiresAt: new Date(t + HOUR).toISOString() }), `approve ${a.id}`);
+    for (const a of currentActions((await c.get(id)).plan)) ok(await c.command(id, { type: "approve", actionId: a.id, scope: a.scope, expiresAt: new Date(t + HOUR).toISOString() }), `approve ${a.id}`);
     const first = await c.command(id, { type: "execute" });
     expect(first.outcome).toBe("rejected");
     expect(first.reason).toMatch(/retry execute/);
-    expect(c.get(id).plan.state).toBe("AWAITING_APPROVAL"); // unknown outcomes never advance state
+    expect((await c.get(id)).plan.state).toBe("AWAITING_APPROVAL"); // unknown outcomes never advance state
     // a cancel afterwards closes it cleanly
     ok(await c.command(id, { type: "cancel" }), "cancel");
-    expect(c.get(id).plan.state).toBe("CANCELLED");
+    expect((await c.get(id)).plan.state).toBe("CANCELLED");
     void t;
   });
 
@@ -270,12 +270,12 @@ describe("final regression: merged-code probes", () => {
     await s.c.command(id, { type: "execute" }); // rejected
     await approvePending(s, id);
     ok(await s.c.command(id, { type: "execute" }), "execute");
-    ok(await s.c.ingest(id, ev(rideReq(s.c.get(id).plan), "ride.confirmed", 1, { idempotencyKey: "k1" })), "ride cb");
-    await s.c.ingest(id, ev(rideReq(s.c.get(id).plan), "ride.confirmed", 1, { idempotencyKey: "k1" })); // duplicate
-    ok(await s.c.ingest(id, ev(inviteReq(s.c.get(id).plan), "invite.accepted", 1)), "invite cb");
-    await s.c.ingest(id, ev(inviteReq(s.c.get(id).plan), "invite.declined", 0)); // stale → ignored
+    ok(await s.c.ingest(id, ev(rideReq((await s.c.get(id)).plan), "ride.confirmed", 1, { idempotencyKey: "k1" })), "ride cb");
+    await s.c.ingest(id, ev(rideReq((await s.c.get(id)).plan), "ride.confirmed", 1, { idempotencyKey: "k1" })); // duplicate
+    ok(await s.c.ingest(id, ev(inviteReq((await s.c.get(id)).plan), "invite.accepted", 1)), "invite cb");
+    await s.c.ingest(id, ev(inviteReq((await s.c.get(id)).plan), "invite.declined", 0)); // stale → ignored
     expect((await s.c.ingest(id, ev("wrong-kind", "ride.confirmed", 5))).outcome).toBe("rejected");
-    const final = s.c.get(id);
+    const final = (await s.c.get(id));
     expect(final.events.map((e) => e.seq)).toEqual(final.events.map((_, i) => i + 1));
     CoordinationPlan.parse(final.plan);
     expect(final.plan.state).toBe("READY");
@@ -289,15 +289,15 @@ describe("final regression: merged-code probes", () => {
       await s2.c.command(id2, { type: "execute" });
       await approvePending(s2, id2);
       await s2.c.command(id2, { type: "execute" });
-      await s2.c.ingest(id2, ev(rideReq(s2.c.get(id2).plan), "ride.confirmed", 1, { idempotencyKey: "k1" }));
-      await s2.c.ingest(id2, ev(rideReq(s2.c.get(id2).plan), "ride.confirmed", 1, { idempotencyKey: "k1" }));
-      await s2.c.ingest(id2, ev(inviteReq(s2.c.get(id2).plan), "invite.accepted", 1));
-      await s2.c.ingest(id2, ev(inviteReq(s2.c.get(id2).plan), "invite.declined", 0));
+      await s2.c.ingest(id2, ev(rideReq((await s2.c.get(id2)).plan), "ride.confirmed", 1, { idempotencyKey: "k1" }));
+      await s2.c.ingest(id2, ev(rideReq((await s2.c.get(id2)).plan), "ride.confirmed", 1, { idempotencyKey: "k1" }));
+      await s2.c.ingest(id2, ev(inviteReq((await s2.c.get(id2)).plan), "invite.accepted", 1));
+      await s2.c.ingest(id2, ev(inviteReq((await s2.c.get(id2)).plan), "invite.declined", 0));
       await s2.c.ingest(id2, ev("wrong-kind", "ride.confirmed", 5));
-      const p = s2.c.get(id2).plan;
+      const p = (await s2.c.get(id2)).plan;
       return JSON.stringify({ state: p.state, version: p.version, deps: p.dependencies.map((d) => [d.kind, d.status, d.lastSequence]), actions: p.actions.map((a) => [a.scope.kind, a.status]) });
     };
-    const p1 = s.c.get(id).plan;
+    const p1 = (await s.c.get(id)).plan;
     expect(JSON.stringify({ state: p1.state, version: p1.version, deps: p1.dependencies.map((d) => [d.kind, d.status, d.lastSequence]), actions: p1.actions.map((a) => [a.scope.kind, a.status]) })).toBe(await run2());
   });
 });

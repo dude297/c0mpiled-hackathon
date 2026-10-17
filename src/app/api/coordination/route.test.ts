@@ -79,6 +79,14 @@ describe("coordination API", () => {
     expect((await command(json({ type: "cancel" }), ctx("any"))).status).toBe(503);
     vi.stubEnv("DAYBRIDGE_DEMO_EVENTS", "1");
     expect((await create(json({ profile: DEMO_PROFILES.margaret, activityId: ACTIVITIES[0].id }))).status).toBe(200);
+    vi.stubEnv("VERCEL", "1"); // a hosted deploy never falls back to public in-memory mode, even with the flag
+    expect((await create(json({ profile: DEMO_PROFILES.margaret, activityId: ACTIVITIES[0].id }))).status).toBe(503);
+    expect((await events(json({}), ctx("any"))).status).toBe(403);
+  });
+
+  it("rejects oversized bodies with 413 before parsing", async () => {
+    const big = json({ profile: DEMO_PROFILES.margaret, activityId: ACTIVITIES[0].id, pad: "x".repeat(70_000) });
+    expect((await create(big)).status).toBe(413);
   });
 
   it("disables the demo provider-event endpoint in production unless explicitly enabled", async () => {

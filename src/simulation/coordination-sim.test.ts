@@ -74,7 +74,7 @@ const inviteReqOf = (plan: CoordinationPlan) =>
 // Approve every action that still needs approval (proposed/revoked); dispatched or
 // carried-over confirmed actions are intentionally skipped.
 async function approvePending(s: Sim, id: string) {
-  for (const a of currentActions(s.c.get(id).plan)) {
+  for (const a of currentActions((await s.c.get(id)).plan)) {
     if (a.status !== "proposed" && a.status !== "revoked") continue;
     ok(await s.c.command(id, { type: "approve", actionId: a.id, scope: a.scope, expiresAt: s.at(HOUR) }), `approve ${a.id}`);
   }
@@ -133,7 +133,7 @@ describe("Phase 2: adversarial provider-event simulation", () => {
     const { id, exec } = await toDispatched(s);
     const rideReq = rideReqOf(exec.plan);
     ok(await s.c.ingest(id, ev(rideReq, "ride.cancelled", 3)), "cancel seq3");
-    expect(s.c.get(id).plan.state).toBe("NEEDS_REPLAN");
+    expect((await s.c.get(id)).plan.state).toBe("NEEDS_REPLAN");
     const stale = await s.c.ingest(id, ev(rideReq, "ride.confirmed", 2));
     expect(stale.outcome).toBe("ignored");
     expect(stale.plan.state).toBe("NEEDS_REPLAN");
@@ -158,9 +158,9 @@ describe("Phase 2: adversarial provider-event simulation", () => {
   it("decline after accept revokes READY (contract: declined-after-confirmed = cancelled)", async () => {
     const s = setup();
     const { id } = await toReady(s);
-    expect(s.c.get(id).plan.state).toBe("READY");
-    const inviteAction = currentActions(s.c.get(id).plan).find((a) => a.scope.kind === "invite")!;
-    const seq = s.c.get(id).plan.dependencies.find((d) => d.actionId === inviteAction.id)!.lastSequence + 1;
+    expect((await s.c.get(id)).plan.state).toBe("READY");
+    const inviteAction = currentActions((await s.c.get(id)).plan).find((a) => a.scope.kind === "invite")!;
+    const seq = (await s.c.get(id)).plan.dependencies.find((d) => d.actionId === inviteAction.id)!.lastSequence + 1;
     const revoked = ok(await s.c.ingest(id, ev(inviteAction.providerRequestId!, "invite.declined", seq)), "decline after accept");
     expect(revoked.plan.state).toBe("NEEDS_REPLAN");
     const dep = revoked.plan.dependencies.find((d) => d.kind === "invite")!;
@@ -176,47 +176,47 @@ describe("Phase 2: adversarial provider-event simulation", () => {
     ok(await s.c.command(id, { type: "cancel" }), "cancel");
     const afterCancel = await s.c.ingest(id, ev(rideReqOf(exec.plan), "ride.cancelled", 2));
     expect(afterCancel.outcome).toBe("ignored");
-    expect(s.c.get(id).plan.state).toBe("CANCELLED");
+    expect((await s.c.get(id)).plan.state).toBe("CANCELLED");
 
     const s2 = setup();
     const r2 = await toReady(s2);
     ok(await s2.c.command(r2.id, { type: "complete", attended: true }), "complete");
     const afterComplete = await s2.c.ingest(r2.id, ev(rideReqOf(r2.exec.plan), "ride.cancelled", 2));
     expect(afterComplete.outcome).toBe("ignored");
-    expect(s2.c.get(r2.id).plan.state).toBe("COMPLETED");
+    expect((await s2.c.get(r2.id)).plan.state).toBe("COMPLETED");
   });
 
   it("rejected events (forged requestId, wrong kind, pre-dispatch) never change state", async () => {
     const s = setup();
     const created = await create(s);
     const id = created.plan.id;
-    const before = s.c.get(id).plan.state;
+    const before = (await s.c.get(id)).plan.state;
     expect((await s.c.ingest(id, ev("forged-request", "ride.confirmed"))).outcome).toBe("rejected");
-    expect(s.c.get(id).plan.state).toBe(before);
+    expect((await s.c.get(id)).plan.state).toBe(before);
 
     ok(await s.c.command(id, { type: "accept_proposal" }), "accept");
     await approvePending(s, id);
     const exec = ok(await s.c.command(id, { type: "execute" }), "execute");
     expect((await s.c.ingest(id, ev(inviteReqOf(exec.plan)!, "ride.confirmed"))).outcome).toBe("rejected"); // wrong kind
-    expect(s.c.get(id).plan.state).toBe("PENDING_CONFIRMATION"); // unchanged by the rejected event
+    expect((await s.c.get(id)).plan.state).toBe("PENDING_CONFIRMATION"); // unchanged by the rejected event
   });
 
   it("no feasible recovery: both ride sources die → NEEDS_REPLAN with hard transport blocker and alternatives", async () => {
     const s = setup();
     const { id } = await toDispatched(s);
     // Dan's ride declined...
-    const plan1 = s.c.get(id).plan;
+    const plan1 = (await s.c.get(id)).plan;
     ok(await s.c.ingest(id, ev(rideReqOf(plan1), "ride.declined", 1)), "ride declined");
-    let cur = s.c.get(id).plan;
+    let cur = (await s.c.get(id)).plan;
     expect(cur.state).toBe("NEEDS_REPLAN");
     // ...recovery proposes paratransit; approve+execute; then paratransit is cancelled too
     ok(await s.c.command(id, { type: "accept_proposal" }), "accept recovery");
     await approvePending(s, id);
     ok(await s.c.command(id, { type: "execute" }), "execute recovery");
-    cur = s.c.get(id).plan;
+    cur = (await s.c.get(id)).plan;
     expect(cur.state).toBe("PENDING_CONFIRMATION");
     ok(await s.c.ingest(id, ev(rideReqOf(cur), "ride.cancelled", 1)), "paratransit cancelled");
-    cur = s.c.get(id).plan;
+    cur = (await s.c.get(id)).plan;
     expect(cur.state).toBe("NEEDS_REPLAN");
     expect(cur.blockers.some((b) => b.rule === "transport")).toBe(true); // no recovery left
     expect((await s.c.command(id, { type: "accept_proposal" })).outcome).toBe("rejected");
@@ -228,7 +228,7 @@ describe("Phase 2: adversarial provider-event simulation", () => {
     const created = await create(s);
     const id = created.plan.id;
     ok(await s.c.command(id, { type: "accept_proposal" }), "accept");
-    const [ride, invite] = currentActions(s.c.get(id).plan);
+    const [ride, invite] = currentActions((await s.c.get(id)).plan);
     ok(await s.c.command(id, { type: "approve", actionId: ride.id, scope: ride.scope, expiresAt: s.at(HOUR) }), "approve ride");
     ok(await s.c.command(id, { type: "revoke", actionId: ride.id }), "revoke ride");
     ok(await s.c.command(id, { type: "approve", actionId: invite.id, scope: invite.scope, expiresAt: s.at(HOUR) }), "approve invite");
@@ -237,7 +237,7 @@ describe("Phase 2: adversarial provider-event simulation", () => {
     expect(s.provider.calls).toHaveLength(0); // nothing sent
 
     // expired path: re-approve with a short window, let it lapse, execute must be atomic-blocked
-    const plan = s.c.get(id).plan;
+    const plan = (await s.c.get(id)).plan;
     const ride2 = currentActions(plan).find((a) => a.id === ride.id)!;
     ok(await s.c.command(id, { type: "approve", actionId: ride2.id, scope: ride2.scope, expiresAt: s.at(60_000) }), "re-approve short");
     s.advance(120_000);
@@ -266,11 +266,11 @@ describe("Phase 2: adversarial provider-event simulation", () => {
     const created = ok(await c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS }), "create");
     const id = created.plan.id;
     ok(await c.command(id, { type: "accept_proposal" }), "accept");
-    for (const a of currentActions(c.get(id).plan)) ok(await c.command(id, { type: "approve", actionId: a.id, scope: a.scope, expiresAt: new Date(t + HOUR).toISOString() }), `approve ${a.id}`);
+    for (const a of currentActions((await c.get(id)).plan)) ok(await c.command(id, { type: "approve", actionId: a.id, scope: a.scope, expiresAt: new Date(t + HOUR).toISOString() }), `approve ${a.id}`);
     const first = await c.command(id, { type: "execute" });
     expect(first.outcome).toBe("rejected");
     expect(first.reason).toMatch(/retry execute/);
-    expect(c.get(id).plan.state).toBe("AWAITING_APPROVAL");
+    expect((await c.get(id)).plan.state).toBe("AWAITING_APPROVAL");
     const retry = ok(await c.command(id, { type: "execute" }), "retry");
     expect(retry.plan.state).toBe("PENDING_CONFIRMATION");
     expect(inner.calls.filter((x) => x.kind === "ride")).toHaveLength(1); // idempotency key reused, no double booking
@@ -290,12 +290,12 @@ describe("Phase 2: adversarial provider-event simulation", () => {
     const created = await create(s);
     const id = created.plan.id;
     ok(await s.c.command(id, { type: "accept_proposal" }), "accept");
-    for (const a of currentActions(s.c.get(id).plan)) ok(await s.c.command(id, { type: "approve", actionId: a.id, scope: a.scope, expiresAt: s.at(2 * HOUR) }), `approve ${a.id}`);
+    for (const a of currentActions((await s.c.get(id)).plan)) ok(await s.c.command(id, { type: "approve", actionId: a.id, scope: a.scope, expiresAt: s.at(2 * HOUR) }), `approve ${a.id}`);
     s.advance(25 * HOUR); // all approvals expired
     const exec = await s.c.command(id, { type: "execute" });
     expect(exec.outcome).toBe("rejected");
     expect(s.provider.calls).toHaveLength(0);
-    expect(s.c.get(id).plan.state).toBe("AWAITING_APPROVAL");
+    expect((await s.c.get(id)).plan.state).toBe("AWAITING_APPROVAL");
   });
 
   it("preference change: proposed patch never mutates profile until confirmed", async () => {
@@ -304,7 +304,7 @@ describe("Phase 2: adversarial provider-event simulation", () => {
     const { id, exec } = await toDispatched(s, { ...MAYA, prefersSmallGroups: false });
     expect(inviteReqOf(exec.plan)).toBeUndefined(); // no invite proposed
     ok(await s.c.ingest(id, ev(rideReqOf(exec.plan), "ride.confirmed")), "ride confirmed");
-    expect(s.c.get(id).plan.state).toBe("READY"); // single dependency confirmed is enough
+    expect((await s.c.get(id)).plan.state).toBe("READY"); // single dependency confirmed is enough
     ok(await s.c.command(id, { type: "complete", attended: true }), "complete");
 
     const fb = ok(await s.c.command(id, { type: "feedback", signals: ["too_crowded"] }), "feedback");
@@ -350,7 +350,7 @@ describe("Phase 2: adversarial provider-event simulation", () => {
     const { id, exec } = await toReady(s);
     const inviteAction = currentActions(exec.plan).find((a) => a.scope.kind === "invite")!;
     ok(await s.c.ingest(id, ev(rideReqOf(exec.plan), "ride.cancelled", 2)), "ride cancelled");
-    const cur = s.c.get(id).plan;
+    const cur = (await s.c.get(id)).plan;
     expect(cur.state).toBe("NEEDS_REPLAN");
     const carriedInvite = currentActions(cur).find((a) => a.scope.kind === "invite")!;
     expect(carriedInvite.id).toBe(inviteAction.id); // same action survives
@@ -388,13 +388,13 @@ describe("Phase 2: offline golden path (repeatable)", () => {
 
     // 3. partial confirmation must NOT be READY (false-success check)
     ok(await s.c.ingest(id, ev(inviteReqOf(exec.plan)!, "invite.accepted")), "invite");
-    const half = s.c.get(id).plan;
+    const half = (await s.c.get(id)).plan;
     expect(half.state).toBe("PENDING_CONFIRMATION");
     expect(readyViolations(half).length).toBeGreaterThan(0);
 
     // 4. final confirmation → READY, invariant holds
     ok(await s.c.ingest(id, ev(rideReqOf(exec.plan), "ride.confirmed")), "ride");
-    const ready = s.c.get(id).plan;
+    const ready = (await s.c.get(id)).plan;
     expect(ready.state).toBe("READY");
     expect(readyViolations(ready)).toEqual([]);
 
@@ -407,7 +407,7 @@ describe("Phase 2: offline golden path (repeatable)", () => {
     const exec2 = ok(await s.c.command(id, { type: "execute" }), "execute recovery");
     expect(exec2.plan.state).toBe("PENDING_CONFIRMATION");
     ok(await s.c.ingest(id, ev(rideReqOf(exec2.plan), "ride.confirmed")), "new ride confirmed");
-    expect(s.c.get(id).plan.state).toBe("READY");
+    expect((await s.c.get(id)).plan.state).toBe("READY");
     expect(s.provider.calls.filter((x) => x.kind === "invite")).toHaveLength(1); // invite never re-sent
 
     // 6. complete → self-reported outcome only, never provider-claimed attendance
@@ -421,7 +421,7 @@ describe("Phase 2: offline golden path (repeatable)", () => {
     const run = async () => {
       const s = setup();
       const { id } = await toReady(s);
-      const p = s.c.get(id).plan;
+      const p = (await s.c.get(id)).plan;
       return JSON.stringify({
         state: p.state, version: p.version,
         actions: p.actions.map((a) => [a.scope.kind, a.scope.recipientId, a.status]),
@@ -446,7 +446,7 @@ describe("Phase 2: offline golden path (repeatable)", () => {
     await s.c.ingest(id, ev(rideReqOf(exec.plan), "ride.confirmed", 1, { idempotencyKey: "k1" })); // duplicate
     await s.c.ingest(id, ev(inviteReqOf(exec.plan)!, "invite.accepted", 1));
     await s.c.ingest(id, ev(inviteReqOf(exec.plan)!, "invite.declined", 0)); // stale sequence → ignored
-    const final = s.c.get(id);
+    const final = await s.c.get(id);
     expect(final.events.map((e) => e.seq)).toEqual(final.events.map((_, i) => i + 1));
     CoordinationPlan.parse(final.plan);
     expect(final.plan.state).toBe("READY");

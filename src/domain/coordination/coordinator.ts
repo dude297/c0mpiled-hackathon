@@ -14,6 +14,7 @@ import {
 } from "@/lib/schema";
 import { alternativesFor, patchesFromFeedback, propose, whenOf, type Exclusions } from "./planner";
 import type { ProviderPort } from "./provider";
+import { createMemoryStore, type CoordinationStore, type StoredPlan } from "./store";
 
 // Deterministic coordination state machine. Every transition is decided here from user commands
 // and provider evidence; AI output never reaches this module.
@@ -28,13 +29,23 @@ export type CoordinatorDeps = {
   now?: () => Date;
   activities?: Activity[];
   newId?: () => string;
+  store?: CoordinationStore;
 };
 
-type Entry = { plan: CoordinationPlan; log: CoordinationEvent[]; seenKeys: Set<string> };
+export const MAX_COMMIT_ATTEMPTS = 3;
+// Abuse ceiling: every command appends at least one event, so this caps writes (and load size) per plan.
+export const MAX_LOG_EVENTS = 500;
+
+type Entry = StoredPlan;
+// Trusted server-side caller (signed provider callbacks). Accepted only by ingest(); user routes pass a userId/null,
+// which can never equal this object, so no user path gains owner bypass.
+export type SystemCaller = { system: true };
+type Caller = string | null | undefined | SystemCaller;
+const isSystem = (c: Caller): c is SystemCaller => typeof c === "object" && c !== null && c.system === true;
 type Pending = Omit<CoordinationEvent, "seq" | "at">;
 
 export class CoordinationError extends Error {
-  constructor(public status: 400 | 404, message: string) {
+  constructor(public status: 400 | 401 | 403 | 404 | 409 | 429 | 503, message: string) {
     super(message);
   }
 }
@@ -74,14 +85,16 @@ export function createCoordinator(deps: CoordinatorDeps) {
   const now = deps.now ?? (() => new Date());
   const catalog = deps.activities ?? ACTIVITIES;
   const newId = deps.newId ?? (() => crypto.randomUUID());
-  const store = new Map<string, Entry>();
+  const store = deps.store ?? createMemoryStore();
   const locks = new Map<string, Promise<unknown>>();
 
-  // ponytail: per-plan promise chain serializes async commands in one process; needs a DB row lock if multi-instance.
+  // Per-plan promise chain: avoids pointless CAS conflicts inside one process. The store's CAS (rev) is the cross-instance guarantee.
   function withLock<T>(id: string, fn: () => Promise<T>): Promise<T> {
     const prev = locks.get(id) ?? Promise.resolve();
     const next = prev.then(fn, fn);
-    locks.set(id, next.catch(() => undefined));
+    const tail = next.catch(() => undefined);
+    locks.set(id, tail);
+    void tail.then(() => locks.get(id) === tail && locks.delete(id));
     return next;
   }
 
@@ -196,13 +209,36 @@ export function createCoordinator(deps: CoordinatorDeps) {
     return [];
   }
 
-  function entry(id: string) {
-    const e = store.get(id);
-    if (!e) throw new CoordinationError(404, `Plan "${id}" not found`);
+  // A wrong owner gets the same 404 as a missing plan, so plan ids leak nothing.
+  async function entry(id: string, ownerId: Caller) {
+    const e = await store.load(id);
+    if (!e || (!isSystem(ownerId) && e.ownerId !== (ownerId ?? null))) throw new CoordinationError(404, `Plan "${id}" not found`);
     return e;
   }
 
-  async function create(input: { profile: Profile; activityId: string; contacts?: Contact[] }): Promise<CommandResult> {
+  // load -> run the transition on the private copy -> CAS commit of the events/keys added in this call.
+  // On a lost race, reload and rerun the whole attempt, unless the attempt called a provider: an external side
+  // effect is never re-run automatically. That surfaces as 409 and the user retries execute; the action stays
+  // approved and reuses its idempotencyKey. ponytail: at-least-once dispatch, safe for the key-deduping mock only;
+  // live providers need a two-phase claim (commit "dispatching" first, then call) before they can be wired in.
+  const dispatchedIn = new WeakSet<Entry>();
+  function mutate(id: string, ownerId: Caller, fn: (e: Entry) => Promise<CommandResult>): Promise<CommandResult> {
+    return withLock(id, async () => {
+      for (let attempt = 0; attempt < MAX_COMMIT_ATTEMPTS; attempt++) {
+        const e = await entry(id, ownerId);
+        if (e.log.length >= MAX_LOG_EVENTS) throw new CoordinationError(429, "This plan has reached its activity limit; start a new plan");
+        const logLen = e.log.length;
+        const keyCount = e.seenKeys.size;
+        const result = await fn(e);
+        // Sets keep insertion order, so keys added in this call are the tail.
+        if (await store.commit(id, e.rev, e.plan, e.log.slice(logLen), [...e.seenKeys].slice(keyCount))) return result;
+        if (dispatchedIn.has(e)) throw new CoordinationError(409, "Plan changed while dispatching; refresh and retry");
+      }
+      throw new CoordinationError(409, "Plan changed concurrently; retry");
+    });
+  }
+
+  async function create(input: { profile: Profile; activityId: string; contacts?: Contact[] }, ownerId?: string | null): Promise<CommandResult> {
     const activity = activityOf(input.activityId);
     const at = now().toISOString();
     const id = newId();
@@ -214,17 +250,17 @@ export function createCoordinator(deps: CoordinatorDeps) {
         blockers: [], interventions: [], actions: [], dependencies: [], approvals: [], alternatives: [], preferencePatches: [],
         dataSource: deps.provider.dataSource, createdAt: at, updatedAt: at,
       },
-      log: [], seenKeys: new Set(),
+      log: [], seenKeys: new Set(), rev: 0, ownerId: ownerId ?? null,
     };
-    store.set(id, e);
     const events: Pending[] = [{ type: "plan.created", actor: "user", outcome: "applied", payload: { activityId: activity.id } }, ...plan(e, activity, { recipients: new Set() })];
     e.plan.state = e.plan.blockers.length ? "BLOCKED" : "PROPOSED";
-    return done(e, events);
+    const result = done(e, events);
+    await store.create({ plan: e.plan, log: e.log, seenKeys: e.seenKeys, ownerId: e.ownerId });
+    return result;
   }
 
-  function command(id: string, cmd: PlanCommand): Promise<CommandResult> {
-    return withLock(id, async () => {
-      const e = entry(id);
+  function command(id: string, cmd: PlanCommand, ownerId?: string | null): Promise<CommandResult> {
+    return mutate(id, ownerId, async (e) => {
       const p = e.plan;
       const type = `command.${cmd.type}`;
       if (CLOSED_PLAN.has(p.state) && !["feedback", "confirm_preference", "reject_preference"].includes(cmd.type))
@@ -301,6 +337,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
             const dep = p.dependencies.find((d) => d.actionId === a.id)!;
             const input = { planId: p.id, actionId: a.id, recipientId: a.scope.recipientId, approvalId: a.approvalId!, idempotencyKey: a.idempotencyKey, sharedFields: [...a.scope.sharedFields], when: a.scope.when };
             try {
+              dispatchedIn.add(e);
               const call = a.scope.kind === "invite" ? deps.provider.sendApprovedInvite(input) : deps.provider.requestApprovedRide(input);
               // A hung provider must not hold the plan lock forever; a timeout is an unknown outcome like any error.
               let timer: ReturnType<typeof setTimeout> | undefined;
@@ -389,9 +426,8 @@ export function createCoordinator(deps: CoordinatorDeps) {
     });
   }
 
-  function ingest(id: string, ev: ProviderEvent): Promise<CommandResult> {
-    return withLock(id, async () => {
-      const e = entry(id);
+  function ingest(id: string, ev: ProviderEvent, ownerId?: string | null | SystemCaller): Promise<CommandResult> {
+    return mutate(id, ownerId, async (e) => {
       const p = e.plan;
       const type = ev.type;
       const base = { type, actor: ev.actor, idempotencyKey: ev.idempotencyKey, payload: { eventId: ev.eventId, requestId: ev.requestId, sequence: ev.sequence } } as const;
@@ -423,9 +459,9 @@ export function createCoordinator(deps: CoordinatorDeps) {
     });
   }
 
-  function get(id: string) {
-    const e = entry(id);
-    return structuredClone({ plan: e.plan, events: e.log });
+  async function get(id: string, ownerId?: string | null | SystemCaller): Promise<{ plan: CoordinationPlan; events: CoordinationEvent[] }> {
+    const e = await entry(id, ownerId); // already a private copy
+    return { plan: e.plan, events: e.log };
   }
 
   return { create, command, ingest, get };

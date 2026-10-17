@@ -55,3 +55,18 @@ Dropped entirely: profile, explanation, evidence, blocked, items/labels, scores,
 - In-memory `globalThis` map, capped at 1000 entries. Expired entries are pruned first, then the oldest entries are evicted. Lost on restart and not shared across serverless instances.
 - Production fails closed: 503 unless `SHARE_STORE=memory` is set explicitly.
 - Before real use, replace the store with a DB table (same contract) and add rate limiting.
+
+## Creator recovery (cloud candidate)
+
+Additive; applies only when the durable store (Supabase) is configured. Memory mode is unchanged.
+
+- `POST /api/plans` may carry `Authorization: Bearer <Supabase access token>`. A verified user is stored as
+  `share_snapshots.creator_user_id` (server-only; never in `plan`, the public page or any response). No header → anonymous
+  share, recoverable only by its revoke token. A present but invalid/expired token → `401 {error}` (clients refresh and retry).
+  Response shape unchanged (`{id, url, revokeToken, expiresAt}`). Rate limit: 20 creates/hour per user (signed in) or per
+  client IP (`x-forwarded-for` first hop, then `x-real-ip`) → `429 {error}`.
+- `GET /api/plans/mine` with the creator's access token → `200 { shares: [{ id, url, expiresAt, createdAt, summary }] }`:
+  unexpired, newest first, max 100, no tokens. `401` without a valid user; `404` in memory mode; `503` when sharing is unavailable.
+- `DELETE /api/plans/:id` accepts either `Bearer <revokeToken>` (checked first) or the creator's access token. Any failure —
+  unknown id, wrong token, another user, anonymous share — is the same `404`. Deletion is a row delete, durable across instances.
+- Deleting the auth user cascades to their shares.

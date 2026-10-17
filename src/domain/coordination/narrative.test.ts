@@ -26,9 +26,9 @@ function setup() {
   let n = 0;
   const c = createCoordinator({ provider: createMockProvider(), now: () => new Date(T0), activities: [WORKSHOP, LOFT, CIRCLE], newId: () => `plan-${++n}` });
   const approveAll = async (id: string) => {
-    for (const a of currentActions(c.get(id).plan).filter((x) => x.status === "proposed" || x.status === "revoked"))
+    for (const a of currentActions((await c.get(id)).plan).filter((x) => x.status === "proposed" || x.status === "revoked"))
       await c.command(id, { type: "approve", actionId: a.id, scope: a.scope, expiresAt: inHour });
-    return c.get(id).plan;
+    return (await c.get(id)).plan;
   };
   return { c, approveAll };
 }

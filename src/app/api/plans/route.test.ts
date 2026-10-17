@@ -13,7 +13,10 @@ const del = (id: string, token?: string) =>
     params: Promise.resolve({ id }),
   });
 
-beforeEach(() => _resetShareStore());
+beforeEach(() => {
+  vi.stubEnv("SUPABASE_URL", ""); // memory store, even when a local Supabase env is loaded
+  _resetShareStore();
+});
 afterEach(() => vi.unstubAllEnvs());
 
 describe("POST /api/plans", () => {
@@ -24,7 +27,7 @@ describe("POST /api/plans", () => {
     expect(data.url).toBe(`/plan/${data.id}`);
     expect(typeof data.revokeToken).toBe("string");
     expect(Date.parse(data.expiresAt)).toBeGreaterThan(Date.now());
-    const snap = getShare(data.id)!;
+    const snap = (await getShare(data.id))!;
     expect(snap.displayName).toBe("Margaret");
     expect(JSON.stringify(snap)).not.toMatch(/walker/i);
   });
@@ -62,7 +65,7 @@ describe("DELETE /api/plans/:id", () => {
     expect((await del(id)).status).toBe(404);
     expect((await del(id, "wrong")).status).toBe(404);
     expect((await del(id, revokeToken)).status).toBe(204);
-    expect(getShare(id)).toBeNull();
+    expect(await getShare(id)).toBeNull();
     expect((await del(id, revokeToken)).status).toBe(404);
   });
 });

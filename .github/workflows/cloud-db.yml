@@ -1,0 +1,110 @@
+name: DayBridge Cloud DB
+# Real local Supabase (Docker, Supabase CLI) — no hosted project, no secrets from the repo.
+# Keys come from `supabase status` of the throwaway local stack and are masked anyway.
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: daybridge-cloud-db-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+env:
+  SUPABASE_CLI_VERSION: 2.101.0
+  SUPABASE_EXCLUDE: storage-api,imgproxy,edge-runtime,vector,logflare,studio
+  AI_BASE_URL: ''
+jobs:
+  cloud-db-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Start local Supabase (applies supabase/migrations)
+        run: supabase start -x "$SUPABASE_EXCLUDE"
+      - name: Export local Supabase env
+        run: |
+          eval "$(supabase status -o env 2>/dev/null | grep -E '^[A-Z_]+=')"
+          SECRET="${SECRET_KEY:-$SERVICE_ROLE_KEY}"
+          PUB="${PUBLISHABLE_KEY:-$ANON_KEY}"
+          test -n "$API_URL" && test -n "$SECRET" && test -n "$PUB"
+          echo "::add-mask::$SECRET"
+          {
+            echo "SUPABASE_URL=$API_URL"
+            echo "SUPABASE_SECRET_KEY=$SECRET"
+            echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
+            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$PUB"
+          } >> "$GITHUB_ENV"
+      - name: Real-DB tests (store, RLS, shares)
+        run: npx vitest run --no-file-parallelism --testTimeout=30000 src/lib/supabase src/lib/share src/app/api/plans
+      - if: always()
+        run: supabase stop --no-backup
+
+  cloud-smoke:
+    needs: cloud-db-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: supabase/setup-cli@v1
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Start local Supabase (applies supabase/migrations)
+        run: supabase start -x "$SUPABASE_EXCLUDE"
+      - name: Export local Supabase env
+        run: |
+          eval "$(supabase status -o env 2>/dev/null | grep -E '^[A-Z_]+=')"
+          SECRET="${SECRET_KEY:-$SERVICE_ROLE_KEY}"
+          PUB="${PUBLISHABLE_KEY:-$ANON_KEY}"
+          test -n "$API_URL" && test -n "$SECRET" && test -n "$PUB"
+          echo "::add-mask::$SECRET"
+          {
+            echo "SUPABASE_URL=$API_URL"
+            echo "SUPABASE_SECRET_KEY=$SECRET"
+            echo "NEXT_PUBLIC_SUPABASE_URL=$API_URL"
+            echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$PUB"
+            echo "SMOKE_STATE=$RUNNER_TEMP/smoke.json"
+          } >> "$GITHUB_ENV"
+      - name: Build with cloud env (DAYBRIDGE_DEMO_EVENTS unset)
+        run: npm run build
+      - name: Start two next servers (3101, 3102)
+        run: |
+          nohup npx next start -p 3101 > "$RUNNER_TEMP/a.log" 2>&1 & echo $! > "$RUNNER_TEMP/a.pid"
+          nohup npx next start -p 3102 > "$RUNNER_TEMP/b.log" 2>&1 & echo $! > "$RUNNER_TEMP/b.pid"
+          for p in 3101 3102; do
+            for i in $(seq 1 60); do curl -fsS -o /dev/null "http://127.0.0.1:$p/" && break; sleep 1; done
+            curl -fsS -o /dev/null "http://127.0.0.1:$p/"
+          done
+      - name: Cross-process smoke
+        run: node scripts/cloud-smoke.mjs http://127.0.0.1:3101 http://127.0.0.1:3102
+      - name: Restart (kill both, start one) and reload
+        run: |
+          kill "$(cat "$RUNNER_TEMP/a.pid")" "$(cat "$RUNNER_TEMP/b.pid")" || true
+          pkill -f "next start" || true
+          sleep 2
+          nohup npx next start -p 3101 > "$RUNNER_TEMP/a2.log" 2>&1 &
+          for i in $(seq 1 60); do curl -fsS -o /dev/null http://127.0.0.1:3101/ && break; sleep 1; done
+          node scripts/cloud-smoke.mjs http://127.0.0.1:3101 reload
+      - name: Server logs
+        if: failure()
+        run: tail -n 100 "$RUNNER_TEMP"/*.log || true
+      - if: always()
+        run: |
+          pkill -f "next start" || true
+          supabase stop --no-backup

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ACTIVITIES, DEMO_PROFILES } from "@/domain/activities";
 import { runScenario } from "@/domain/engine";
 import type { AnalysisResult, Profile } from "@/lib/schema";
@@ -95,42 +95,46 @@ describe("firstNameFrom", () => {
 });
 
 describe("share store", () => {
-  beforeEach(() => _resetShareStore());
+  beforeEach(() => {
+    vi.stubEnv("SUPABASE_URL", ""); // memory store, even when a local Supabase env is loaded
+    _resetShareStore();
+  });
+  afterEach(() => vi.unstubAllEnvs());
   const input = () => ShareInput.parse({ result: resultFor(DEMO_PROFILES.margaret), consent: true });
 
-  it("issues unguessable 128-bit ids and separate 256-bit revoke tokens", () => {
-    const a = createShare(input());
-    const b = createShare(input());
+  it("issues unguessable 128-bit ids and separate 256-bit revoke tokens", async () => {
+    const a = await createShare(input());
+    const b = await createShare(input());
     expect(a.id).toMatch(ID_RE);
     expect(a.id).not.toBe(b.id);
     expect(a.revokeToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(a.revokeToken).not.toContain(a.id);
   });
 
-  it("expires after expiresInDays", () => {
+  it("expires after expiresInDays", async () => {
     const t0 = new Date("2026-10-17T00:00:00Z");
-    const { id } = createShare({ ...input(), expiresInDays: 1 }, t0);
-    expect(getShare(id, new Date(t0.getTime() + 86_399_000))).not.toBeNull();
-    expect(getShare(id, new Date(t0.getTime() + 86_400_000))).toBeNull();
+    const { id } = await createShare({ ...input(), expiresInDays: 1 }, t0);
+    expect(await getShare(id, new Date(t0.getTime() + 86_399_000))).not.toBeNull();
+    expect(await getShare(id, new Date(t0.getTime() + 86_400_000))).toBeNull();
   });
 
-  it("revokes only with the right token", () => {
-    const { id, revokeToken } = createShare(input());
-    expect(revokeShare(id, "wrong")).toBe(false);
-    expect(revokeShare("nope", revokeToken)).toBe(false);
-    expect(getShare(id)).not.toBeNull();
-    expect(revokeShare(id, revokeToken)).toBe(true);
-    expect(getShare(id)).toBeNull();
-    expect(revokeShare(id, revokeToken)).toBe(false);
+  it("revokes only with the right token", async () => {
+    const { id, revokeToken } = await createShare(input());
+    expect(await revokeShare(id, "wrong")).toBe(false);
+    expect(await revokeShare("nope", revokeToken)).toBe(false);
+    expect(await getShare(id)).not.toBeNull();
+    expect(await revokeShare(id, revokeToken)).toBe(true);
+    expect(await getShare(id)).toBeNull();
+    expect(await revokeShare(id, revokeToken)).toBe(false);
   });
 
-  it("caps at MAX_SHARES, pruning expired first", () => {
+  it("caps at MAX_SHARES, pruning expired first", { timeout: 30_000 }, async () => {
     const old = new Date("2020-01-01T00:00:00Z");
-    for (let i = 0; i < MAX_SHARES; i++) createShare(input(), old);
+    for (let i = 0; i < MAX_SHARES; i++) await createShare(input(), old);
     expect(_shareStoreSize()).toBe(MAX_SHARES);
-    createShare(input()); // all old ones are expired by now
+    await createShare(input()); // all old ones are expired by now
     expect(_shareStoreSize()).toBe(1);
-    for (let i = 0; i < MAX_SHARES + 5; i++) createShare(input());
+    for (let i = 0; i < MAX_SHARES + 5; i++) await createShare(input());
     expect(_shareStoreSize()).toBe(MAX_SHARES);
   });
 });

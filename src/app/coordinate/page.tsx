@@ -13,6 +13,7 @@ import type {
   ActionRequest, CommandResult, CoordinationEvent, CoordinationPlan, Dependency,
 } from "@/lib/schema";
 import { describePlan } from "@/domain/coordination/narrative";
+import { authFetch, cloudEnabled } from "@/lib/supabase/browser";
 
 // Coordination screen: DayBridge gets the person there, with consent at every step.
 // Everything here consumes the Coordination contract v1.0.0 (see docs/daybridge/COORDINATION_CONTRACT.md).
@@ -289,6 +290,7 @@ function CoordinateInner() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [persistence, setPersistence] = useState<string | null>(null);
   const seqCounter = useRef(new Map<string, number>());
 
   const apply = useCallback((r: CommandResult) => {
@@ -303,7 +305,7 @@ function CoordinateInner() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/coordination/plans/${plan.id}/commands`, {
+      const res = await authFetch(`/api/coordination/plans/${plan.id}/commands`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -324,7 +326,7 @@ function CoordinateInner() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/api/coordination/plans/${plan!.id}/events`, {
+      const res = await authFetch(`/api/coordination/plans/${plan!.id}/events`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -345,13 +347,24 @@ function CoordinateInner() {
     }
   }, [plan, apply]);
 
-  const loadDemo = useCallback(async () => {
+  const loadDemo = useCallback(async (restore?: unknown) => {
     setBusy(true);
     setError(null);
     setEvents([]);
     seqCounter.current = new Map();
+    // cloud: on first load (not "Restart demo"/"Try again"), reopen this tab's saved plan on refresh (same activity); 404/any failure falls through to create.
+    const savedKey = `daybridge:plan:${params.get("activityId") ?? ""}`;
     try {
-      const res = await fetch("/api/coordination/plans", {
+      const saved = restore === true && cloudEnabled() ? sessionStorage.getItem(savedKey) : null;
+      const prev = saved ? await authFetch(`/api/coordination/plans/${encodeURIComponent(saved)}`).catch(() => null) : null;
+      if (prev?.ok) {
+        const data = await prev.json();
+        setPersistence(prev.headers.get("x-daybridge-persistence"));
+        setPlan(data.plan);
+        setEvents(data.events ?? []);
+        return;
+      }
+      const res = await authFetch("/api/coordination/plans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -382,6 +395,10 @@ function CoordinateInner() {
         } catch {}
         throw new Error(data.error ?? "Request failed");
       }
+      setPersistence(res.headers.get("x-daybridge-persistence"));
+      try {
+        if (cloudEnabled()) sessionStorage.setItem(savedKey, data.plan.id);
+      } catch {}
       setPlan(data.plan);
       setEvents(data.events ?? []);
       setNotice(null);
@@ -394,7 +411,7 @@ function CoordinateInner() {
 
   useEffect(() => {
     if (!plan) {
-      const t = setTimeout(() => void loadDemo(), 0);
+      const t = setTimeout(() => void loadDemo(true), 0);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -459,6 +476,11 @@ function CoordinateInner() {
           <Badge variant="secondary" className="h-auto min-h-6 whitespace-normal px-3 py-1 text-sm">
             Demo: nothing is really sent
           </Badge>
+          {persistence && (
+            <Badge variant="outline" className="h-auto min-h-6 whitespace-normal px-3 py-1 text-sm">
+              {persistence === "supabase" ? "Saved to cloud" : "Local demo"}
+            </Badge>
+          )}
         </div>
       </header>
 

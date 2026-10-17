@@ -1,10 +1,12 @@
 import { describePlan } from "@/domain/coordination/narrative";
-import { coordinator, handle } from "../../_lib/service";
+import { context, handle } from "../../_lib/service";
 
-export async function GET(_req: Request, ctx: RouteContext<"/api/coordination/plans/[id]">) {
+export async function GET(req: Request, ctx: RouteContext<"/api/coordination/plans/[id]">) {
   const { id } = await ctx.params;
-  return handle(async () => {
-    const got = coordinator.get(id);
+  const c = await context(req);
+  if (c instanceof Response) return c;
+  return handle(c, async () => {
+    const got = await c.coordinator.get(id, c.userId);
     return { ...got, narrative: describePlan(got.plan) };
   });
 }

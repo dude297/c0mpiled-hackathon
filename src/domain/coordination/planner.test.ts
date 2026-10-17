@@ -21,7 +21,7 @@ async function execute(c: ReturnType<typeof setup>, profile: Profile, contacts: 
   const r = await c.create({ profile, activityId: "fellowship", contacts });
   const id = r.plan.id;
   await c.command(id, { type: "accept_proposal" });
-  for (const a of currentActions(c.get(id).plan)) await c.command(id, { type: "approve", actionId: a.id, scope: a.scope, expiresAt: "2026-10-17T13:00:00Z" });
+  for (const a of currentActions((await c.get(id)).plan)) await c.command(id, { type: "approve", actionId: a.id, scope: a.scope, expiresAt: "2026-10-17T13:00:00Z" });
   return (await c.command(id, { type: "execute" })).plan;
 }
 const reqOf = (p: CoordinationPlan, kind: "ride" | "invite") => currentActions(p).find((a) => a.scope.kind === kind)!.providerRequestId!;

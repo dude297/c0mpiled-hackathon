@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
-import { getShare } from "@/lib/share/share";
+import { getShare, shareStoreKind } from "@/lib/share/share";
 
 // Read-only, redacted shared plan. Blocks on the server so missing/expired/revoked links get a real 404.
 export const instant = false;
@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: "Shared plan · DayBridge", robots: {
 export default async function SharedPlanPage(props: PageProps<"/plan/[id]">) {
   await connection();
   const { id } = await props.params;
-  const plan = getShare(id);
+  const plan = await getShare(id);
   if (!plan) notFound();
 
   return (
@@ -43,7 +43,10 @@ export default async function SharedPlanPage(props: PageProps<"/plan/[id]">) {
           Plan checked by deterministic rules. The AI explanation ({plan.dataSource === "live" ? "live AI" : "mock AI"}) is not included in shared
           links; personal details are removed.
         </p>
-        <p>Demo link — valid while this demo server is running, until {new Date(plan.expiresAt).toUTCString()}.</p>
+        <p>
+          {shareStoreKind() === "memory" ? "Demo link — valid while this demo server is running, until" : "Link valid until"}{" "}
+          {new Date(plan.expiresAt).toUTCString()}.
+        </p>
       </footer>
     </main>
   );

@@ -14,9 +14,15 @@ import { CoordinationError } from "@/domain/coordination/coordinator";
 import type { CoordinationEvent, CoordinationPlan } from "@/lib/schema";
 import { coordinator, demoEventsEnabled, parseBody } from "../../coordination/_lib/service";
 import { headerCallerResolver, type CallerResolver } from "./caller";
+import { supabaseCallerResolver } from "@/lib/supabase/caller";
+import { createSupabaseCaregiverStore } from "@/lib/supabase/caregiver-store";
+import { supabaseConfigured } from "@/lib/supabase/server";
 
 // Swappable ports: the cloud lane replaces these with Supabase-backed implementations.
-export const ports: { store: CaregiverStore; caller: CallerResolver } = { store: memoryCaregiverStore, caller: headerCallerResolver };
+// Supabase configured → durable store + verified session ALWAYS (x-daybridge-user is never read).
+export const ports: { store: CaregiverStore; caller: CallerResolver } = supabaseConfigured()
+  ? { store: createSupabaseCaregiverStore(), caller: supabaseCallerResolver }
+  : { store: memoryCaregiverStore, caller: headerCallerResolver };
 
 export const CAREGIVER_HOSTED_DISABLED = "Caregiver dashboard needs sign-in and storage; available in the local demo";
 
@@ -25,7 +31,7 @@ export const reply = (body: object, status = 200) => Response.json({ ...body, la
 
 /** Hosted production without the local-demo flag fails closed (503) before identity is even read. */
 export async function resolveCaller(req: Request): Promise<{ userId: string } | Response> {
-  if (!demoEventsEnabled()) return reply({ error: CAREGIVER_HOSTED_DISABLED }, 503);
+  if (!supabaseConfigured() && !demoEventsEnabled()) return reply({ error: CAREGIVER_HOSTED_DISABLED }, 503);
   const userId = await ports.caller.resolve(req);
   return userId ? { userId } : reply({ error: "Missing or invalid caller (x-daybridge-user)" }, 401);
 }
@@ -164,7 +170,7 @@ export async function revokeGrant(userId: string, personId: string, target: stri
 export async function createPlan(userId: string, personId: string, req: Request) {
   const { person } = await access(personId, userId, "manage");
   const input = await body(req, CreatePersonPlanInput);
-  const res = await coordinator.create({ profile: person.profile, activityId: input.activityId, contacts: input.contacts });
+  const res = await coordinator.create({ profile: person.profile, activityId: input.activityId, contacts: input.contacts }, userId);
   const linked = await ports.store.linkPlan({ personId, planId: res.plan.id, linkedAt: new Date().toISOString(), linkedBy: userId, profileVersion: person.profileVersion ?? 1 });
   if (linked !== "ok") throw new CaregiverError(409, "Plan is already linked to a person");
   return reply({ planId: res.plan.id, state: res.plan.state, profileVersion: person.profileVersion ?? 1 }, 201);

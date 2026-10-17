@@ -47,21 +47,21 @@ const act = (p: CoordinationPlan, kind: "ride" | "invite") => currentActions(p).
 const depOf = (p: CoordinationPlan, actionId: string) => p.dependencies.find((d) => d.actionId === actionId)!;
 
 async function approvePending(s: S, id: string) {
-  for (const a of currentActions(s.c.get(id).plan).filter((x) => x.status === "proposed" || x.status === "revoked")) {
+  for (const a of currentActions((await s.c.get(id)).plan).filter((x) => x.status === "proposed" || x.status === "revoked")) {
     const r = ok(await s.c.command(id, { type: "approve", actionId: a.id, scope: a.scope, expiresAt: s.at(HOUR) }));
     expect(r.outcome).toBe("applied");
   }
-  return s.c.get(id).plan;
+  return (await s.c.get(id)).plan;
 }
 
 // Confirms every current dependency still waiting on the provider.
 async function confirmRequested(s: S, id: string) {
-  for (const a of currentActions(s.c.get(id).plan)) {
-    const d = depOf(s.c.get(id).plan, a.id);
+  for (const a of currentActions((await s.c.get(id)).plan)) {
+    const d = depOf((await s.c.get(id)).plan, a.id);
     if (d.status !== "requested") continue;
     ok(await s.c.ingest(id, ev(a.providerRequestId!, a.scope.kind === "ride" ? "ride.confirmed" : "invite.accepted", d.lastSequence + 1)));
   }
-  return s.c.get(id).plan;
+  return (await s.c.get(id)).plan;
 }
 
 async function toReady(s: S, profile = MAYA) {
@@ -186,7 +186,7 @@ describe("golden coordination loop (end-to-end trace)", () => {
     expect(s.raw).toHaveLength(3);
     expect(s.raw.filter((x) => x.kind === "invite")).toHaveLength(1);
 
-    const { events } = s.c.get(id);
+    const { events } = (await s.c.get(id));
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i + 1));
     expect(events.map((e) => e.type)).toEqual([
       "plan.created", "plan.blocked",
@@ -275,7 +275,7 @@ describe("state × command matrix", () => {
       it(`${type} in ${state} → ${outcome} (${nextState}), never a false READY, never a dispatch`, async () => {
         const s = setup();
         const id = await builders[state](s);
-        const before = s.c.get(id).plan;
+        const before = (await s.c.get(id)).plan;
         expect(before.state).toBe(state);
         const calls = s.raw.length;
 
@@ -284,7 +284,7 @@ describe("state × command matrix", () => {
         expect(s.raw).toHaveLength(calls);
         if (r.plan.state === "READY") expect(readyViolations(r.plan)).toEqual([]);
         if (r.outcome !== "applied") expect(r.plan).toEqual(before); // refusals never mutate the plan
-        expect(s.c.get(id).plan).toEqual(r.plan);
+        expect((await s.c.get(id)).plan).toEqual(r.plan);
         expect(r.events).toHaveLength(r.outcome === "applied" ? r.events.length : 1);
       });
     }
@@ -341,7 +341,7 @@ describe("adversarial approvals and revocations", () => {
     const invite = act(plan, "invite");
     for (const state of ["NEEDS_REPLAN", "AWAITING_APPROVAL"] as const) {
       if (state === "AWAITING_APPROVAL") ok(await s.c.command(id, { type: "accept_proposal" }));
-      const before = s.c.get(id).plan;
+      const before = (await s.c.get(id)).plan;
       expect(before.state).toBe(state);
       const r = ok(await s.c.command(id, { type: "revoke", actionId: invite.id }));
       expect(r.outcome).toBe("rejected");
@@ -361,7 +361,7 @@ describe("state isolation", () => {
     const contacts = structuredClone(CONTACTS);
     const r = ok(await s.c.create({ profile, activityId: "workshop", contacts }));
     const id = r.plan.id;
-    const snapshot = s.c.get(id);
+    const snapshot = (await s.c.get(id));
 
     r.plan.state = "READY";
     r.plan.actions[0].status = "dispatched";
@@ -369,11 +369,11 @@ describe("state isolation", () => {
     r.events.push({ ...r.events[0], type: "forged" });
     profile.maxTravelMin = 120;
     contacts[0].canDrive = true;
-    const got = s.c.get(id);
+    const got = (await s.c.get(id));
     got.plan.approvals.push({ id: "forged", actionId: got.plan.actions[0].id, scope: got.plan.actions[0].scope, approvedBy: "user", approvedAt: s.at(0), expiresAt: s.at(HOUR), revoked: false });
     got.events.length = 0;
 
-    expect(s.c.get(id)).toEqual(snapshot);
+    expect((await s.c.get(id))).toEqual(snapshot);
     ok(await s.c.command(id, { type: "accept_proposal" }));
     expect(ok(await s.c.command(id, { type: "execute" })).outcome).toBe("rejected"); // forged approval did not leak in
     expect(s.raw).toHaveLength(0);
@@ -386,14 +386,14 @@ describe("state isolation", () => {
     ok(await s.c.command(bId, { type: "accept_proposal" }));
     await approvePending(s, bId);
     const b = ok(await s.c.command(bId, { type: "execute" })).plan;
-    const [beforeA, beforeB] = [s.c.get(a.id).plan, s.c.get(bId).plan];
+    const [beforeA, beforeB] = [(await s.c.get(a.id)).plan, (await s.c.get(bId)).plan];
 
     for (const [target, other] of [[a.id, b], [bId, a.plan]] as const) {
       const r = ok(await s.c.ingest(target, ev(act(other, "ride").providerRequestId!, "ride.cancelled", 9)));
       expect(r.outcome).toBe("rejected");
     }
-    expect(s.c.get(a.id).plan).toEqual(beforeA);
-    expect(s.c.get(bId).plan).toEqual(beforeB);
+    expect((await s.c.get(a.id)).plan).toEqual(beforeA);
+    expect((await s.c.get(bId)).plan).toEqual(beforeB);
     expect(beforeA.state).toBe("READY");
     expect(beforeB.state).toBe("PENDING_CONFIRMATION");
   });
@@ -434,7 +434,7 @@ describe("concurrency and ordering", () => {
       const rs = (await Promise.all([s.c.ingest(id, first), s.c.ingest(id, second)])).map(ok);
       if (order === "confirm-first") expect(rs.map((r) => [r.outcome, r.plan.state])).toEqual([["applied", "READY"], ["applied", "NEEDS_REPLAN"]]);
       else expect(rs.map((r) => [r.outcome, r.plan.state])).toEqual([["applied", "NEEDS_REPLAN"], ["ignored", "NEEDS_REPLAN"]]);
-      const final = s.c.get(id).plan;
+      const final = (await s.c.get(id)).plan;
       expect(final.state).toBe("NEEDS_REPLAN");
       expect(final.dependencies.find((d) => d.actionId.includes(":ride:dan"))!.status).toBe("cancelled");
     }
@@ -445,7 +445,7 @@ describe("concurrency and ordering", () => {
     const { id, rid } = await pending(s);
     const rs = (await Promise.all([s.c.ingest(id, ev(rid, "ride.cancelled", 1)), s.c.ingest(id, ev(rid, "ride.confirmed", 1))])).map(ok);
     expect(rs.map((r) => r.outcome)).toEqual(["applied", "ignored"]);
-    expect(s.c.get(id).plan.state).toBe("NEEDS_REPLAN");
+    expect((await s.c.get(id)).plan.state).toBe("NEEDS_REPLAN");
   });
 
   it("events for the previous activity's dispatched requests are ignored after choose_alternative", async () => {
@@ -509,7 +509,7 @@ describe("feedback and preferences", () => {
     const r = ok(await s.c.command(a, { type: "confirm_preference", patchId: patch.id }));
     expect(r.outcome).toBe("rejected");
     expect(r.plan.profileVersion).toBe(1);
-    expect(s.c.get(b).plan.profile.maxTravelMin).toBe(30);
+    expect((await s.c.get(b)).plan.profile.maxTravelMin).toBe(30);
   });
 });
 
@@ -571,7 +571,7 @@ describe("bugs found", () => {
     ok(await s.c.command(id, { type: "accept_proposal" }));
     await approvePending(s, id);
     ok(await s.c.command(id, { type: "execute" }));
-    expect(currentDeps(s.c.get(id).plan).length).toBeGreaterThan(0);
+    expect(currentDeps((await s.c.get(id)).plan).length).toBeGreaterThan(0);
     expect(inner.calls.filter((x) => x.kind === "invite" && x.recipientId === "elaine")).toHaveLength(1);
   });
 });
