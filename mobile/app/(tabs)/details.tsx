@@ -19,6 +19,11 @@ const MOBILITY: Record<Profile['mobility'], string> = {
 const TRANSPORT: Record<Profile['transport'][number], string> = {
   drive: 'drives', bus: 'bus', paratransit: 'senior shuttle', family: 'family rides', walk: 'walks',
 };
+const STATUS = {
+  passed: { label: 'Passed', icon: 'checkmark-circle', color: colors.like },
+  heads: { label: 'Heads up', icon: 'warning', color: colors.soft },
+  problem: { label: 'Problem', icon: 'close-circle', color: colors.hard },
+} as const;
 const list = (xs: string[]) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 
 function Row({ label, value }: { label: string; value: string }) {
@@ -51,8 +56,14 @@ export default function Details() {
       {profile && <BigButton label="Change my answers" icon="create-outline" variant="outline" onPress={changeAnswers} hint="Goes back to the questions" />}
       <ResultGate>
         {(result) => {
-          const passed = result.evidence.filter((e) => e.verified).length;
-          const flagged = result.evidence.length - passed;
+          // Soft barriers pass the engine check (verified) but need a work-around: show them as "Heads up", not "Passed".
+          const softKeys = new Set(
+            result.plan.flatMap((i) => i.barriers.filter((b) => b.severity === 'soft').map((b) => `activity:${i.activityId}/rule:${b.rule}`)),
+          );
+          const status = (e: (typeof result.evidence)[number]) => (!e.verified ? 'problem' : softKeys.has(e.source) ? 'heads' : 'passed');
+          const heads = result.evidence.filter((e) => status(e) === 'heads').length;
+          const passed = result.evidence.filter((e) => status(e) === 'passed').length;
+          const flagged = result.evidence.length - passed - heads;
           return (
             <>
               <View style={[styles.card, { gap: space.md }]}>
@@ -63,17 +74,18 @@ export default function Details() {
                   </View>
                 ))}
               </View>
-              <Collapsible title="Every check we ran" subtitle={`${passed} passed · ${flagged} problem${flagged === 1 ? '' : 's'}`}>
+              <Collapsible title="Every check we ran" subtitle={`${passed} passed${heads ? ` · ${heads} heads-up` : ''} · ${flagged} problem${flagged === 1 ? '' : 's'}`}>
                 {result.evidence.map((e) => {
                   const src = parseEvidenceSource(e.source);
                   // claim is "<activity name>: <engine detail>"; reword the detail, keep the name.
                   const named = ACTIVITIES.find((x) => x.id === src?.activityId)?.name ?? e.claim.split(': ')[0];
                   const text = src ? `${named}: ${reason(src.rule, evidenceDetail(e.claim, named), e.verified, { id: src.activityId })}` : e.claim;
+                  const look = STATUS[status(e)];
                   return (
-                    <View key={e.source} style={[styles.metaRow, { paddingVertical: space.xs }]} accessible accessibilityLabel={`${e.verified ? 'Passed' : 'Problem'}: ${text}`}>
-                      <Ionicons name={e.verified ? 'checkmark-circle' : 'close-circle'} size={24} color={e.verified ? colors.like : colors.hard} style={{ marginTop: 1 }} />
+                    <View key={e.source} style={[styles.metaRow, { paddingVertical: space.xs }]} accessible accessibilityLabel={`${look.label}: ${text}`}>
+                      <Ionicons name={look.icon} size={24} color={look.color} style={{ marginTop: 1 }} />
                       <Text style={[type.body, { color: colors.text, flex: 1 }]}>
-                        <Text style={[type.bodyStrong, { color: e.verified ? colors.like : colors.hard }]}>{e.verified ? 'Passed: ' : 'Problem: '}</Text>
+                        <Text style={[type.bodyStrong, { color: look.color }]}>{look.label}: </Text>
                         {text}
                       </Text>
                     </View>

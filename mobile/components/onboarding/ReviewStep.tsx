@@ -15,6 +15,7 @@ export function ReviewStep({
   onConfirm,
   busy,
   bottomInset,
+  note,
 }: {
   name: string;
   onChangeName: () => void;
@@ -23,6 +24,7 @@ export function ReviewStep({
   onConfirm: () => void;
   busy?: boolean;
   bottomInset: number;
+  note?: { text: string; onChange: () => void }; // blocking problem: shown inline, See my matches stays off until fixed
 }) {
   const heading = useHeadingFocus();
   return (
@@ -50,13 +52,21 @@ export function ReviewStep({
             />
           </View>
         ))}
+        {note ? (
+          <View style={[st.row, { borderColor: colors.softBorder, backgroundColor: colors.softBg }]} accessible={false}>
+            <Text accessibilityLiveRegion="polite" style={[type.bodyStrong, { color: colors.soft, flex: 1 }]}>
+              {note.text}
+            </Text>
+            <PillButton variant="outline" label="Change" a11yLabel="Change how you get places" onPress={note.onChange} disabled={busy} style={st.change} />
+          </View>
+        ) : null}
       </ScrollView>
       <View style={[ui.footer, { paddingBottom: bottomInset + space.md }]}>
         <PillButton
           label={busy ? 'Finding matches…' : 'See my matches'}
           icon={busy ? undefined : 'arrow-forward'}
           onPress={onConfirm}
-          disabled={busy}
+          disabled={busy || !!note}
           style={{ flex: 1 }}
         />
       </View>

@@ -19,14 +19,11 @@ export function tapHaptic() {
   if (Platform.OS !== 'web') Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 }
 
-/** reset() then back to onboarding. Same action from every tab. */
+/** Back to the onboarding review ("Here's what we heard") with every answer kept. Same action from every tab.
+ *  dismissTo pops to the onboarding screen under the tabs; if it isn't there (e.g. a web refresh), it replaces. */
 export function useChangeAnswers() {
   const router = useRouter();
-  const { reset } = useApp();
-  return () => {
-    reset();
-    router.replace('/onboarding');
-  };
+  return () => router.dismissTo('/onboarding');
 }
 
 /** Plain-language reason for one engine check, using what we know about the activity and the person. */

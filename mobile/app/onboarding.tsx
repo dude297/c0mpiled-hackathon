@@ -7,7 +7,7 @@
 // Interests: swipe deck (default), the Easier view grid, or Hands-free (look / head tilt answers the
 // same swipe cards). Switching modes keeps every answer.
 import { useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -34,6 +34,7 @@ import {
   type ReviewField,
 } from '@/lib/onboarding';
 import { DEMO_PROFILES } from '@/domain/activities';
+import type { Profile } from '@/lib/schema';
 import { useApp } from '@/lib/store';
 import { colors, radius, space, tap, type } from '@/lib/theme';
 
@@ -51,26 +52,63 @@ const VIEWS = [
 ] as const;
 const LAST = INTEREST_META.length - 1;
 
+// Answers rebuilt from the last matched profile, so "Change my answers" / Back from Matches lands on the
+// review with everything kept (also after a demo).
+function draftFrom(p: Profile, first: string | null) {
+  const comfort: ComfortKey[] = [...(p.hearingImpaired ? ['hearing' as const] : []), ...(p.prefersSmallGroups ? ['smallGroups' as const] : [])];
+  return {
+    name: first ?? '',
+    liked: Object.fromEntries(INTEREST_META.map((i) => [i.key, p.interests.includes(i.key)])) as Partial<Record<Key, boolean>>,
+    times: [...p.times] as TimeSlot[],
+    travel: p.maxTravelMin,
+    mobility: p.mobility as MobilityKey,
+    transport: [...p.transport] as TransportKey[],
+    comfort: comfort.length ? comfort : (['neither'] as ComfortKey[]),
+    budget: p.budgetPerWeek,
+  };
+}
+
 export default function Onboarding() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { analyze, loading } = useApp();
+  const { analyze, loading, profile, firstName } = useApp();
+  const [d0] = useState(() => (profile ? draftFrom(profile, firstName) : null));
 
-  const [step, setStep] = useState(0);
-  const [name, setName] = useState('');
+  const [step, setStep] = useState(d0 ? STEPS.length - 1 : 0);
+  const [name, setName] = useState(d0?.name ?? '');
   const [easy, setEasy] = useState(false);
   const [handsFree, setHandsFree] = useState(false);
-  const [liked, setLiked] = useState<Partial<Record<Key, boolean>>>({});
-  const [cursor, setCursor] = useState(0); // swipe deck position
+  const [liked, setLiked] = useState<Partial<Record<Key, boolean>>>(d0?.liked ?? {});
+  const [cursor, setCursor] = useState(d0 ? INTEREST_META.length : 0); // swipe deck position
   const [enterFrom, setEnterFrom] = useState<1 | -1 | null>(null);
-  const [times, setTimes] = useState<TimeSlot[]>([]);
-  const [travel, setTravel] = useState<number | null>(null);
-  const [mobility, setMobility] = useState<MobilityKey | null>(null);
-  const [transport, setTransport] = useState<TransportKey[]>([]);
-  const [comfort, setComfort] = useState<ComfortKey[]>([]);
-  const [budget, setBudget] = useState<number | null>(null);
+  const [times, setTimes] = useState<TimeSlot[]>(d0?.times ?? []);
+  const [travel, setTravel] = useState<number | null>(d0?.travel ?? null);
+  const [mobility, setMobility] = useState<MobilityKey | null>(d0?.mobility ?? null);
+  const [transport, setTransport] = useState<TransportKey[]>(d0?.transport ?? []);
+  const [comfort, setComfort] = useState<ComfortKey[]>(d0?.comfort ?? []);
+  const [budget, setBudget] = useState<number | null>(d0?.budget ?? null);
   const [editing, setEditing] = useState(false); // came from the review's Change: Continue returns there
   const submitting = useRef(false); // double-tap lockout for See my matches
+  const seen = useRef<Profile | null>(profile); // last profile these answers came from (ours or a demo's)
+
+  // A demo matched while this screen stays mounted under the tabs: load its answers so Back / Change
+  // lands on the review. Our own finish() already holds the answers (and keeps "(default)" labels).
+  useEffect(() => {
+    if (!profile || profile === seen.current) return;
+    seen.current = profile;
+    const d = draftFrom(profile, firstName);
+    setName(d.name);
+    setLiked(d.liked);
+    setCursor(INTEREST_META.length);
+    setTimes(d.times);
+    setTravel(d.travel);
+    setMobility(d.mobility);
+    setTransport(d.transport);
+    setComfort(d.comfort);
+    setBudget(d.budget);
+    setEditing(false);
+    setStep(stepOf('review'));
+  }, [profile, firstName]);
 
   const current = STEPS[step];
   const next = () => {
@@ -156,9 +194,10 @@ export default function Onboarding() {
       return setStep(stepOf(result.missing[0]));
     }
     submitting.current = true;
+    seen.current = result.profile;
     try {
       await analyze(result.profile, name);
-      router.replace('/(tabs)/matches');
+      router.push('/(tabs)/matches'); // push: Back from Matches returns to this review
     } finally {
       submitting.current = false;
     }
@@ -172,7 +211,7 @@ export default function Onboarding() {
     submitting.current = true;
     try {
       await analyze(p, p.name);
-      router.replace('/(tabs)/matches');
+      router.push('/(tabs)/matches');
     } finally {
       submitting.current = false;
     }
@@ -180,13 +219,29 @@ export default function Onboarding() {
 
   const bottom = insets.bottom;
   const showTopBack = step > 0 && !(current === 'interests' && !easy); // swipe deck has its own Back
+  // Came from the review's Change on "What sounds fun": return without re-answering every card.
+  const showBackToReview = editing && current === 'interests';
+  const backToReview = () => {
+    setEditing(false);
+    setEnterFrom(null);
+    setCursor(INTEREST_META.length);
+    setStep(stepOf('review'));
+  };
+  // The engine skips walking routes for walker / wheelchair users; if walking is their only way, say so.
+  const walkOnly =
+    (mobility === 'walker' || mobility === 'wheelchair') && transport.length > 0 && transport.every((t) => t === 'walk');
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={[st.header, { paddingTop: insets.top + space.sm }]}>
-        {showTopBack ? (
+        {showTopBack || showBackToReview ? (
           <View style={st.headerRow}>
-            <PillButton variant="outline" icon="arrow-back" label="Back" onPress={back} disabled={loading} style={st.backBtn} />
+            {showTopBack ? (
+              <PillButton variant="outline" icon="arrow-back" label="Back" onPress={back} disabled={loading} style={st.backBtn} />
+            ) : null}
+            {showBackToReview ? (
+              <PillButton variant="outline" icon="checkmark" label="Back to review" onPress={backToReview} disabled={loading} style={st.backBtn} />
+            ) : null}
           </View>
         ) : null}
         {current === 'interests' ? (
@@ -358,6 +413,11 @@ export default function Onboarding() {
           rows={reviewRows(answers())}
           onChange={change}
           onConfirm={finish}
+          note={
+            walkOnly
+              ? { text: 'Walking routes are skipped for walker/wheelchair users — add another way to get places', onChange: () => change('transport') }
+              : undefined
+          }
           busy={loading}
           bottomInset={bottom}
         />

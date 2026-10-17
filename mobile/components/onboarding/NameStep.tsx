@@ -76,6 +76,7 @@ export function NameStep({
             autoCapitalize="words"
             autoComplete="given-name"
             returnKeyType="done"
+            onSubmitEditing={busy ? undefined : onStart} // Enter / Done starts the questions
             accessibilityLabel="Your first name"
             accessibilityHint="Optional"
             style={st.input}
