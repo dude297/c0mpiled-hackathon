@@ -1,6 +1,8 @@
-import { coordinator, handle } from "../../_lib/service";
+import { context, handle } from "../../_lib/service";
 
-export async function GET(_req: Request, ctx: RouteContext<"/api/coordination/plans/[id]">) {
+export async function GET(req: Request, ctx: RouteContext<"/api/coordination/plans/[id]">) {
   const { id } = await ctx.params;
-  return handle(async () => coordinator.get(id));
+  const c = await context(req);
+  if (c instanceof Response) return c;
+  return handle(c, () => c.coordinator.get(id, c.userId));
 }

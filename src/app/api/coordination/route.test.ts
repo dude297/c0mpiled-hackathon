@@ -48,6 +48,11 @@ describe("coordination API", () => {
     vi.stubEnv("NODE_ENV", "production");
     expect((await events(json({}), ctx("any"))).status).toBe(403);
     vi.stubEnv("DAYBRIDGE_DEMO_EVENTS", "1");
-    expect((await events(json({}), ctx("any"))).status).toBe(400);
+    expect((await events(json({}), ctx("any"))).status).toBe(403); // flag alone is not enough: needs the demo key
+    const key = "k".repeat(32);
+    vi.stubEnv("DAYBRIDGE_DEMO_KEY", key);
+    vi.stubEnv("SUPABASE_URL", "");
+    const keyed = new Request("http://test", { method: "POST", body: "{}", headers: { "x-daybridge-demo-key": key } });
+    expect((await events(keyed, ctx("any"))).status).toBe(503); // gate passed; prod without persistence fails closed
   });
 });

@@ -51,7 +51,7 @@ async function toReady(s: ReturnType<typeof setup>) {
   const created = ok(await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS }));
   const id = created.plan.id;
   await s.c.command(id, { type: "accept_proposal" });
-  const approved = await approveAll(s.c, s.c.get(id).plan, s.at(HOUR));
+  const approved = await approveAll(s.c, (await s.c.get(id)).plan, s.at(HOUR));
   const exec = ok(await s.c.command(id, { type: "execute" }));
   expect(exec.plan.state).toBe("PENDING_CONFIRMATION");
   await s.c.ingest(id, ev(req(exec.plan, "invite"), "invite.accepted"));
@@ -107,7 +107,7 @@ describe("consent and dispatch", () => {
     expect(early.outcome).toBe("rejected");
     expect(mock.calls).toHaveLength(0);
 
-    await approveAll(s.c, s.c.get(id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(id)).plan, s.at(HOUR));
     const exec = ok(await s.c.command(id, { type: "execute" }));
     expect(exec.plan.state).toBe("PENDING_CONFIRMATION");
     expect(mock.calls.map((x) => x.kind).sort()).toEqual(["invite", "ride"]);
@@ -175,13 +175,13 @@ describe("consent and dispatch", () => {
     const mock = s.provider as ReturnType<typeof createMockProvider>;
     const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    const plan = await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    const plan = await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     const invite = currentActions(plan).find((a) => a.scope.kind === "invite")!;
     expect((await s.c.command(plan.id, { type: "revoke", actionId: invite.id })).outcome).toBe("applied");
     expect((await s.c.command(plan.id, { type: "execute" })).outcome).toBe("rejected");
     expect(mock.calls).toHaveLength(0);
 
-    await approveAll(s.c, s.c.get(plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(plan.id)).plan, s.at(HOUR));
     await s.c.command(plan.id, { type: "execute" });
     expect((await s.c.command(plan.id, { type: "revoke", actionId: invite.id })).reason).toMatch(/Already sent/);
   });
@@ -191,7 +191,7 @@ describe("consent and dispatch", () => {
     const mock = s.provider as ReturnType<typeof createMockProvider>;
     const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     await Promise.all([s.c.command(r.plan.id, { type: "execute" }), s.c.command(r.plan.id, { type: "execute" })]);
     expect((await s.c.command(r.plan.id, { type: "execute" })).outcome).toBe("duplicate");
     expect(mock.calls).toHaveLength(2);
@@ -215,7 +215,7 @@ describe("consent and dispatch", () => {
     const s = setup({ provider: flaky });
     const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     const first = await s.c.command(r.plan.id, { type: "execute" });
     expect(first.plan.state).toBe("AWAITING_APPROVAL");
     const retry = await s.c.command(r.plan.id, { type: "execute" });
@@ -229,7 +229,7 @@ describe("provider evidence", () => {
     const s = setup();
     const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     const exec = await s.c.command(r.plan.id, { type: "execute" });
     const e1 = ev(req(exec.plan, "ride"), "ride.confirmed", 1, { idempotencyKey: "cb-1" });
     expect((await s.c.ingest(r.plan.id, e1)).outcome).toBe("applied");
@@ -243,7 +243,7 @@ describe("provider evidence", () => {
     const s = setup();
     const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     const exec = await s.c.command(r.plan.id, { type: "execute" });
     await s.c.ingest(r.plan.id, ev(req(exec.plan, "invite"), "invite.accepted"));
     const cancelled = await s.c.ingest(r.plan.id, ev(req(exec.plan, "ride"), "ride.cancelled", 2));
@@ -258,10 +258,10 @@ describe("provider evidence", () => {
     const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
     expect((await s.c.ingest(r.plan.id, ev("mock-ride-forged", "ride.confirmed"))).outcome).toBe("rejected");
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     const exec = await s.c.command(r.plan.id, { type: "execute" });
     expect((await s.c.ingest(r.plan.id, ev(req(exec.plan, "invite"), "ride.confirmed"))).outcome).toBe("rejected");
-    expect(s.c.get(r.plan.id).plan.state).toBe("PENDING_CONFIRMATION");
+    expect((await s.c.get(r.plan.id)).plan.state).toBe("PENDING_CONFIRMATION");
   });
 });
 
@@ -271,14 +271,14 @@ describe("review regressions", () => {
     const mock = s.provider as ReturnType<typeof createMockProvider>;
     const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     const exec = await s.c.command(r.plan.id, { type: "execute" });
     const inviteReq = req(exec.plan, "invite");
     const replan = await s.c.ingest(r.plan.id, ev(req(exec.plan, "ride"), "ride.declined"));
     expect(replan.plan.state).toBe("NEEDS_REPLAN");
     expect(req(replan.plan, "invite")).toBe(inviteReq); // same live request, not superseded
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     const again = await s.c.command(r.plan.id, { type: "execute" });
     expect(mock.calls.filter((x) => x.kind === "invite")).toHaveLength(1);
     await s.c.ingest(r.plan.id, ev(inviteReq, "invite.accepted")); // Elaine's reply to the original invite still counts
@@ -293,7 +293,7 @@ describe("review regressions", () => {
     const c = createCoordinator({ provider, now: () => new Date(T0), activities: [...CATALOG, SAME_DAY], newId: () => `plan-${++n}` });
     const r = await c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
     await c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(c, c.get(r.plan.id).plan, new Date(T0 + HOUR).toISOString());
+    await approveAll(c, (await c.get(r.plan.id)).plan, new Date(T0 + HOUR).toISOString());
     const exec = await c.command(r.plan.id, { type: "execute" });
     await c.ingest(r.plan.id, ev(req(exec.plan, "ride"), "ride.declined"));
     const alt = await c.command(r.plan.id, { type: "choose_alternative", activityId: "fair" });
@@ -327,9 +327,9 @@ describe("review regressions", () => {
     const s = setup({ provider: greedy });
     const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     await s.c.command(r.plan.id, { type: "execute" });
-    expect(currentActions(s.c.get(r.plan.id).plan).find((a) => a.scope.kind === "ride")!.scope.sharedFields).not.toContain("homeAddress");
+    expect(currentActions((await s.c.get(r.plan.id)).plan).find((a) => a.scope.kind === "ride")!.scope.sharedFields).not.toContain("homeAddress");
     const r2 = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
     expect(currentActions(r2.plan).find((a) => a.scope.kind === "ride")!.scope.sharedFields).not.toContain("homeAddress");
   });
@@ -341,7 +341,7 @@ describe("review regressions", () => {
       const s = setup({ provider: hung });
       const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
       await s.c.command(r.plan.id, { type: "accept_proposal" });
-      await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+      await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
       const pending = s.c.command(r.plan.id, { type: "execute" });
       await vi.advanceTimersByTimeAsync(PROVIDER_TIMEOUT_MS * 2 + 10);
       const res = await pending;
@@ -378,7 +378,7 @@ describe("disruption and recovery", () => {
 
     expect((await s.c.command(id, { type: "accept_proposal" })).plan.state).toBe("AWAITING_APPROVAL");
     expect((await s.c.command(id, { type: "execute" })).outcome).toBe("rejected"); // old approval doesn't cover new scope
-    await approveAll(s.c, s.c.get(id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(id)).plan, s.at(HOUR));
     const exec = await s.c.command(id, { type: "execute" });
     expect(exec.plan.state).toBe("PENDING_CONFIRMATION");
     const again = await s.c.ingest(id, ev(req(exec.plan, "ride"), "ride.confirmed"));
@@ -386,14 +386,14 @@ describe("disruption and recovery", () => {
     expect(mock.calls.filter((x) => x.kind === "invite")).toHaveLength(1); // Elaine was not re-invited
     // Late events for the superseded ride are ignored.
     expect((await s.c.ingest(id, ev(oldRide, "ride.confirmed", 3))).outcome).toBe("ignored");
-    expect(s.c.get(id).plan.state).toBe("READY");
+    expect((await s.c.get(id)).plan.state).toBe("READY");
   });
 
   it("companion decline triggers a replan without the declined companion", async () => {
     const s = setup();
     const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: [...CONTACTS, { id: "rosa", name: "Rosa", canDrive: false }] });
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     const exec = await s.c.command(r.plan.id, { type: "execute" });
     const declined = await s.c.ingest(r.plan.id, ev(req(exec.plan, "invite"), "invite.declined"));
     expect(declined.plan.state).toBe("NEEDS_REPLAN");
@@ -405,7 +405,7 @@ describe("disruption and recovery", () => {
     const s = setup({ provider: createMockProvider({ fail: (i) => i.recipientId === "dan" }) });
     const r = await s.c.create({ profile: MAYA, activityId: "workshop", contacts: CONTACTS });
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     const exec = await s.c.command(r.plan.id, { type: "execute" });
     expect(exec.plan.state).toBe("NEEDS_REPLAN");
     expect(currentActions(exec.plan).find((a) => a.scope.kind === "ride")!.scope.recipientId).toBe(PARATRANSIT_ID);
@@ -415,7 +415,7 @@ describe("disruption and recovery", () => {
     const s = setup({ profile: MAYA });
     const r = await s.c.create({ profile: { ...MAYA, transport: ["bus", "family"] }, activityId: "workshop", contacts: CONTACTS });
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     const exec = await s.c.command(r.plan.id, { type: "execute" });
     const res = await s.c.ingest(r.plan.id, ev(req(exec.plan, "ride"), "ride.declined"));
     expect(res.plan.state).toBe("NEEDS_REPLAN");
@@ -431,7 +431,7 @@ describe("completion and feedback", () => {
     const p0: Profile = { ...MAYA, prefersSmallGroups: false };
     const r = await s.c.create({ profile: p0, activityId: "workshop", contacts: CONTACTS });
     await s.c.command(r.plan.id, { type: "accept_proposal" });
-    await approveAll(s.c, s.c.get(r.plan.id).plan, s.at(HOUR));
+    await approveAll(s.c, (await s.c.get(r.plan.id)).plan, s.at(HOUR));
     const exec = await s.c.command(r.plan.id, { type: "execute" });
     expect((await s.c.command(r.plan.id, { type: "feedback", signals: ["too_crowded"] })).outcome).toBe("rejected"); // not completed yet
     await s.c.ingest(r.plan.id, ev(req(exec.plan, "ride"), "ride.confirmed"));
@@ -472,7 +472,7 @@ describe("completion and feedback", () => {
     await s.c.command(id, { type: "cancel" });
     expect((await s.c.ingest(id, ev(req(ready, "ride"), "ride.cancelled", 5))).outcome).toBe("ignored");
     expect((await s.c.command(id, { type: "execute" })).outcome).toBe("rejected");
-    expect(s.c.get(id).plan.state).toBe("CANCELLED");
+    expect((await s.c.get(id)).plan.state).toBe("CANCELLED");
   });
 
   it("throws a 404-style error for unknown plans", async () => {
@@ -496,7 +496,7 @@ describe("invariant fuzz", () => {
       const { plan } = await s.c.create({ profile: MAYA, activityId: pick(["workshop", "loft"]), contacts: CONTACTS });
       const seqs = new Map<string, number>();
       for (let step = 0; step < 25; step++) {
-        const cur = s.c.get(plan.id).plan;
+        const cur = (await s.c.get(plan.id)).plan;
         const acts = currentActions(cur);
         const a = acts.length ? pick(acts) : undefined;
         const choice = Math.floor(rnd() * 9);
@@ -516,7 +516,7 @@ describe("invariant fuzz", () => {
           const type = pick(kind === "ride" ? (["ride.confirmed", "ride.confirmed", "ride.cancelled", "ride.declined"] as const) : (["invite.accepted", "invite.accepted", "invite.declined"] as const));
           await s.c.ingest(plan.id, ev(rid, type, n));
         }
-        const now = s.c.get(plan.id).plan;
+        const now = (await s.c.get(plan.id)).plan;
         CoordinationPlan.parse(now);
         if (now.state === "READY") {
           readyHits++;
