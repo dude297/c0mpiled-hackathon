@@ -8,6 +8,7 @@ import { ShareControl } from "@/components/share/ShareControl";
 import { WeekCalendar, weekSummary } from "@/components/calendar/WeekCalendar";
 import { MatchFeed, hardBarriers, toggleInSet } from "@/components/feed/MatchFeed";
 import { CardDeck } from "@/components/onboarding/CardDeck";
+import { DiscoveryFeed } from "@/components/discovery/DiscoveryFeed";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DEMO_PROFILES } from "@/domain/activities";
@@ -263,6 +264,9 @@ export default function Home() {
           ))}
         {tab === "details" && details}
       </div>
+
+      {/* Separate from the personalized plan: public listings, not checked for fit. */}
+      <DiscoveryFeed />
 
       {/* Print-only: same output whichever tab is open. */}
       <div className="hidden print:block">

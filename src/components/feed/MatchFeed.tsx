@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Calendar, CircleX, Hand, MapPin, SearchX, ShieldCheck, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HandoffLinks } from "@/components/discovery/HandoffLinks";
 import type { AnalysisResult, Barrier, PlanItem } from "@/lib/schema";
 
 export const money = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
@@ -19,7 +20,7 @@ export function toggleInSet(set: Set<string>, id: string): Set<string> {
   return next;
 }
 
-function MatchCard({ item, added, onToggle }: { item: PlanItem; added: boolean; onToggle: () => void }) {
+function MatchCard({ item, added, onToggle, result }: { item: PlanItem; added: boolean; onToggle: () => void; result?: AnalysisResult }) {
   return (
     <li
       className={`rounded-2xl border-2 p-4 shadow-sm transition-colors md:p-5 ${added ? "border-primary bg-primary/5" : "border-dashed border-border bg-card"}`}
@@ -59,6 +60,7 @@ function MatchCard({ item, added, onToggle }: { item: PlanItem; added: boolean; 
         <Hand className="size-5" aria-hidden="true" />
         Get me there →
       </Link>
+      <HandoffLinks item={item} result={result} />
     </li>
   );
 }
@@ -79,7 +81,7 @@ export function MatchFeed({ result, added, onToggle }: { result: AnalysisResult;
         ) : (
           <ul className="grid gap-4">
             {result.plan.map((item) => (
-              <MatchCard key={item.activityId} item={item} added={added.has(item.activityId)} onToggle={() => onToggle(item.activityId)} />
+              <MatchCard key={item.activityId} item={item} added={added.has(item.activityId)} onToggle={() => onToggle(item.activityId)} result={result} />
             ))}
           </ul>
         )}
