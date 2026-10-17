@@ -7,11 +7,11 @@
 export type Mode = 'look' | 'tilt';
 export type Zone = 'left' | 'center' | 'right'; // left = ✕ (no), right = ❤️ (yes) — screen sides
 
-// Tuning. Gaze is unitless in [-1, 1]; tilt is in degrees. Look threshold is 0.2 (spec says ~0.25):
-// a glance at the edge of a phone held at arm's length is small, so 0.25 risks never firing.
-// Not yet tuned on a device — if it fires by accident, raise it; if it never fires, lower to ~0.15.
+// Look combines eye gaze with head yaw (nose offset / inter-eye distance). A small glance or
+// turn should be enough on a phone; hysteresis and return-to-center keep holds deliberate.
+// Tilt remains in degrees with its original tuning.
 export const TUNING = {
-  look: { dwellMs: 1500, threshold: 0.2, hysteresis: 0.06 },
+  look: { dwellMs: 1200, threshold: 0.14, hysteresis: 0.04, yawWeight: 1.5 },
   tilt: { dwellMs: 800, threshold: 15, hysteresis: 3 },
   rearmMs: 400, // must look/hold back at the middle this long before the next answer
   calibrateMs: 2000, // "look at the middle" step at start
@@ -23,6 +23,9 @@ export const TUNING = {
 // Tilt: landmarks are in raw (un-mirrored) camera pixels, where the person's right side is on the
 // image's left, so tilting toward the screen's right makes the raw roll negative — flip it.
 export const GAZE_SIGN = 1;
+// Yaw uses raw, un-mirrored landmarks too: a turn toward screen right moves the nose left
+// in the camera image. The mirrored preview is CSS-only; flip the raw offset exactly once.
+export const YAW_SIGN = -1;
 export const TILT_SIGN = -1;
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -34,6 +37,19 @@ export function gazeFromBlendshapes(b: Record<string, number>): number {
   const right = g('eyeLookInLeft') + g('eyeLookOutRight');
   const left = g('eyeLookOutLeft') + g('eyeLookInRight');
   return clamp((GAZE_SIGN * (right - left)) / 2, -1, 1);
+}
+
+// Head yaw proxy: nose tip (1) relative to the midpoint of the outer eye corners (33/263),
+// normalized by their aspect-corrected distance. Positive = toward screen right (❤️).
+export function yawFromLandmarks(nose: { x: number; y: number }, p33: { x: number; y: number }, p263: { x: number; y: number }, aspect = 1): number {
+  const eyeDistance = Math.hypot((p263.x - p33.x) * aspect, p263.y - p33.y);
+  if (eyeDistance < 1e-6) return 0;
+  const offset = (nose.x - (p33.x + p263.x) / 2) * aspect;
+  return clamp((YAW_SIGN * offset) / eyeDistance, -1, 1);
+}
+
+export function lookFromSignals(gaze: number, yaw: number, baseline = { gaze: 0, yaw: 0 }): number {
+  return gaze - baseline.gaze + TUNING.look.yawWeight * (yaw - baseline.yaw);
 }
 
 // Head roll in degrees from the outer eye corners (landmarks 33 and 263, normalized x/y),
@@ -64,7 +80,7 @@ export type DwellState = {
 export type DwellStep = {
   state: DwellState;
   side: 'left' | 'right' | null;
-  progress: number; // 0..1 for the ring on `side`
+  progress: number; // 0..1 for the fill on `side`
   fired: 'left' | 'right' | null; // an answer happened on this frame
 };
 
@@ -101,12 +117,13 @@ export function stepDwell(s: DwellState, zone: Zone | null, now: number, dwellMs
 // Plain-JS twin of everything above, injected into the WebView page. Keep in sync (see top).
 export const HANDSFREE_CORE_JS = String.raw`
 var TUNING = {
-  look: { dwellMs: 1500, threshold: 0.2, hysteresis: 0.06 },
+  look: { dwellMs: 1200, threshold: 0.14, hysteresis: 0.04, yawWeight: 1.5 },
   tilt: { dwellMs: 800, threshold: 15, hysteresis: 3 },
   rearmMs: 400,
   calibrateMs: 2000
 };
 var GAZE_SIGN = 1;
+var YAW_SIGN = -1;
 var TILT_SIGN = -1;
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 function gazeFromBlendshapes(b) {
@@ -114,6 +131,17 @@ function gazeFromBlendshapes(b) {
   var right = g('eyeLookInLeft') + g('eyeLookOutRight');
   var left = g('eyeLookOutLeft') + g('eyeLookInRight');
   return clamp((GAZE_SIGN * (right - left)) / 2, -1, 1);
+}
+function yawFromLandmarks(nose, p33, p263, aspect) {
+  if (aspect == null) aspect = 1;
+  var eyeDistance = Math.hypot((p263.x - p33.x) * aspect, p263.y - p33.y);
+  if (eyeDistance < 1e-6) return 0;
+  var offset = (nose.x - (p33.x + p263.x) / 2) * aspect;
+  return clamp((YAW_SIGN * offset) / eyeDistance, -1, 1);
+}
+function lookFromSignals(gaze, yaw, baseline) {
+  if (baseline == null) baseline = { gaze: 0, yaw: 0 };
+  return gaze - baseline.gaze + TUNING.look.yawWeight * (yaw - baseline.yaw);
 }
 function tiltFromLandmarks(p33, p263, aspect) {
   if (aspect == null) aspect = 1;
