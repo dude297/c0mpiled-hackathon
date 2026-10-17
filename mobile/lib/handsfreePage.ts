@@ -16,12 +16,14 @@ const MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/f
 export const HANDSFREE_BASE_URL = 'https://daybridge.local/';
 
 export type PageError = 'denied' | 'nocamera' | 'load';
-export type PageMessage =
+export type PageStamp = { session: number; revision: number };
+export type PageContext = PageStamp & { live: boolean };
+export type PageMessage = PageStamp & (
   | { type: 'ready'; swapSides: boolean }
   | { type: 'status'; state: 'starting' | 'loading' | 'calibrating' | 'tracking' | 'stopped'; face?: boolean; progress?: number; detail?: string }
   | { type: 'status'; state: 'error'; error: PageError; detail?: string }
   | { type: 'progress'; side: 'left' | 'right' | null; value: number; signal: number; zone: Zone; mode: Mode }
-  | { type: 'answer'; liked: boolean; mode: Mode };
+  | { type: 'answer'; liked: boolean; mode: Mode });
 
 // Narrow an untrusted postMessage string to a PageMessage (or null).
 export function parsePageMessage(data: string): PageMessage | null {
@@ -33,23 +35,25 @@ export function parsePageMessage(data: string): PageMessage | null {
   }
   if (!m || typeof m !== 'object') return null;
   const o = m as Record<string, unknown>;
-  if (o.type === 'ready' && typeof o.swapSides === 'boolean') return { type: 'ready', swapSides: o.swapSides };
+  if (!Number.isSafeInteger(o.session) || (o.session as number) < 0 || !Number.isSafeInteger(o.revision) || (o.revision as number) < 0) return null;
+  const stamp = { session: o.session as number, revision: o.revision as number };
+  if (o.type === 'ready' && typeof o.swapSides === 'boolean') return { ...stamp, type: 'ready', swapSides: o.swapSides };
   if (o.type === 'answer' && typeof o.liked === 'boolean' && (o.mode === 'look' || o.mode === 'tilt'))
-    return { type: 'answer', liked: o.liked, mode: o.mode };
+    return { ...stamp, type: 'answer', liked: o.liked, mode: o.mode };
   if (o.type === 'progress' && (o.side === 'left' || o.side === 'right' || o.side === null)
       && typeof o.value === 'number' && Number.isFinite(o.value)
       && typeof o.signal === 'number' && Number.isFinite(o.signal)
       && (o.zone === 'left' || o.zone === 'center' || o.zone === 'right') && (o.mode === 'look' || o.mode === 'tilt'))
-    return { type: 'progress', side: o.side, value: Math.min(1, Math.max(0, o.value)),
+    return { ...stamp, type: 'progress', side: o.side, value: Math.min(1, Math.max(0, o.value)),
       signal: Math.min(1, Math.max(-1, o.signal)), zone: o.zone, mode: o.mode };
   if (o.type === 'status') {
     if (o.state === 'error') {
       const error = o.error === 'denied' || o.error === 'nocamera' ? o.error : 'load';
-      return { type: 'status', state: 'error', error, detail: typeof o.detail === 'string' ? o.detail : undefined };
+      return { ...stamp, type: 'status', state: 'error', error, detail: typeof o.detail === 'string' ? o.detail : undefined };
     }
     if (o.state === 'starting' || o.state === 'loading' || o.state === 'calibrating' || o.state === 'tracking' || o.state === 'stopped')
       return {
-        type: 'status',
+        ...stamp, type: 'status',
         state: o.state,
         face: typeof o.face === 'boolean' ? o.face : undefined,
         progress: typeof o.progress === 'number' ? o.progress : undefined,
@@ -64,12 +68,21 @@ export function handsFreeModeScript(mode: Mode): string {
   return `window.__hf && window.__hf.setMode(${JSON.stringify(mode)}); true;`;
 }
 
-export function buildHandsFreeHtml(mode: Mode): string {
+export function isCurrentPageMessage(message: PageMessage, context: PageContext): boolean {
+  return context.live && message.session === context.session && message.revision === context.revision;
+}
+
+export function handsFreeContextScript(session: number, revision: number): string {
+  return `window.__hf && window.__hf.setContext(${session}, ${revision}); true;`;
+}
+
+export function buildHandsFreeHtml(mode: Mode, session = 0): string {
   const app = String.raw`
 (function () {
   var CDN = ${JSON.stringify(CDN)};
   var MODEL = ${JSON.stringify(MODEL)};
   var mode = ${JSON.stringify(mode)};
+  var session = ${JSON.stringify(session)}, revision = 0;
   var swapSides = false;
   var swapKey = 'daybridge.handsfree.swapSides';
   try { swapSides = window.localStorage.getItem(swapKey) === 'true'; } catch (e) {}
@@ -84,7 +97,7 @@ export function buildHandsFreeHtml(mode: Mode): string {
   var video = document.getElementById('v');
 
   function post(m) {
-    try { window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {}
+    try { window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({}, m, { session: session, revision: revision }))); } catch (e) {}
   }
   function fail(error, detail) {
     if (phase === 'error') return;
@@ -127,6 +140,10 @@ export function buildHandsFreeHtml(mode: Mode): string {
   }
 
   window.__hf = {
+    setContext: function (s, r) {
+      if (s !== session || !Number.isSafeInteger(r) || r < revision) return;
+      revision = r; rearm();
+    },
     setMode: function (m) {
       if ((m !== 'look' && m !== 'tilt') || m === mode) return;
       mode = m;
@@ -145,6 +162,7 @@ export function buildHandsFreeHtml(mode: Mode): string {
   post({ type: 'ready', swapSides: swapSides });
 
   function handle(res, now) {
+    if (!running || document.hidden) return;
     var face = !!(res && res.faceLandmarks && res.faceLandmarks.length);
     if (face !== lastFace) {
       lastFace = face;
@@ -272,6 +290,11 @@ export function buildHandsFreeHtml(mode: Mode): string {
     requestAnimationFrame(loop);
   }
 
+  document.addEventListener('visibilitychange', function () {
+    rearm();
+    if (calib) { calib.last = null; calib.ms = 0; calib.gaze = []; calib.yaw = []; calib.tilt = []; }
+  });
+  window.addEventListener('pagehide', function () { stop(false); });
   window.addEventListener('error', function (e) { if (phase === 'starting' || phase === 'loading') fail('load', e.message); });
   start();
 })();`;
@@ -286,7 +309,7 @@ video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 <body><video id="v" autoplay muted playsinline></video>
 <script>
 (function () {
-  function post(m) { try { window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {} }
+  function post(m) { try { window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({}, m, { session: ${JSON.stringify(session)}, revision: 0 }))); } catch (e) {} }
   post({ type: 'status', state: 'starting', detail: 'Hands-free page loaded…' });
   window.addEventListener('error', function (e) { if (!window.__hf) post({ type: 'status', state: 'error', error: 'load', detail: 'Script error: ' + (e && e.message) }); });
   window.addEventListener('unhandledrejection', function (e) { if (!window.__hfLive) post({ type: 'status', state: 'error', error: 'load', detail: 'Error: ' + String(e && e.reason && (e.reason.message || e.reason)).slice(0, 150) }); });

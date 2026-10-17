@@ -70,6 +70,7 @@ export function classify(v: number, prev: Zone, threshold: number, hysteresis: n
 }
 
 export type DwellState = {
+  lastAt: number | null;
   side: 'left' | 'right' | null; // side currently being held
   since: number; // when that hold started (ms)
   needsCenter: boolean; // just answered: wait for the middle before arming again
@@ -83,22 +84,27 @@ export type DwellStep = {
   fired: 'left' | 'right' | null; // an answer happened on this frame
 };
 
-export const initialDwell = (): DwellState => ({ side: null, since: 0, needsCenter: false, centerSince: null });
+export const initialDwell = (): DwellState => ({ side: null, since: 0, needsCenter: false, centerSince: null, lastAt: null });
 // After a Look/Tilt switch: wait for the middle before answering, so a head already turned or tilted
 // to one side can't fire straight away under the new mode.
-export const rearmDwell = (): DwellState => ({ side: null, since: 0, needsCenter: true, centerSince: null });
+export const rearmDwell = (): DwellState => ({ side: null, since: 0, needsCenter: true, centerSince: null, lastAt: null });
 
 // One frame of the dwell machine. zone = null means no face (resets the hold).
 export function stepDwell(s: DwellState, zone: Zone | null, now: number, dwellMs: number, rearmMs: number): DwellStep {
+  if (!Number.isFinite(now) || !Number.isFinite(dwellMs) || dwellMs <= 0 || !Number.isFinite(rearmMs) || rearmMs < 0 ||
+      (s.lastAt !== null && (now < s.lastAt || now - s.lastAt > 500))) {
+    return { state: { ...rearmDwell(), lastAt: Number.isFinite(now) ? now : null }, side: null, progress: 0, fired: null };
+  }
+  s = { ...s, lastAt: now };
   if (zone === null) {
-    return { state: { ...s, side: null, since: now, centerSince: null }, side: null, progress: 0, fired: null };
+    return { state: { ...s, side: null, since: now, needsCenter: true, centerSince: null }, side: null, progress: 0, fired: null };
   }
   if (s.needsCenter) {
     if (zone !== 'center') return { state: { ...s, side: null, centerSince: null }, side: null, progress: 0, fired: null };
     const centerSince = s.centerSince ?? now;
     const rearmed = now - centerSince >= rearmMs;
     return {
-      state: { side: null, since: now, needsCenter: !rearmed, centerSince: rearmed ? null : centerSince },
+      state: { side: null, since: now, needsCenter: !rearmed, centerSince: rearmed ? null : centerSince, lastAt: now },
       side: null,
       progress: 0,
       fired: null,
@@ -108,7 +114,7 @@ export function stepDwell(s: DwellState, zone: Zone | null, now: number, dwellMs
   const since = s.side === zone ? s.since : now;
   const progress = Math.min(1, (now - since) / dwellMs);
   if (progress >= 1) {
-    return { state: { side: null, since: now, needsCenter: true, centerSince: null }, side: null, progress: 0, fired: zone };
+    return { state: { side: null, since: now, needsCenter: true, centerSince: null, lastAt: now }, side: null, progress: 0, fired: zone };
   }
   return { state: { ...s, side: zone, since }, side: zone, progress, fired: null };
 }
@@ -155,24 +161,29 @@ function classify(v, prev, threshold, hysteresis) {
   if (v > threshold) return 'right';
   return 'center';
 }
-function initialDwell() { return { side: null, since: 0, needsCenter: false, centerSince: null }; }
-function rearmDwell() { return { side: null, since: 0, needsCenter: true, centerSince: null }; }
+function initialDwell() { return { side: null, since: 0, needsCenter: false, centerSince: null, lastAt: null }; }
+function rearmDwell() { return { side: null, since: 0, needsCenter: true, centerSince: null, lastAt: null }; }
 function stepDwell(s, zone, now, dwellMs, rearmMs) {
+  if (!Number.isFinite(now) || !Number.isFinite(dwellMs) || dwellMs <= 0 || !Number.isFinite(rearmMs) || rearmMs < 0 ||
+      (s.lastAt !== null && (now < s.lastAt || now - s.lastAt > 500))) {
+    return { state: { side: null, since: 0, needsCenter: true, centerSince: null, lastAt: Number.isFinite(now) ? now : null }, side: null, progress: 0, fired: null };
+  }
+  s = Object.assign({}, s, { lastAt: now });
   if (zone === null) {
-    return { state: { side: null, since: now, needsCenter: s.needsCenter, centerSince: null }, side: null, progress: 0, fired: null };
+    return { state: { side: null, since: now, needsCenter: true, centerSince: null, lastAt: now }, side: null, progress: 0, fired: null };
   }
   if (s.needsCenter) {
-    if (zone !== 'center') return { state: { side: null, since: s.since, needsCenter: true, centerSince: null }, side: null, progress: 0, fired: null };
+    if (zone !== 'center') return { state: { side: null, since: s.since, needsCenter: true, centerSince: null, lastAt: now }, side: null, progress: 0, fired: null };
     var centerSince = s.centerSince == null ? now : s.centerSince;
     var rearmed = now - centerSince >= rearmMs;
-    return { state: { side: null, since: now, needsCenter: !rearmed, centerSince: rearmed ? null : centerSince }, side: null, progress: 0, fired: null };
+    return { state: { side: null, since: now, needsCenter: !rearmed, centerSince: rearmed ? null : centerSince, lastAt: now }, side: null, progress: 0, fired: null };
   }
-  if (zone === 'center') return { state: { side: null, since: now, needsCenter: false, centerSince: s.centerSince }, side: null, progress: 0, fired: null };
+  if (zone === 'center') return { state: { side: null, since: now, needsCenter: false, centerSince: s.centerSince, lastAt: now }, side: null, progress: 0, fired: null };
   var since = s.side === zone ? s.since : now;
   var progress = Math.min(1, (now - since) / dwellMs);
   if (progress >= 1) {
-    return { state: { side: null, since: now, needsCenter: true, centerSince: null }, side: null, progress: 0, fired: zone };
+    return { state: { side: null, since: now, needsCenter: true, centerSince: null, lastAt: now }, side: null, progress: 0, fired: zone };
   }
-  return { state: { side: zone, since: since, needsCenter: false, centerSince: s.centerSince }, side: zone, progress: progress, fired: null };
+  return { state: { side: zone, since: since, needsCenter: false, centerSince: s.centerSince, lastAt: now }, side: zone, progress: progress, fired: null };
 }
 `;
