@@ -1,4 +1,5 @@
 import { CalendarHeart, MapPin, TriangleAlert } from "lucide-react";
+import { costLabel } from "@/components/feed/MatchFeed";
 import type { PlanItem } from "@/lib/schema";
 
 export const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -43,21 +44,25 @@ export function placeOnWeek(items: PlanItem[]): PlacedWeek {
   return { days, unscheduled };
 }
 
-const money = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
+/** "2 outings · $5/week", "1 outing · Free", or "Nothing added yet" — same cost rule as the match cards. */
+export function weekSummary(items: PlanItem[]): string {
+  if (items.length === 0) return "Nothing added yet";
+  const total = items.reduce((sum, i) => sum + i.costPerWeek, 0);
+  return `${items.length} ${items.length === 1 ? "outing" : "outings"} · ${costLabel(total)}`;
+}
 
 function Activity({ item, compact }: { item: PlanItem; compact?: boolean }) {
   const soft = item.barriers.filter((b) => b.severity === "soft");
   const small = compact ? "text-sm" : "text-base";
   return (
-    <div className="break-inside-avoid rounded-xl border bg-card p-2.5 shadow-sm md:p-2">
-      <p className={`font-semibold leading-snug ${compact ? "text-sm md:text-base" : "text-lg"}`}>{item.name}</p>
+    <div className="min-w-0 break-inside-avoid rounded-xl border bg-card p-2.5 shadow-sm md:p-2">
+      <p className={`min-w-0 font-semibold leading-snug break-words ${compact ? "text-sm md:text-base" : "text-lg"}`}>{item.name}</p>
       <p className={`mt-1 flex items-start gap-1 text-muted-foreground ${small}`}>
         <MapPin className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-        <span>{item.travel}</span>
+        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{item.travel}</span>
       </p>
       <p className={small}>
-        <b>{money(item.costPerWeek)}</b>
-        <span className="text-muted-foreground">/week</span>
+        <b>{costLabel(item.costPerWeek)}</b>
       </p>
       {soft.map((b) => (
         <p key={b.rule} className={`mt-1.5 rounded-md bg-amber-100 p-1.5 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100 ${small}`}>
@@ -84,7 +89,6 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
   }
 
   const { days, unscheduled } = placeOnWeek(items);
-  const total = items.reduce((sum, i) => sum + i.costPerWeek, 0);
 
   return (
     <section aria-label="My week" className="text-base md:text-lg">
@@ -93,7 +97,7 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
         <caption className="sr-only">My week: activities by day and time of day</caption>
         <thead>
           <tr>
-            <td className="w-24" />
+            <td className="w-16" />
             {days.map((d) => (
               <th key={d.day} scope="col" className="pb-1 text-center text-base font-semibold">
                 <abbr title={DAY_NAMES[d.day]} className="no-underline">{d.day}</abbr>
@@ -104,7 +108,7 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
         <tbody>
           {SLOTS.map((slot, si) => (
             <tr key={slot}>
-              <th scope="row" className="pr-1 text-left align-top text-sm font-semibold">
+              <th scope="row" className="pr-1 text-left align-top text-xs font-semibold break-words">
                 <span aria-hidden="true" className="block text-xl">{SLOT_LABELS[slot].emoji}</span>
                 {SLOT_LABELS[slot].label}
               </th>
@@ -170,7 +174,7 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
       )}
 
       <p className="mt-3 border-t pt-3 text-center font-medium">
-        {items.length} {items.length === 1 ? "outing" : "outings"} · {money(total)}/week
+        {weekSummary(items)}
       </p>
     </section>
   );

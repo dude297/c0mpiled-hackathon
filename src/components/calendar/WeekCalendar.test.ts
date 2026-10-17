@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseWhen, placeOnWeek } from "@/components/calendar/WeekCalendar";
+import { parseWhen, placeOnWeek, weekSummary } from "@/components/calendar/WeekCalendar";
 import type { PlanItem } from "@/lib/schema";
 
 const item = (activityId: string, when: string): PlanItem => ({
@@ -52,4 +52,11 @@ describe("placeOnWeek", () => {
     expect(ids(w.days[4].slots[1].items)).toEqual(["ok"]);
     expect(w.days.reduce((n, d) => n + d.count, 0)).toBe(1);
   });
+});
+
+describe("weekSummary", () => {
+  const priced = (id: string, costPerWeek: number): PlanItem => ({ ...item(id, "Mon morning"), costPerWeek });
+  it("says nothing added for an empty week", () => expect(weekSummary([])).toBe("Nothing added yet"));
+  it("uses Free for a $0 week, like the match cards", () => expect(weekSummary([priced("a", 0)])).toBe("1 outing · Free"));
+  it("sums weekly cost and pluralises", () => expect(weekSummary([priced("a", 2), priced("b", 3.5)])).toBe("2 outings · $5.50/week"));
 });

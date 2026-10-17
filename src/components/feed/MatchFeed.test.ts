@@ -10,6 +10,7 @@ const item: PlanItem = { activityId: "choir", name: "Choir", when: "Tue afternoo
 describe("costLabel", () => {
   it("says Free for zero cost", () => expect(costLabel(0)).toBe("Free"));
   it("formats weekly cost", () => expect(costLabel(5)).toBe("$5/week"));
+  it("shows cents for non-whole amounts", () => expect(costLabel(2.5)).toBe("$2.50/week"));
 });
 
 describe("barrier filters", () => {

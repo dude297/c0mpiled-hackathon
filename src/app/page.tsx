@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CircleX, LoaderCircle, Printer, RotateCcw, Share2 } from "lucide-react";
 import { DashboardShell, EvidencePanel, IntakeSlot, ProfilePanel } from "@/components/dashboard/panels";
-import { WeekCalendar } from "@/components/calendar/WeekCalendar";
-import { MatchFeed, toggleInSet } from "@/components/feed/MatchFeed";
+import { WeekCalendar, weekSummary } from "@/components/calendar/WeekCalendar";
+import { MatchFeed, hardBarriers, toggleInSet } from "@/components/feed/MatchFeed";
 import { CardDeck } from "@/components/onboarding/CardDeck";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,10 @@ import type { AnalysisResult, Profile } from "@/lib/schema";
 
 const TABS = ["matches", "week", "details"] as const;
 type Tab = (typeof TABS)[number];
+
+const SHARE_AVAILABLE = false; // flip when POST /api/plans and /plan/[id] exist
+const FRIENDLY_ERROR = "Our planner is having a moment — please try again.";
+const FOCUS = "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-foreground";
 
 export default function Home() {
   const router = useRouter();
@@ -25,27 +29,49 @@ export default function Home() {
   const [added, setAdded] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<Tab>("matches");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "error">("idle");
+  const [announce, setAnnounce] = useState("");
+  const reqId = useRef(0);
+  const focusNext = useRef<"tab" | "summary" | null>(null);
+  const summaryRef = useRef<HTMLHeadingElement>(null);
+
+  // Move focus once the element we want exists (after a run finishes rendering).
+  useEffect(() => {
+    if (!focusNext.current) return;
+    const el = focusNext.current === "tab" ? document.getElementById("tab-matches") : summaryRef.current;
+    if (el) {
+      el.focus();
+      focusNext.current = null;
+    }
+  });
 
   async function run(p: Profile = profile) {
+    const id = ++reqId.current;
+    const rebuilding = result !== null;
     setLoading(true);
     setError(null);
+    setSaveState("idle");
+    setAnnounce("");
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ profile: p }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Request failed");
+      const data = await res.json().catch(() => null);
+      if (id !== reqId.current) return; // stale: start over or a newer run happened
+      if (!res.ok || !data) throw new Error(FRIENDLY_ERROR);
       setResult(data);
       setAdded(new Set((data as AnalysisResult).plan.map((i) => i.activityId)));
       setTab("matches");
       setMode("dashboard");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Request failed");
+      setAnnounce("Plan updated");
+      focusNext.current = rebuilding ? "tab" : "summary";
+    } catch {
+      if (id !== reqId.current) return;
+      setError(FRIENDLY_ERROR);
       setMode("dashboard");
     } finally {
-      setLoading(false);
+      if (id === reqId.current) setLoading(false);
     }
   }
 
@@ -80,8 +106,16 @@ export default function Home() {
     router.push(`/plan/${data.id}`);
   }
 
+  // Always mounted (first child of every render) so announcements aren't lost on remount.
+  const withLive = (node: React.ReactNode) => (
+    <>
+      <p role="status" aria-live="polite" className="sr-only">{announce}</p>
+      {node}
+    </>
+  );
+
   if (mode === "onboarding") {
-    return (
+    return withLive(
       <div className="mx-auto w-full max-w-6xl p-6">
         <header className="mb-6 text-center">
           <h1 className="text-3xl font-semibold">DayBridge</h1>
@@ -98,15 +132,19 @@ export default function Home() {
         />
         {error && <p className="mx-auto max-w-md text-center text-destructive">{error}</p>}
         <div className="pt-6 text-center">
-          <button className="text-sm text-muted-foreground underline" onClick={() => setMode("dashboard")}>
+          <button
+            className={`inline-flex min-h-11 items-center rounded-md px-3 text-base text-foreground underline underline-offset-4 ${FOCUS}`}
+            onClick={() => setMode("dashboard")}
+          >
             Or use the classic form
           </button>
         </div>
-      </div>
+      </div>,
     );
   }
 
   async function handleSave() {
+    if (!SHARE_AVAILABLE) return;
     setSaveState("saving");
     try {
       await savePlan();
@@ -117,22 +155,27 @@ export default function Home() {
   }
 
   function startOver() {
+    reqId.current++; // ignore any in-flight response
+    setLoading(false);
     setResult(null);
     setError(null);
     setSaveState("idle");
+    setAnnounce("");
+    focusNext.current = null;
     setMode("onboarding");
   }
 
-  const details = (
+  // showError=false where the page already shows its own error box, so the message isn't announced twice.
+  const details = (showError: boolean) => (
     <>
+      <ProfilePanel value={profile} onChange={setProfile} onSubmit={() => run()} onDemo={demo} loading={loading} error={showError ? error : null} hasResult={result !== null} />
       <IntakeSlot onIntake={intake} />
-      <ProfilePanel value={profile} onChange={setProfile} onSubmit={() => run()} onDemo={demo} loading={loading} error={error} hasResult={result !== null} />
       {result && <EvidencePanel result={result} />}
     </>
   );
 
   if (!result) {
-    return (
+    return withLive(
       <DashboardShell>
         {loading ? (
           <div role="status" aria-live="polite" className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed p-10 text-center">
@@ -146,17 +189,17 @@ export default function Home() {
               <CircleX className="size-6 shrink-0" aria-hidden="true" />
               We couldn&apos;t build the plan
             </p>
-            <p className="mt-1">Something went wrong on our side ({error}). Your answers are still here.</p>
+            <p className="mt-1">{error} Your answers are still here.</p>
             <div className="mt-4 flex flex-wrap gap-2">
-              <Button size="lg" onClick={() => run()}>Try again</Button>
-              <Button size="lg" variant="outline" onClick={startOver}>Start over</Button>
+              <Button size="lg" className={FOCUS} onClick={() => run()}>Try again</Button>
+              <Button size="lg" variant="outline" className={FOCUS} onClick={startOver}>Start over</Button>
             </div>
           </div>
         ) : (
           <p className="text-lg text-muted-foreground">Fill in the form below, or load a demo, then press Build plan.</p>
         )}
-        {!loading && details}
-      </DashboardShell>
+        {!loading && details(false)}
+      </DashboardShell>,
     );
   }
 
@@ -171,33 +214,45 @@ export default function Home() {
     document.getElementById(`tab-${next}`)?.focus();
   }
 
-  return (
+  return withLive(
     <DashboardShell>
       <section aria-label="Plan summary" className="rounded-2xl border bg-card p-4 shadow-sm md:p-5">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <p className="text-xl font-medium leading-snug md:text-2xl">{result.summary}</p>
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wide text-foreground/75">Suggested plan</p>
+            <h2 ref={summaryRef} tabIndex={-1} className="text-xl font-medium leading-snug outline-none md:text-2xl">
+              {result.summary}
+            </h2>
+          </div>
           <Badge variant={result.dataSource === "mock" ? "secondary" : "default"} className="h-7 px-3 text-sm">
             {result.dataSource === "mock" ? "mock AI" : "live AI"}
           </Badge>
         </div>
         <p className="mt-2 text-muted-foreground">{result.explanation}</p>
-        <div className="mt-3 flex flex-wrap gap-2 text-sm md:text-base">
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm md:text-base">
+          <span className="font-semibold text-foreground/75">Suggested:</span>
           {result.items.map((it) => (
             <span key={it.label} className="rounded-md border bg-muted/50 px-2.5 py-1.5">
-              {it.label}: <b>{it.value}</b>
+              {it.label}: <b>{/^\$0(\.0+)?$/.test(it.value) ? "Free" : it.value}</b>
             </span>
           ))}
         </div>
-        <div className="mt-4 flex flex-wrap gap-2 print:hidden">
-          <Button variant="outline" size="lg" onClick={() => window.print()}>
+        <p className="mt-3 rounded-lg bg-primary/10 px-3 py-2 text-lg font-semibold md:text-xl">
+          In your week: {weekSummary(addedItems)}
+        </p>
+        <div className="mt-4 flex flex-wrap items-center gap-2 print:hidden">
+          <Button variant="outline" size="lg" className={FOCUS} onClick={() => window.print()}>
             <Printer aria-hidden="true" />
             Print
           </Button>
-          <Button size="lg" onClick={handleSave} disabled={saveState === "saving"}>
+          <Button size="lg" className={FOCUS} onClick={handleSave} disabled={!SHARE_AVAILABLE || saveState === "saving"} aria-describedby={SHARE_AVAILABLE ? undefined : "share-soon"}>
             <Share2 aria-hidden="true" />
             {saveState === "saving" ? "Saving…" : "Save & share"}
           </Button>
-          <Button variant="ghost" size="lg" onClick={startOver}>
+          {!SHARE_AVAILABLE && (
+            <span id="share-soon" className="text-sm text-foreground/75 md:text-base">Sharing: coming soon</span>
+          )}
+          <Button variant="ghost" size="lg" className={FOCUS} onClick={startOver} disabled={loading}>
             <RotateCcw aria-hidden="true" />
             Start over
           </Button>
@@ -225,14 +280,14 @@ export default function Home() {
             aria-controls="dash-panel"
             tabIndex={tab === t ? 0 : -1}
             onClick={() => setTab(t)}
-            className={`min-h-12 rounded-lg px-2 text-base font-semibold outline-none transition-colors focus-visible:ring-3 focus-visible:ring-ring/50 md:text-lg ${tab === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+            className={`min-h-12 rounded-lg px-2 text-base font-semibold outline-none transition-colors md:text-lg ${FOCUS} ${tab === t ? "bg-background text-foreground shadow-sm" : "text-foreground/75 hover:text-foreground"}`}
           >
             {labels[t]}
           </button>
         ))}
       </div>
 
-      <div role="tabpanel" id="dash-panel" aria-labelledby={`tab-${tab}`} tabIndex={0} className="flex flex-col gap-4 rounded-xl outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+      <div role="tabpanel" id="dash-panel" aria-labelledby={`tab-${tab}`} tabIndex={0} className={`flex flex-col gap-4 rounded-xl outline-none print:hidden ${FOCUS}`}>
         {tab === "matches" && <MatchFeed result={result} added={added} onToggle={(id) => setAdded((s) => toggleInSet(s, id))} />}
         {tab === "week" &&
           (addedItems.length ? (
@@ -241,11 +296,29 @@ export default function Home() {
             <div className="rounded-xl border-2 border-dashed p-8 text-center">
               <p className="text-xl font-semibold">Your week is empty</p>
               <p className="mt-1 text-muted-foreground">Go to Matches and tap “Add to my week” on anything that sounds good.</p>
-              <Button size="lg" className="mt-4" onClick={() => setTab("matches")}>See matches</Button>
+              <Button size="lg" className={`mt-4 ${FOCUS}`} onClick={() => setTab("matches")}>See matches</Button>
             </div>
           ))}
-        {tab === "details" && details}
+        {tab === "details" && details(true)}
       </div>
-    </DashboardShell>
+
+      {/* Print-only: same output whichever tab is open. */}
+      <div className="hidden print:block">
+        <h2 className="mb-2 text-2xl font-semibold">{profile.name}&apos;s week</h2>
+        {addedItems.length ? <WeekCalendar items={addedItems} /> : <p>No outings added yet.</p>}
+        <h2 className="mb-2 mt-6 text-xl font-semibold">Not a match — why</h2>
+        {result.blocked.length === 0 ? (
+          <p>Nothing was ruled out.</p>
+        ) : (
+          <ul className="list-disc space-y-1 pl-5">
+            {result.blocked.map((b) => (
+              <li key={b.name}>
+                <b>{b.name}</b>: {hardBarriers(b.barriers).map((x) => x.detail).join("; ")}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </DashboardShell>,
   );
 }

@@ -4,7 +4,9 @@ import { Calendar, CircleX, MapPin, SearchX, ShieldCheck, Wallet } from "lucide-
 import { Button } from "@/components/ui/button";
 import type { AnalysisResult, Barrier, PlanItem } from "@/lib/schema";
 
-export const costLabel = (n: number) => (n === 0 ? "Free" : `$${n}/week`);
+export const money = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
+
+export const costLabel = (n: number) => (n === 0 ? "Free" : `${money(n)}/week`);
 
 export const softBarriers = (item: PlanItem): Barrier[] => item.barriers.filter((b) => b.severity === "soft");
 
@@ -22,7 +24,7 @@ function MatchCard({ item, added, onToggle }: { item: PlanItem; added: boolean; 
       className={`rounded-2xl border-2 p-4 shadow-sm transition-colors md:p-5 ${added ? "border-primary bg-primary/5" : "border-dashed border-border bg-card"}`}
     >
       <h3 className="text-xl font-semibold leading-snug md:text-2xl">{item.name}</h3>
-      <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5 text-base text-muted-foreground md:text-lg">
+      <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5 text-base text-foreground/75 md:text-lg">
         <li className="inline-flex items-center gap-1.5"><Calendar className="size-5" aria-hidden="true" />{item.when}</li>
         <li className="inline-flex items-center gap-1.5"><MapPin className="size-5" aria-hidden="true" />{item.travel}</li>
         <li className="inline-flex items-center gap-1.5"><Wallet className="size-5" aria-hidden="true" /><b className="text-foreground">{costLabel(item.costPerWeek)}</b></li>
@@ -44,7 +46,7 @@ function MatchCard({ item, added, onToggle }: { item: PlanItem; added: boolean; 
         variant={added ? "outline" : "default"}
         aria-pressed={added}
         onClick={onToggle}
-        className={`mt-4 h-14 w-full rounded-xl text-lg font-semibold ${added ? "border-2 border-primary text-primary" : ""}`}
+        className={`mt-4 h-14 w-full rounded-xl text-lg font-semibold focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-foreground ${added ? "border-2 border-primary text-primary" : ""}`}
       >
         <span aria-hidden="true">{added ? "✓" : "❤️"}</span>
         {added ? "In my week" : "Add to my week"}
