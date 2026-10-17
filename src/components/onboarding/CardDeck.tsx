@@ -241,6 +241,27 @@ export function pickedToHistory(picked: readonly InterestKey[], answeredCount: n
   }));
 }
 
+export type AnswerMode = "swipe" | "easy" | "hands";
+
+export const ANSWER_MODES: readonly { key: AnswerMode; label: string; detail: string }[] = [
+  { key: "swipe", label: "Swipe cards", detail: "One idea at a time; swipe or tap Yes/No." },
+  { key: "easy", label: "Easier view (big tiles)", detail: "See every idea at once." },
+  { key: "hands", label: "Hands-free (eye tracker)", detail: "Look or tilt your head toward No or Yes; camera stays on this device." },
+];
+
+// Keep the existing grid/card conversion in one place. Swipe and hands-free share
+// the same answers and cursor; later required answers must never be rewritten.
+export function changeAnswerMode(
+  from: AnswerMode,
+  to: AnswerMode,
+  history: readonly (Answer | null)[],
+  picked: readonly InterestKey[],
+): { history: (Answer | null)[]; picked: InterestKey[] } {
+  if (history.length >= INTEREST_COUNT || from === to) return { history: [...history], picked: [...picked] };
+  if (from === "easy") return { history: pickedToHistory(picked, history.length), picked: [...picked] };
+  return { history: [...history], picked: to === "easy" ? likedInterests(history) : [...picked] };
+}
+
 // Change "What you enjoy" from the review: new interest picks, every later answer kept.
 export function replaceInterests(history: readonly (Answer | null)[], picked: readonly InterestKey[]): (Answer | null)[] {
   return [...pickedToHistory(picked, INTEREST_COUNT), ...history.slice(INTEREST_COUNT)];
@@ -402,6 +423,46 @@ function InterestGrid({ picked, onToggle, onClear, onContinue, disabled }: {
   );
 }
 
+function ModePicker({ mode, onContinue, disabled }: {
+  mode: AnswerMode;
+  onContinue: (mode: AnswerMode) => void;
+  disabled: boolean;
+}) {
+  const id = useId();
+  const [selected, setSelected] = useState(mode);
+  return (
+    <section aria-labelledby={`${id}-heading`} className="rounded-xl border-2 bg-card p-5 shadow-sm">
+      <h2 id={`${id}-heading`} tabIndex={-1} data-step-focus className={`text-2xl font-semibold ${RING}`}>
+        How would you like to choose?
+      </h2>
+      <p className="mb-4 mt-2 text-lg text-muted-foreground">First, choose a mode. You can change it while choosing your interests.</p>
+      <div role="radiogroup" aria-labelledby={`${id}-heading`} className="space-y-3">
+        {ANSWER_MODES.map((option) => (
+          <label key={option.key} className="flex min-h-14 cursor-pointer items-center gap-4 rounded-xl border-2 bg-background p-4 hover:bg-accent has-[:checked]:border-foreground has-[:checked]:bg-accent has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-solid has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-foreground">
+            <input
+              type="radio"
+              name={id}
+              value={option.key}
+              checked={selected === option.key}
+              onChange={() => setSelected(option.key)}
+              disabled={disabled}
+              aria-describedby={`${id}-${option.key}-detail`}
+              className="size-6 shrink-0 accent-foreground"
+            />
+            <span>
+              <span className="block text-xl font-semibold">{option.label}</span>
+              <span id={`${id}-${option.key}-detail`} className="mt-1 block text-lg text-muted-foreground">{option.detail}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <Button size="lg" className={`mt-4 min-h-14 w-full rounded-xl text-lg ${RING}`} onClick={() => onContinue(selected)} disabled={disabled}>
+        Continue
+      </Button>
+    </section>
+  );
+}
+
 export function CardDeck({
   onComplete,
   initialName = "",
@@ -415,7 +476,9 @@ export function CardDeck({
 }) {
   const cards = useMemo(() => buildCards(), []);
   const [history, setHistory] = useState<(Answer | null)[]>([]);
-  const [bigButtons, setBigButtons] = useState(false);
+  const [answerMode, setAnswerMode] = useState<AnswerMode>("swipe");
+  const [choosingMode, setChoosingMode] = useState(true);
+  const bigButtons = answerMode === "easy";
   const [picked, setPicked] = useState<InterestKey[]>([]);
   // Card index being changed from the review step; null = normal forward flow.
   const [editing, setEditing] = useState<number | null>(null);
@@ -426,14 +489,14 @@ export function CardDeck({
   const [name, setName] = useState(initialName);
   const lastRecordAt = useRef(-Infinity);
   const rootRef = useRef<HTMLDivElement>(null);
-  // Set by user-driven step changes only, so first mount and view toggles never steal focus.
+  // Set by user-driven step changes only, so first mount never steals focus.
   const moveFocus = useRef(false);
 
   useEffect(() => {
     if (!moveFocus.current) return;
     moveFocus.current = false;
     rootRef.current?.querySelector<HTMLElement>("[data-step-focus]")?.focus();
-  }, [history, editing]);
+  }, [history, editing, choosingMode]);
 
   const changeStep = (next: (Answer | null)[] | ((prev: (Answer | null)[]) => (Answer | null)[])) => {
     moveFocus.current = true;
@@ -468,17 +531,41 @@ export function CardDeck({
       changeStep([]);
     } else changeStep(undoAnswer);
   };
-  const toggleView = () => {
-    if (editing === null && index < INTEREST_COUNT) {
-      if (bigButtons) setHistory(pickedToHistory(picked, index));
-      else setPicked(likedInterests(history));
-    }
-    setBigButtons((value) => !value);
+  const chooseMode = (next: AnswerMode) => {
+    const converted = changeAnswerMode(answerMode, next, history, picked);
+    setHistory(converted.history);
+    setPicked(converted.picked);
+    setAnswerMode(next);
   };
 
   const swipeCard = (dir: 1 | -1, interest: CardDef & { type: "interest" }) => {
     record({ kind: "interest", key: interest.interest.key, liked: dir > 0 });
   };
+
+  const demos = onDemo && index === 0 && editing === null && (
+    <div className="mb-3 grid grid-cols-2 gap-2">
+      <Button size="lg" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("margaret")} disabled={loading}>Demo: Margaret</Button>
+      <Button size="lg" variant="outline" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("harold")} disabled={loading}>Demo: Harold</Button>
+    </div>
+  );
+
+  if (choosingMode) {
+    return (
+      <div ref={rootRef} className="mx-auto w-full max-w-xl p-4 text-base md:text-lg">
+        {demos}
+        <ModePicker
+          mode={answerMode}
+          disabled={loading}
+          onContinue={(next) => {
+            if (!guard()) return;
+            chooseMode(next);
+            moveFocus.current = true;
+            setChoosingMode(false);
+          }}
+        />
+      </div>
+    );
+  }
 
   if (editing === null && index >= cards.length) {
     const result = answersToProfile(answers, name);
@@ -537,8 +624,10 @@ export function CardDeck({
             disabled={loading}
             className={`min-h-11 rounded-xl px-3 text-base underline ${RING}`}
             onClick={() => {
+              if (!guard()) return;
               changeStep([]);
               setPicked([]);
+              setChoosingMode(true);
             }}
           >
             Start over
@@ -559,21 +648,22 @@ export function CardDeck({
 
   return (
     <div ref={rootRef} className={`mx-auto w-full min-w-0 ${showGrid ? "max-w-3xl" : "max-w-md"} overflow-x-clip p-4 text-base md:text-lg`}>
-      {onDemo && index === 0 && editing === null && (
-        <div className="mb-3 grid grid-cols-2 gap-2">
-          <Button size="lg" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("margaret")} disabled={loading}>Demo: Margaret</Button>
-          <Button size="lg" variant="outline" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("harold")} disabled={loading}>Demo: Harold</Button>
+      {demos}
+      {card.type === "interest" && editing === null && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="font-semibold">{ANSWER_MODES.find((mode) => mode.key === answerMode)?.label}</p>
+          <button type="button" className={`min-h-11 rounded-lg px-2 text-base underline underline-offset-4 ${RING}`} disabled={loading} onClick={() => {
+            if (!guard()) return;
+            moveFocus.current = true;
+            setChoosingMode(true);
+          }}>Change mode</button>
         </div>
       )}
-      <Button
-        size="lg"
-        variant={bigButtons ? "default" : "outline"}
-        aria-pressed={bigButtons}
-        onClick={toggleView}
-        className={`mb-3 min-h-14 w-full rounded-xl text-lg ${RING}`}
-      >
-        {bigButtons && <Check aria-hidden="true" />} Easier view (big tiles): {bigButtons ? "on" : "off"}
-      </Button>
+      {/* Outside the keyed card: a camera session lasts across interest cards.
+          Leaving the interest step or changing mode unmounts it and stops it. */}
+      {!showGrid && card.type === "interest" && answerMode === "hands" && (
+        <HandsFree label={card.interest.label} onAnswer={(liked) => swipeCard(liked ? 1 : -1, card)} />
+      )}
       <div className="mb-3">
         <Button size="lg" variant="outline" className={RING} onClick={back} disabled={editing === null && (index === 0 || showGrid || loading)}>
           <ArrowLeft aria-hidden="true" /> {editing !== null ? "Back to review" : "Back"}
@@ -607,8 +697,8 @@ export function CardDeck({
         <InterestGrid
           picked={picked}
           disabled={loading}
-          onToggle={(key) => setPicked((prev) => toggleKey(prev, key))}
-          onClear={() => setPicked([])}
+          onToggle={(key) => { if (!locked()) setPicked((prev) => toggleKey(prev, key)); }}
+          onClear={() => { if (!locked()) setPicked([]); }}
           onContinue={() => {
             if (!guard()) return;
             if (editing !== null) {
@@ -617,10 +707,6 @@ export function CardDeck({
             } else changeStep(pickedToHistory(picked, INTEREST_COUNT));
           }}
         />
-      )}
-
-      {!showGrid && card.type === "interest" && (
-        <HandsFree label={card.interest.label} onAnswer={(liked) => swipeCard(liked ? 1 : -1, card)} />
       )}
 
       {!showGrid && card.type === "interest" && (

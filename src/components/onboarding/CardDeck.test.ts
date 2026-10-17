@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { ANSWER_LOCKOUT_MS, answersToProfile, COMFORT_OPTIONS, comfortFromKeys, comfortToKeys, INTEREST_COUNT, isLockedOut, likedInterests, pickedToHistory, replaceAnswer, replaceInterests, reviewRows, swipeDirection, toggleChoice, toggleKey, TRANSPORT_OPTIONS, undoAnswer, WALKING_AID_OPTIONS, type Answer } from "@/components/onboarding/CardDeck";
+import { ANSWER_LOCKOUT_MS, ANSWER_MODES, answersToProfile, CardDeck, changeAnswerMode, COMFORT_OPTIONS, comfortFromKeys, comfortToKeys, INTEREST_COUNT, isLockedOut, likedInterests, pickedToHistory, replaceAnswer, replaceInterests, reviewRows, swipeDirection, toggleChoice, toggleKey, TRANSPORT_OPTIONS, undoAnswer, WALKING_AID_OPTIONS, type Answer } from "@/components/onboarding/CardDeck";
+import { HandsFree } from "@/components/handsfree/HandsFree";
 import { Profile, type Profile as ProfileType } from "@/lib/schema";
 
 // The three required answers; tests about other fields add them so a full Profile comes back.
@@ -350,6 +353,71 @@ describe("easier view interest grid", () => {
     // crafts is card 5, so the swipe deck resumes after it with nothing lost
     expect(back).toHaveLength(5);
     expect(profileOf(back, "A").interests).toEqual(["music", "crafts"]);
+  });
+});
+
+describe("first-step answer mode picker", () => {
+  const partial: (Answer | null)[] = [
+    { kind: "interest", key: "music", liked: true },
+    { kind: "interest", key: "gardening", liked: false },
+    null,
+  ];
+
+  it("starts with the three named radio options before any interest card, with both demos available", () => {
+    const html = renderToStaticMarkup(createElement(CardDeck, { onComplete: () => {}, onDemo: () => {} }));
+    expect(html).toContain('role="radiogroup"');
+    expect(html.match(/type="radio"/g)).toHaveLength(3);
+    expect(html.match(/checked=""/g)).toHaveLength(1);
+    for (const mode of ANSWER_MODES) expect(html).toContain(mode.label);
+    expect(html).toContain("Demo: Margaret");
+    expect(html).toContain("Demo: Harold");
+    expect(html).toContain("data-step-focus");
+    expect(html).not.toContain("Would you enjoy this?");
+    expect(html).not.toContain("Turn on camera");
+  });
+
+  it("hands-free exposes a camera consent control immediately, without a second mode toggle", () => {
+    const html = renderToStaticMarkup(createElement(HandsFree, { label: "Music", onAnswer: () => {} }));
+    expect(html).toContain("Turn on camera");
+    expect(html).toContain("Your camera stays on this device");
+    expect(html).not.toContain("Hands-free (camera):");
+    expect(html).not.toContain("Stop hands-free");
+  });
+
+  it("switches swipe and hands-free without changing liked, declined or skipped answers or the cursor", () => {
+    const hands = changeAnswerMode("swipe", "hands", partial, []);
+    expect(hands.history).toEqual(partial);
+    expect(changeAnswerMode("hands", "swipe", hands.history, hands.picked).history).toEqual(partial);
+    expect(partial).toHaveLength(3);
+  });
+
+  it.each(["swipe", "hands"] as const)("seeds easier view from %s answers and preserves changed picks on return", (mode) => {
+    const grid = changeAnswerMode(mode, "easy", partial, []);
+    expect(grid).toEqual({ history: partial, picked: ["music"] });
+    const resumed = changeAnswerMode("easy", mode, grid.history, ["music", "crafts"]);
+    expect(resumed.history).toHaveLength(5);
+    expect(likedInterests(resumed.history)).toEqual(["music", "crafts"]);
+    expect(profileOf(resumed.history, "A").interests).toEqual(["music", "crafts"]);
+    expect(partial).toHaveLength(3);
+  });
+
+  it("keeps progress when every grid tile is cleared, and a final tile pick is not dropped", () => {
+    const cleared = changeAnswerMode("easy", "hands", partial, []);
+    expect(cleared.history).toHaveLength(partial.length);
+    expect(likedInterests(cleared.history)).toEqual([]);
+    const lastTile = changeAnswerMode("easy", "hands", partial, ["tech"]);
+    expect(lastTile.history).toHaveLength(INTEREST_COUNT);
+    expect(likedInterests(lastTile.history)).toEqual(["tech"]);
+  });
+
+  it("reselecting easier view keeps unsaved tile picks", () => {
+    expect(changeAnswerMode("easy", "easy", partial, ["tech"])).toEqual({ history: partial, picked: ["tech"] });
+  });
+
+  it("never rewrites later walking-aid, transport or comfort answers", () => {
+    const history = [...pickedToHistory(["music"], INTEREST_COUNT), WALK, BUS, NEITHER];
+    expect(changeAnswerMode("easy", "hands", history, ["tech"]).history).toEqual(history);
+    expect(changeAnswerMode("hands", "easy", history, []).history).toEqual(history);
   });
 });
 
