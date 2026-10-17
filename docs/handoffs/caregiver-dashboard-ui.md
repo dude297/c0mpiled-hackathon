@@ -1,6 +1,6 @@
 # Handoff: Caregiver Dashboard UI
 
-**For:** the UI teammate. **API contract:** `docs/daybridge/CAREGIVER_DASHBOARD_CONTRACT.md` (types, endpoints, errors, fixtures, curl walkthrough). **Backend:** `feat/caregiver-backend`. Check that doc's Status column. Code against IMPLEMENTED rows only, and treat PROPOSED rows as subject to change.
+**For:** the UI teammate. **API contract:** `docs/daybridge/CAREGIVER_DASHBOARD_CONTRACT.md` (types, endpoints, errors, fixtures, curl walkthrough). **Backend:** `feat/caregiver-backend` (PR #33, open). The contract is reconciled to that code. Rows marked IMPLEMENTED (branch) are verified there, but they reach `main` only when #33 merges.
 
 ## Ownership
 
@@ -16,7 +16,7 @@ Reuse `src/components/ui/*` (button, card, badge, textarea). Add no new packages
 ## Local setup
 
 1. `npm run dev`.
-2. Seed with `curl -X POST localhost:3000/api/caregiver/demo -H "x-daybridge-user: cg-dana"`. The response returns person and plan ids.
+2. Seed with `curl -X POST localhost:3000/api/caregiver/demo`. No header is needed. Person ids are fixed: Maya `7d1f0a52-4c1e-4b8a-9a0e-6d6179610001`, Margaret `7d1f0a52-4c1e-4b8a-9a0e-6d6172670002`. Plan ids change on every seed.
 3. The UI sends the `x-daybridge-user` header on every call. For the demo, add a small "Viewing as" picker on the dashboard (cg-dana / cg-lee / self-maya) and store the choice in `localStorage`. Label it **"Demo identity (not sign-in)"**. Never present it as login.
 
 ## Screens
@@ -38,7 +38,7 @@ Reuse `src/components/ui/*` (button, card, badge, textarea). Add no new packages
   - Check in (`checkin`, or the caller is self)
   - Acknowledge (`view`)
 - Hide the controls the caller can't use. Still handle a 403 if one gets through.
-- Check-in notes: if an item has `hasNote: true` and no `note`, show "Note (visible to the reporter and managers)". Don't render it as an empty note.
+- Check-ins in detail and history are `CheckInView`s. They have `reporterRole` but no `reporterUserId`, so show the role rather than a name. Check-in notes: if an item has `hasNote: true` and no `note`, show "Note (visible to the reporter and managers)". Don't render it as an empty note.
 
 ### 3. Check-in form
 - Three large buttons, each one sends the check-in:
@@ -63,7 +63,7 @@ Reuse `src/components/ui/*` (button, card, badge, textarea). Add no new packages
   - `checkin_overdue`
 
 ### 5. History (`/caregiver/[personId]/history`)
-- `GET /people/:id/history?limit=20`. List newest first.
+- `GET /people/:id/history?limit=20`. List newest first. Items with `type: "checkin"` carry a `checkIn` object (role, kind, note/hasNote).
 - A **Load more** button sends `cursor=<nextCursor>` and appends the results. Hide the button when `nextCursor` is null. Never parse or build cursors.
 - Group by day in the person's timezone. Use an icon or tag per `type`: plan, ride/invite, attendance, feedback, check-in.
 
@@ -74,6 +74,7 @@ Reuse `src/components/ui/*` (button, card, badge, textarea). Add no new packages
 | `labels.storage === "memory"` | Persistent footer or banner on every caregiver screen | "Demo storage: data resets when the server restarts." |
 | `labels.storage === "durable"` | Same place | "Saved" (or no banner) |
 | `labels.providers === "simulated"` | Next to any ride/invite status | "Simulated: no real ride or invite was sent." |
+| Dependency `not_requested` | Plan rows | "Not requested yet" (waiting for approval) |
 | Dependency `requested` | Plan rows | "Requested, not confirmed yet". **Never show `requested` as confirmed**, and never use a check mark for it |
 | Dependency `confirmed` | Plan rows | "Confirmed" (with "simulated" while providers are simulated) |
 | `outcome.source === "self_reported"` | Plan rows | "Attended (self-reported)". Keep it separate from the dependency statuses |
@@ -87,6 +88,7 @@ Reuse `src/components/ui/*` (button, card, badge, textarea). Add no new packages
 |---|---|
 | 401 | "Choose a demo identity to continue". Open the identity picker |
 | 403 | Inline, at the action: "You can view but not do this. Ask a manager for access." Keep the page |
+| 404 on ack | "This item is no longer current." Refetch the person |
 | 404 | Full-page "Person not found or not shared with you." It reads the same whether the person doesn't exist or isn't shared. Link back to the overview |
 | 409 | Show the `error` message from the response inline |
 | 503 | Full-page "The caregiver dashboard is available in the local demo only. It needs sign-in and storage." No retry loop |
