@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { CircleX, LoaderCircle, Printer, RotateCcw } from "lucide-react";
+import { ArrowUpRight, Check, CircleX, LoaderCircle, Printer, RotateCcw } from "lucide-react";
 import { DashboardShell, EvidencePanel, ProfilePanel } from "@/components/dashboard/panels";
 import { IntakeReview } from "@/components/intake/IntakeReview";
 import { ShareControl } from "@/components/share/ShareControl";
@@ -93,13 +93,21 @@ export default function Home() {
 
   if (mode === "onboarding") {
     return withLive(
-      <div className="mx-auto w-full max-w-6xl p-6">
-        <header className="mb-6 text-center">
-          <h1 className="text-3xl font-semibold">DayBridge</h1>
-          <p className="text-muted-foreground">
-            Find the social activities you&apos;ll actually love — and can actually get to.
-          </p>
-        </header>
+      <div className="onboarding-page">
+        <section className="welcome-panel">
+          <p className="eyebrow">A little connection. A better week.</p>
+          <h1>Make room for<br />something <em>good.</em></h1>
+          <p className="welcome-description">Find activities you look forward to, with a plan that makes getting there feel easier.</p>
+          <div className="welcome-steps">
+            <p><span>01</span> Tell us what you enjoy</p>
+            <p><span>02</span> Discover your local matches</p>
+            <p><span>03</span> Make a plan, on your terms <ArrowUpRight size={18} /></p>
+          </div>
+          <div className="welcome-note"><Check size={18} /><span>Your preferences. Your pace. Always your choice.</span></div>
+          <div className="bridge-art" aria-hidden="true"><div className="art-sun" /><div className="art-arch" /><div className="art-ground" /><span>A bridge to your next good day.</span></div>
+        </section>
+        <section className="onboarding-workspace" aria-label="Set up your preferences">
+        <div className="workspace-heading"><span className="eyebrow">Let’s get to know you</span><span>YOUR PERSONAL STARTING POINT</span></div>
         <CardDeck
           onComplete={(p) => {
             setProfile(p);
@@ -114,9 +122,10 @@ export default function Home() {
             className={`inline-flex min-h-11 items-center rounded-md px-3 text-base text-foreground underline underline-offset-4 ${FOCUS}`}
             onClick={() => setMode("dashboard")}
           >
-            Or use the classic form
+            Prefer a form? Set up your preferences
           </button>
         </div>
+        </section>
       </div>,
     );
   }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Check, Heart, LoaderCircle, X } from "lucide-react";
+import { ArrowLeft, Check, Heart, LoaderCircle, X, Music, Sprout, Club, Footprints, Scissors, Church, BookOpen, HandHeart, CookingPot, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Profile } from "@/lib/schema";
 
@@ -21,6 +21,12 @@ export const INTEREST_META = [
   { key: "cooking", emoji: "🍳", label: "Cooking" },
   { key: "tech", emoji: "📱", label: "Technology help" },
 ] as const;
+
+const INTEREST_ICONS = { music: Music, gardening: Sprout, cards: Club, walking: Footprints, crafts: Scissors, faith: Church, learning: BookOpen, volunteering: HandHeart, cooking: CookingPot, tech: Smartphone };
+function InterestIcon({ interest, className }: { interest: Profile["interests"][number]; className?: string }) {
+  const Icon = INTEREST_ICONS[interest];
+  return <Icon className={className} strokeWidth={1.4} aria-hidden="true" />;
+}
 
 export const TRAVEL_BUCKETS = [
   { label: "Down the block", detail: "within 5 minutes", min: 5 },
@@ -329,10 +335,10 @@ function InterestGrid({ picked, onToggle, onClear, onContinue, disabled }: {
               onClick={() => onToggle(m.key)}
               // Tab doesn't scroll a tile that is already in the viewport, even when the sticky bar covers it.
               onFocus={(e) => { if (e.currentTarget.matches(":focus-visible")) e.currentTarget.scrollIntoView({ block: "nearest" }); }}
-              className={`relative flex min-h-24 min-w-0 scroll-mb-32 flex-col items-center justify-center gap-1 rounded-xl p-3 text-center text-lg font-bold leading-tight break-words transition-colors motion-reduce:transition-none md:text-xl ${RING} ${on ? "bg-[#5a594e] text-white" : "bg-[#efefe6] text-[#121212] hover:bg-[#e2e2d6]"}`}
+              className={`relative flex min-h-24 min-w-0 scroll-mb-32 flex-col items-center justify-center gap-1 rounded-xl p-3 text-center text-lg font-bold leading-tight break-words transition-colors motion-reduce:transition-none md:text-xl ${RING} ${on ? "bg-primary text-white" : "bg-secondary text-secondary-foreground hover:bg-accent"}`}
             >
               {on && <Check aria-hidden="true" className="absolute right-2 top-2 size-6" strokeWidth={3} />}
-              <span aria-hidden="true" className="text-3xl">{m.emoji}</span>
+              <InterestIcon interest={m.key} className="size-8" />
               <span>{m.label}</span>
             </button>
           );
@@ -511,7 +517,7 @@ export function CardDeck({
   const optionDetail = `mt-1 block text-muted-foreground ${bigButtons ? "text-lg md:text-xl" : "text-base md:text-lg"}`;
 
   return (
-    <div ref={rootRef} className={`mx-auto w-full min-w-0 ${showGrid ? "max-w-3xl" : "max-w-md"} overflow-x-clip p-4 text-base md:text-lg`}>
+    <div ref={rootRef} className={`onboarding-deck mx-auto w-full min-w-0 ${showGrid ? "max-w-3xl" : "max-w-md"} overflow-x-clip p-4 text-base md:text-lg`}>
       {onDemo && index === 0 && !showGrid && (
         <div className="mb-3 grid grid-cols-2 gap-2">
           <Button size="lg" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("margaret")} disabled={loading}>Demo: Margaret</Button>
@@ -589,7 +595,7 @@ export function CardDeck({
         <div className="rounded-xl border bg-card p-6 shadow-sm">
           <p className="mb-4 text-base md:text-lg font-medium text-muted-foreground">Would you enjoy this?</p>
           <div className="mb-6 text-center">
-            <div className="text-7xl">{card.interest.emoji}</div>
+            <div className="interest-symbol"><InterestIcon interest={card.interest.key} className="size-14" /></div>
             <p className="mt-3 text-2xl font-semibold">{card.interest.label}</p>
           </div>
           <ActionRow

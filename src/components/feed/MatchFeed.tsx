@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Calendar, CircleX, Hand, MapPin, SearchX, ShieldCheck, Wallet } from "lucide-react";
+import { Calendar, Check, Plus, CircleX, Hand, MapPin, SearchX, ShieldCheck, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AnalysisResult, Barrier, PlanItem } from "@/lib/schema";
 
@@ -22,7 +22,7 @@ export function toggleInSet(set: Set<string>, id: string): Set<string> {
 function MatchCard({ item, added, onToggle }: { item: PlanItem; added: boolean; onToggle: () => void }) {
   return (
     <li
-      className={`rounded-2xl border-2 p-4 shadow-sm transition-colors md:p-5 ${added ? "border-primary bg-primary/5" : "border-dashed border-border bg-card"}`}
+      className={`rounded-2xl match-card border p-5 transition-colors md:p-6 ${added ? "border-primary/40 bg-card" : "border-border bg-card"}`}
     >
       <h3 className="text-xl font-semibold leading-snug md:text-2xl">{item.name}</h3>
       <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5 text-base text-foreground/75 md:text-lg">
@@ -49,7 +49,7 @@ function MatchCard({ item, added, onToggle }: { item: PlanItem; added: boolean; 
         onClick={onToggle}
         className={`mt-4 h-14 w-full rounded-xl text-lg font-semibold focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-foreground ${added ? "border-2 border-primary text-primary" : ""}`}
       >
-        <span aria-hidden="true">{added ? "✓" : "❤️"}</span>
+        {added ? <Check aria-hidden="true" /> : <Plus aria-hidden="true" />}
         {added ? "In my week" : "Add to my week"}
       </Button>
       <Link
@@ -77,7 +77,7 @@ export function MatchFeed({ result, added, onToggle }: { result: AnalysisResult;
             </p>
           </div>
         ) : (
-          <ul className="grid gap-4">
+          <ul className="grid gap-5 md:grid-cols-2">
             {result.plan.map((item) => (
               <MatchCard key={item.activityId} item={item} added={added.has(item.activityId)} onToggle={() => onToggle(item.activityId)} />
             ))}
