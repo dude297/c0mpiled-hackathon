@@ -484,7 +484,7 @@ export function CardDeck({
     const cardFor = (field: ReviewField) =>
       field === "interests" ? 0 : cards.findIndex((c) => c.type === (field === "hearing" || field === "groupSize" ? "comfort" : field));
     return (
-      <div ref={rootRef} className="mx-auto w-full max-w-md rounded-xl border bg-card p-6 text-base md:text-lg">
+      <div ref={rootRef} className="db-fade-up mx-auto w-full max-w-md rounded-xl border bg-card p-6 text-base md:text-lg">
         <h2 tabIndex={-1} data-step-focus className="mb-1 text-2xl font-semibold outline-none">Here&apos;s what we heard</h2>
         <p className="mb-4 text-muted-foreground">Check your answers. Tap Change to fix anything.</p>
         <dl className="divide-y">
@@ -584,7 +584,7 @@ export function CardDeck({
         <>
           <p className="mb-2 font-medium" aria-live="polite">{bigButtons ? "Step" : "Card"} {step + 1} of {stepCount}</p>
           <div role="progressbar" aria-label="Cards completed" aria-valuemin={0} aria-valuemax={stepCount} aria-valuenow={step} className="mb-4 h-3 overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
+            <div className="db-progress h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
           </div>
         </>
       )}
@@ -600,6 +600,8 @@ export function CardDeck({
         />
       </label>
 
+      {/* Re-keyed per step so each new card fades up once; focus still moves via data-step-focus after commit. */}
+      <div key={showGrid ? "grid" : `card-${at}`} className="db-fade-up">
       {showGrid && (
         <InterestGrid
           picked={picked}
@@ -753,6 +755,7 @@ export function CardDeck({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

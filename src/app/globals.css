@@ -149,3 +149,50 @@
     display: none !important;
   }
 }
+/* Shared micro-interactions (no motion library). All motion is dropped under prefers-reduced-motion; state still changes instantly. */
+@keyframes db-fade-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes db-pop {
+  from { transform: scale(0.96); }
+  to { transform: scale(1); }
+}
+@keyframes db-flash-ok {
+  0% { box-shadow: 0 0 0 3px rgb(21 128 61 / 0.7), inset 0 0 0 999px rgb(21 128 61 / 0.1); }
+  100% { box-shadow: 0 0 0 10px rgb(21 128 61 / 0), inset 0 0 0 999px rgb(21 128 61 / 0); }
+}
+@keyframes db-flash-warn {
+  0% { box-shadow: 0 0 0 3px rgb(194 65 12 / 0.7), inset 0 0 0 999px rgb(194 65 12 / 0.1); }
+  100% { box-shadow: 0 0 0 10px rgb(194 65 12 / 0), inset 0 0 0 999px rgb(194 65 12 / 0); }
+}
+.db-fade-up { animation: db-fade-up 220ms ease-out both; }
+.db-pop { animation: db-pop 180ms ease-out both; }
+.db-flash-ok { animation: db-flash-ok 600ms ease-out; }
+.db-flash-warn { animation: db-flash-warn 600ms ease-out; }
+.db-stagger > * { animation: db-fade-up 220ms ease-out both; }
+.db-stagger > :nth-child(2) { animation-delay: 40ms; }
+.db-stagger > :nth-child(3) { animation-delay: 80ms; }
+.db-stagger > :nth-child(4) { animation-delay: 120ms; }
+.db-stagger > :nth-child(5) { animation-delay: 160ms; }
+.db-stagger > :nth-child(6) { animation-delay: 200ms; }
+.db-stagger > :nth-child(7) { animation-delay: 240ms; }
+.db-stagger > :nth-child(8) { animation-delay: 280ms; }
+.db-stagger > :nth-child(9) { animation-delay: 320ms; }
+.db-stagger > :nth-child(10) { animation-delay: 360ms; }
+.db-stagger > :nth-child(11) { animation-delay: 400ms; }
+.db-stagger > :nth-child(n + 12) { animation-delay: 440ms; }
+.db-progress { transition: width 300ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .db-fade-up,
+  .db-pop,
+  .db-flash-ok,
+  .db-flash-warn,
+  .db-stagger > * {
+    animation: none !important;
+  }
+  .db-progress {
+    transition: none !important;
+  }
+}

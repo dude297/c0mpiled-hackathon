@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Calendar, CircleX, Hand, MapPin, SearchX, ShieldCheck, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -19,10 +20,27 @@ export function toggleInSet(set: Set<string>, id: string): Set<string> {
   return next;
 }
 
-function MatchCard({ item, added, onToggle }: { item: PlanItem; added: boolean; onToggle: () => void }) {
+const DAY_FULL: Record<string, string> = {
+  mon: "Monday", tue: "Tuesday", wed: "Wednesday", thu: "Thursday", fri: "Friday", sat: "Saturday", sun: "Sunday",
+};
+
+/** Screen-reader confirmation: "Added Library Cards to Wednesday" / "Removed Library Cards from Wednesday". */
+export function toggleMessage(item: Pick<PlanItem, "name" | "when">, nowAdded: boolean): string {
+  const day = DAY_FULL[(item.when ?? "").trim().slice(0, 3).toLowerCase()] ?? "your week";
+  return nowAdded ? `Added ${item.name} to ${day}` : `Removed ${item.name} from ${day}`;
+}
+
+// Ids added from the feed that a calendar hasn't shown yet. The Week tab mounts after the add,
+// so it reads this once to pop the new blocks; it never affects what is planned.
+export const pendingCalendarReveal = new Set<string>();
+
+type Flash = { id: string; kind: "add" | "remove" };
+
+function MatchCard({ item, added, flash, onToggle }: { item: PlanItem; added: boolean; flash: Flash["kind"] | null; onToggle: () => void }) {
   return (
-    <li
-      className={`rounded-2xl border-2 p-4 shadow-sm transition-colors md:p-5 ${added ? "border-primary bg-primary/5" : "border-dashed border-border bg-card"}`}
+    <li>
+    <article
+      className={`rounded-2xl border-2 p-4 shadow-sm transition-[color,background-color,border-color,opacity] duration-300 motion-reduce:transition-none md:p-5 ${added ? "border-primary bg-primary/5" : "border-dashed border-border bg-card"} ${flash === "add" ? "db-flash-ok" : ""} ${flash === "remove" ? "opacity-70" : ""}`}
     >
       <h3 className="text-xl font-semibold leading-snug md:text-2xl">{item.name}</h3>
       <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5 text-base text-foreground/75 md:text-lg">
@@ -49,8 +67,10 @@ function MatchCard({ item, added, onToggle }: { item: PlanItem; added: boolean; 
         onClick={onToggle}
         className={`mt-4 h-14 w-full rounded-xl text-lg font-semibold focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-foreground ${added ? "border-2 border-primary text-primary" : ""}`}
       >
-        <span aria-hidden="true">{added ? "✓" : "❤️"}</span>
-        {added ? "In my week" : "Add to my week"}
+        <span key={added ? "in" : "out"} className="db-pop inline-flex items-center gap-2">
+          <span aria-hidden="true">{added ? "✓" : "❤️"}</span>
+          {added ? "In my week" : "Add to my week"}
+        </span>
       </Button>
       <Link
         href={`/coordinate?activityId=${item.activityId}`}
@@ -59,13 +79,31 @@ function MatchCard({ item, added, onToggle }: { item: PlanItem; added: boolean; 
         <Hand className="size-5" aria-hidden="true" />
         Get me there →
       </Link>
+    </article>
     </li>
   );
 }
 
 export function MatchFeed({ result, added, onToggle }: { result: AnalysisResult; added: Set<string>; onToggle: (activityId: string) => void }) {
+  const [flash, setFlash] = useState<Flash | null>(null);
+  const [message, setMessage] = useState("");
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const toggle = (item: PlanItem) => {
+    const nowAdded = !added.has(item.activityId);
+    if (nowAdded) pendingCalendarReveal.add(item.activityId);
+    else pendingCalendarReveal.delete(item.activityId);
+    onToggle(item.activityId);
+    setMessage(toggleMessage(item, nowAdded));
+    setFlash({ id: item.activityId, kind: nowAdded ? "add" : "remove" });
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setFlash(null), 650);
+  };
+
   return (
     <div className="space-y-8 text-base md:text-lg">
+      <p className="sr-only" role="status" aria-live="polite">{message}</p>
       <section aria-labelledby="matches-heading">
         <h2 id="matches-heading" className="mb-3 text-2xl font-semibold">Good matches</h2>
         {result.plan.length === 0 ? (
@@ -77,9 +115,15 @@ export function MatchFeed({ result, added, onToggle }: { result: AnalysisResult;
             </p>
           </div>
         ) : (
-          <ul className="grid gap-4">
+          <ul className="db-stagger grid gap-4">
             {result.plan.map((item) => (
-              <MatchCard key={item.activityId} item={item} added={added.has(item.activityId)} onToggle={() => onToggle(item.activityId)} />
+              <MatchCard
+                key={item.activityId}
+                item={item}
+                added={added.has(item.activityId)}
+                flash={flash?.id === item.activityId ? flash.kind : null}
+                onToggle={() => toggle(item)}
+              />
             ))}
           </ul>
         )}
@@ -93,7 +137,7 @@ export function MatchFeed({ result, added, onToggle }: { result: AnalysisResult;
             Nothing was ruled out — every option could be worked around.
           </p>
         ) : (
-          <ul className="grid gap-3">
+          <ul className="db-stagger grid gap-3">
             {result.blocked.map((b) => (
               <li key={b.name} className="rounded-xl border border-destructive/30 bg-destructive/5 p-4">
                 <p className="text-lg font-semibold md:text-xl">{b.name}</p>
