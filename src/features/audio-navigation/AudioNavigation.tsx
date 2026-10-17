@@ -240,7 +240,11 @@ export function AudioNavigation() {
       const stop = await startLocalCommands(
         (command) => { if (!cancelled && generation === listeningGeneration.current) executeVoiceCommand(command); },
         (message, active) => { if (!cancelled && generation === listeningGeneration.current) { setVoiceNotice(message); setListening(active); } },
-        () => !!window.speechSynthesis?.speaking || !!window.speechSynthesis?.pending, pending.signal);
+        () => !!window.speechSynthesis?.speaking || !!window.speechSynthesis?.pending, pending.signal,
+        () => {
+          const group = lastControl.current?.closest<HTMLElement>('[data-step-focus][role="group"]');
+          return group?.isConnected ? group.getAttribute('aria-label') : null;
+        });
       if (cancelled || generation !== listeningGeneration.current) stop();
       else stopListening.current = stop;
     } catch (error) {

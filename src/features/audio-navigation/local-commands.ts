@@ -6,6 +6,7 @@ export async function startLocalCommands(
   report: (message: string, active: boolean) => void,
   speaking: () => boolean,
   signal?: AbortSignal,
+  answerContext: () => string | null = () => null,
 ): Promise<() => void> {
   const health = await fetch('/api/voice/transcribe', { cache: 'no-store', signal: AbortSignal.timeout(3000) });
   const status = await health.json();
@@ -34,6 +35,7 @@ export async function startLocalCommands(
     const mimeType = formats.find((format) => MediaRecorder.isTypeSupported(format));
     recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
     const chunks: BlobPart[] = [];
+    const question = answerContext();
     let discard = false;
     recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
     recorder.onerror = () => { stop(); report('Microphone recording failed. Check browser microphone access and try again.', false); };
@@ -52,7 +54,10 @@ export async function startLocalCommands(
         if (!response.ok) throw new Error(data.error || 'Local transcription failed.');
         const command = typeof data.command === 'string' ? parseVoiceCommand(data.command) : null;
         if (command === 'stop listening') { stop(); return; }
-        if (command) { misses = 0; report(`Recognized: “${command}”.`, true); execute(command); }
+        if ((command === 'yes' || command === 'no') && (!question || question !== answerContext())) {
+          report('The question changed. Say your answer again for the current card.', true);
+        }
+        else if (command) { misses = 0; report(`Recognized: “${command}”.`, true); execute(command); }
         else { misses++; report('No command recognized. Wait for Listening, then say next or read page.', true); }
         if (misses >= 3) { stop(); report('No command recognized three times. Microphone off. Start again when ready.', false); return; }
         timer = setTimeout(next, 700);

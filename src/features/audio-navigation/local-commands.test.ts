@@ -24,6 +24,24 @@ function fixture(command: string | null = 'next') {
 }
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();});
 describe('local microphone commands',()=>{
+  it('rejects a delayed answer after eye tracking advances the card',async()=>{
+    const f=fixture('yes'); let card='Music. Left arrow for no, right arrow for yes.';
+    const stop=await startLocalCommands(f.execute,f.report,()=>false,undefined,()=>card);
+    await vi.advanceTimersByTimeAsync(2000); card='Gardening. Left arrow for no, right arrow for yes.';
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.report).toHaveBeenCalledWith(expect.stringContaining('question changed'),true); stop();
+  });
+  it('accepts an answer only while the same interest card remains current',async()=>{
+    const f=fixture('no');
+    const stop=await startLocalCommands(f.execute,f.report,()=>false,undefined,()=> 'Music');
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(f.execute).toHaveBeenCalledExactlyOnceWith('no'); stop();
+  });
+  it('cannot answer without a captured interest card',async()=>{
+    const f=fixture('yes'); const stop=await startLocalCommands(f.execute,f.report,()=>false);
+    await vi.advanceTimersByTimeAsync(4000); expect(f.execute).not.toHaveBeenCalled(); stop();
+  });
   it('checks worker availability before requesting microphone access',async()=>{
     const f=fixture(); f.fetch.mockResolvedValue(Response.json({ready:false,error:'Worker offline'},{status:503}));
     await expect(startLocalCommands(f.execute,f.report,()=>false)).rejects.toThrow('Worker offline');
