@@ -14,7 +14,7 @@ type IconName = keyof typeof Ionicons.glyphMap;
 const MODES: { key: AnswerMode; icon: IconName; label: string; detail: string }[] = [
   { key: 'swipe', icon: 'albums-outline', label: 'Swipe cards', detail: 'One idea at a time. Swipe or tap No / Yes.' },
   { key: 'easy', icon: 'grid-outline', label: 'Easier view (big tiles)', detail: 'See every idea at once. Tap the ones you like.' },
-  { key: 'hands', icon: 'eye-outline', label: 'Hands-free (eye tracker)', detail: 'Look or tilt your head toward No or Yes.' },
+  { key: 'hands', icon: 'eye-outline', label: 'Hands-free (eye tracker)', detail: 'Look or tilt your head toward No or Yes. Next screen: tap “Turn on camera”.' },
 ];
 
 const DEMOS: { key: DemoKey; label: string }[] = [

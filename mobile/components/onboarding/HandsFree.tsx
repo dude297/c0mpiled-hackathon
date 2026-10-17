@@ -25,11 +25,15 @@ type Side = 'left' | 'right';
 
 const PRIVACY = 'Your camera stays on this device — nothing is recorded or sent.';
 const ERRORS: Record<PageError | 'timeout', string> = {
-  denied: "The camera is turned off for this app. To use hands-free, allow the camera in your phone's Settings. The No and Yes buttons still work.",
-  nocamera: "We couldn't find a front camera on this phone. The No and Yes buttons still work.",
-  load: "Hands-free couldn't start. It needs the internet the first time. Check your connection and try again — the No and Yes buttons still work.",
-  timeout: "Hands-free is taking too long to start. Try again — the No and Yes buttons still work.",
+  denied:
+    Platform.OS === 'ios'
+      ? 'The camera is blocked. To fix it: open the iPhone Settings app › Expo Go › turn on Camera, then come back and tap Try again. The ✕ / ❤️ buttons still work.'
+      : "The camera is blocked. Allow the camera for this app in your phone's Settings, then tap Try again. The ✕ / ❤️ buttons still work.",
+  nocamera: "We couldn't open the front camera. Tap Try again — the ✕ / ❤️ buttons still work.",
+  load: "Hands-free couldn't load the face model. It needs the internet. Check your connection and tap Try again — the ✕ / ❤️ buttons still work.",
+  timeout: "Hands-free couldn't start — use the ✕ / ❤️ buttons, or tap Try again.",
 };
+const START_TIMEOUT_MS = 15_000; // no word from the camera page for this long while starting → show the timeout
 
 // Progress ring from plain Views (no SVG dependency): two clipped half-rings rotated into view.
 function Ring({ size, width, progress, color, track }: { size: number; width: number; progress: number; color: string; track: string }) {
@@ -132,6 +136,7 @@ export function HandsFreeDeck({
   const [face, setFace] = useState<boolean | null>(null);
   const [calib, setCalib] = useState(0);
   const [error, setError] = useState<PageError | 'timeout' | null>(null);
+  const [detail, setDetail] = useState(''); // latest step / technical reason from the page, shown as plain text
   const [progress, setProgress] = useState<{ side: Side | null; value: number }>({ side: null, value: 0 });
   const [said, setSaid] = useState('');
   const top = INTEREST_META[cursor];
@@ -145,7 +150,8 @@ export function HandsFreeDeck({
     if (phase !== 'starting' && phase !== 'loading') return;
     const id = setInterval(() => {
       const quiet = Date.now() - lastMsg.current;
-      if (quiet > (phase === 'loading' ? 100_000 : 60_000)) {
+      if (quiet > START_TIMEOUT_MS) {
+        webRef.current?.injectJavaScript('window.__hf && window.__hf.stop(); true;');
         setError('timeout');
         setPhase('error');
       }
@@ -156,6 +162,7 @@ export function HandsFreeDeck({
   const start = () => {
     lastMsg.current = Date.now();
     setError(null);
+    setDetail('Opening the camera page…');
     setFace(null);
     setCalib(0);
     setProgress({ side: null, value: 0 });
@@ -196,16 +203,20 @@ export function HandsFreeDeck({
     else if (m.type === 'answer') answer(m.liked);
     else if (m.state === 'error') {
       setError(m.error);
+      setDetail(m.detail ?? '');
       setPhase('error');
     } else if (m.state === 'stopped') setPhase('idle');
     else {
       setPhase(m.state);
+      if (m.detail) setDetail(m.detail);
       if (m.face !== undefined) setFace(m.face);
       if (m.progress !== undefined) setCalib(m.progress);
     }
   };
-  const pageFailed = () => {
+  const pageFailed = (e?: { nativeEvent?: object }) => {
+    const n = e?.nativeEvent as { description?: string; statusCode?: number } | undefined;
     setError('load');
+    setDetail(n?.description ? `WebView: ${n.description}` : n?.statusCode ? `WebView HTTP ${n.statusCode}` : 'The camera page stopped.');
     setPhase('error');
   };
 
@@ -226,8 +237,8 @@ export function HandsFreeDeck({
   // percent (updates ~5×/s) sits in a separate, non-live Text so TalkBack doesn't repeat it.
   let statusText = '';
   let percent = '';
-  if (phase === 'starting') statusText = 'Starting the camera…';
-  else if (phase === 'loading') statusText = 'Getting ready… (a few seconds)';
+  if (phase === 'starting') statusText = detail || 'Starting the camera…';
+  else if (phase === 'loading') statusText = detail || 'Getting ready… (a few seconds)';
   else if (face === false) statusText = "Can't see your face. Hold the phone in front of you, in good light.";
   else if (phase === 'calibrating') {
     statusText = 'Look at the middle of the screen…';
@@ -298,16 +309,23 @@ export function HandsFreeDeck({
           </>
         ) : (
           <>
-            <Text style={[type.body, { color: colors.text }]}>
-              Look toward No or Yes, or tilt your head toward it, and hold. Hands-free works on the interest cards.
-            </Text>
-            <ModeSwitch mode={mode} onMode={pickMode} />
             {error ? (
               <Text style={[type.bodyStrong, { color: colors.hard }]} accessibilityLiveRegion="assertive" accessibilityRole="alert">
                 {ERRORS[error]}
               </Text>
             ) : null}
-            <PillButton icon="camera-outline" label={error ? 'Try again' : 'Start hands-free'} onPress={start} hint="Turns on the front camera" />
+            {error && detail ? <Text style={[type.label, { color: colors.textMuted }]}>{detail}</Text> : null}
+            <PillButton
+              icon={error ? 'refresh' : 'camera'}
+              label={error ? 'Try again' : 'Turn on camera'}
+              onPress={start}
+              hint="Turns on the front camera for hands-free"
+              style={st.bigStart}
+            />
+            <Text style={[type.body, { color: colors.text }]}>
+              Then look toward ✕ No or ❤️ Yes (or tilt your head) and hold. You can always tap ✕ / ❤️ instead.
+            </Text>
+            <ModeSwitch mode={mode} onMode={pickMode} />
           </>
         )}
         {!web ? <Text style={st.privacy}>{PRIVACY}</Text> : null}
@@ -341,7 +359,8 @@ const st = StyleSheet.create({
   liveRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   stop: { minHeight: tap.min, paddingHorizontal: space.md },
   privacy: { fontSize: 16, lineHeight: 22, color: colors.textMuted },
-  preview: { width: 96, height: 96, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.text },
+  bigStart: { minHeight: 64 },
+  preview: { width: 120, height: 90, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.text },
   web: { flex: 1, backgroundColor: colors.text },
   faceDot: { position: 'absolute', top: 6, right: 6, width: 14, height: 14, borderRadius: 7, borderWidth: 2, borderColor: '#fff' },
   faceRow: { flexDirection: 'row', alignItems: 'center', gap: space.xs },

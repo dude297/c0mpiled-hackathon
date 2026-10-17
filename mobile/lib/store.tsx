@@ -13,7 +13,7 @@ export type AppState = {
   firstName: string | null;
   result: AnalysisResult | null;
   source: ResultSource | null; // where `result` came from — label it honestly in the UI
-  added: Set<string>; // activityIds on "My week"; resets to all plan items on each new result
+  added: Set<string>; // activityIds on "My week"; starts EMPTY on each new result — they add with ❤️
   loading: boolean;
   error: string | null;
   analyze: (profile: Profile, firstName?: string | null) => Promise<void>; // firstName omitted = keep current
@@ -82,7 +82,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const next = server ?? analyzeOnDevice(p, shown);
       setResult(next);
       setSource(server ? 'server' : 'on-device');
-      setAdded(new Set(next.plan.map((i) => i.activityId)));
+      setAdded(new Set()); // My week fills only as they tap ❤️ on a match
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong. Please try again.');
     } finally {

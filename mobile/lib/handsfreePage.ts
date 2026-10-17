@@ -16,7 +16,7 @@ export const HANDSFREE_BASE_URL = 'https://daybridge.local/';
 
 export type PageError = 'denied' | 'nocamera' | 'load';
 export type PageMessage =
-  | { type: 'status'; state: 'starting' | 'loading' | 'calibrating' | 'tracking' | 'stopped'; face?: boolean; progress?: number }
+  | { type: 'status'; state: 'starting' | 'loading' | 'calibrating' | 'tracking' | 'stopped'; face?: boolean; progress?: number; detail?: string }
   | { type: 'status'; state: 'error'; error: PageError; detail?: string }
   | { type: 'progress'; side: 'left' | 'right' | null; value: number }
   | { type: 'answer'; liked: boolean };
@@ -45,6 +45,7 @@ export function parsePageMessage(data: string): PageMessage | null {
         state: o.state,
         face: typeof o.face === 'boolean' ? o.face : undefined,
         progress: typeof o.progress === 'number' ? o.progress : undefined,
+        detail: typeof o.detail === 'string' ? o.detail.slice(0, 120) : undefined,
       };
   }
   return null;
@@ -88,6 +89,7 @@ export function buildHandsFreeHtml(mode: Mode): string {
   }
   function resetDwell() { zone = 'center'; dwell = initialDwell(); sendProgress(null, 0, true); }
   function startCalib() {
+    window.__hfLive = true;
     calib = { gaze: [], tilt: [], ms: 0, last: null, sentAt: 0 };
     phase = 'calibrating';
     resetDwell();
@@ -166,13 +168,13 @@ export function buildHandsFreeHtml(mode: Mode): string {
     sendProgress(r.side, r.progress);
   }
 
-  function make(d) {
+  function make(d, ms) {
     return withTimeout(vision.FaceLandmarker.createFromOptions(files, {
       baseOptions: { modelAssetPath: MODEL, delegate: d },
       runningMode: 'VIDEO',
       numFaces: 1,
       outputFaceBlendshapes: true
-    }), 25000).then(function (l) { delegate = d; return l; });
+    }), ms || 14000).then(function (l) { delegate = d; return l; });
   }
   // GPU made a landmarker but it keeps throwing on frames (WebGL in WKWebView can do this):
   // swap to CPU once instead of giving up. The loop pauses until the new one is ready.
@@ -206,7 +208,7 @@ export function buildHandsFreeHtml(mode: Mode): string {
   }
 
   async function start() {
-    post({ type: 'status', state: 'starting' });
+    post({ type: 'status', state: 'starting', detail: 'Asking for the camera…' });
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fail('nocamera', 'getUserMedia unavailable');
     try {
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
@@ -218,11 +220,17 @@ export function buildHandsFreeHtml(mode: Mode): string {
     video.srcObject = stream;
     try { await video.play(); } catch (e) {}
     phase = 'loading';
-    post({ type: 'status', state: 'loading' });
+    post({ type: 'status', state: 'loading', detail: 'Camera on. Downloading the face model…' });
     try {
-      vision = await withTimeout(import(CDN + '/vision_bundle.mjs'), 20000);
-      files = await withTimeout(vision.FilesetResolver.forVisionTasks(CDN + '/wasm'), 20000);
-      try { landmarker = await make('GPU'); } catch (e) { landmarker = await make('CPU'); }
+      vision = await withTimeout(import(CDN + '/vision_bundle.mjs'), 14000);
+      post({ type: 'status', state: 'loading', detail: 'Loading the face model files…' });
+      files = await withTimeout(vision.FilesetResolver.forVisionTasks(CDN + '/wasm'), 14000);
+      post({ type: 'status', state: 'loading', detail: 'Starting the face model…' });
+      // GPU (WebGL) can fail or hang in iOS WebViews: give it a short try, then use the CPU.
+      try { landmarker = await make('GPU', 7000); } catch (e) {
+        post({ type: 'status', state: 'loading', detail: 'Using the slower CPU mode…' });
+        landmarker = await make('CPU', 14000);
+      }
     } catch (e) {
       return fail('load', e && e.message ? e.message : e);
     }
@@ -243,6 +251,14 @@ html,body{margin:0;height:100%;background:#1a1a1a;overflow:hidden}
 video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 </style></head>
 <body><video id="v" autoplay muted playsinline></video>
+<script>
+(function () {
+  function post(m) { try { window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {} }
+  post({ type: 'status', state: 'starting', detail: 'Hands-free page loaded…' });
+  window.addEventListener('error', function (e) { if (!window.__hf) post({ type: 'status', state: 'error', error: 'load', detail: 'Script error: ' + (e && e.message) }); });
+  window.addEventListener('unhandledrejection', function (e) { if (!window.__hfLive) post({ type: 'status', state: 'error', error: 'load', detail: 'Error: ' + String(e && e.reason && (e.reason.message || e.reason)).slice(0, 150) }); });
+})();
+</script>
 <script>${HANDSFREE_CORE_JS}</script>
 <script>${app}</script>
 </body></html>`;

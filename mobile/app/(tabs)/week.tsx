@@ -29,9 +29,9 @@ export default function Week() {
             return (
               <View style={[styles.card, { alignItems: 'center' }]}>
                 <Ionicons name="calendar-outline" size={40} color={colors.textMuted} />
-                <Text style={[type.heading, { color: colors.text, textAlign: 'center' }]}>Your week is open</Text>
+                <Text style={[type.heading, { color: colors.text, textAlign: 'center' }]}>Nothing in your week yet</Text>
                 <Text style={[type.body, { color: colors.textMuted, textAlign: 'center' }]}>
-                  On the Matches tab, tap “Add to my week” and it will show up here.
+                  Go to Matches and tap ❤️ “Add to my week” on anything you like. It will show up here.
                 </Text>
               </View>
             );
