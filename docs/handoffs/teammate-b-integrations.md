@@ -14,10 +14,14 @@ Owner: Teammate B (`hiromaruyama`). Branch: `intg/third-party` (PR #11). Contrac
 
 Nothing books, sends or confirms anything. Deep links are a handoff for the user to tap; they are not a `ProviderPort` and never mark a ride dependency confirmed.
 
+## Known limits
+
+- **UI wiring is pending.** On this branch, `/api/analyze` computes and returns enrichment, but no committed UI consumes `venueByItem` / `weather` / `rideshareByItem` / `calendarLink` yet. The rendering exists in a stash and must land through Teammate A (panels.tsx is UI-owned; see `docs/handoffs/README.md` one-owner-per-file rule). Until then this table describes API behavior, not what a demo viewer sees.
+- **Unconfirmed evidence styling:** the existing `EvidencePanel` renders any `verified: false` evidence with a red "barrier" badge, so the Google "unconfirmed" claim would visually read as a check failure. Guardrail holds (never green/pass), but a neutral "unconfirmed" style is a UI request for Teammate A.
+
 ## Provenance rules
 
-- Every Google-sourced claim renders as **unconfirmed** (`verified: false`, "via Google", "Google says … — unconfirmed by the venue"). Crowd-sourced accessibility data is never shown as a green pass.
-- Weather/estimates render with source labels (`live: Open-Meteo`, `Uber estimate · live`).
+- Enrichment claims render only once the UI wiring lands (currently stashed, pending Teammate A — see "Known limits"). The API always attaches `source` to each enrichment so any renderer can label provenance: `source: "google"` on venues, `source: "uber"` on estimates, `source: "open-meteo"` on weather (`WeatherNote` includes `source` in the schema proposal; the API currently returns the weather note without it — add it with the schema fold-in).
 - Enrichment is **opt-in**: `DAYBRIDGE_ENRICH=1`, total budget 2.5 s (`Promise.race` in `src/app/api/analyze/route.ts`). Unset → base deterministic plan only, identical to offline.
 - Deep links are skipped entirely when Places gives no coordinates — no venue name is ever aimed at a made-up location.
 - Pickup is honestly labeled "Berkeley Civic Center (demo)" — not the user's home.
@@ -57,5 +61,3 @@ Guardrails: public pages only, respect robots.txt and site terms, aggregate demo
 ## Known limits
 
 - Uber price estimates with a *server* token may 403 in some account configs — deep links remain unaffected (by design).
-- Places `maxResultCount: 1` + `locationBias` (20 km around Berkeley) can still mis-resolve a name; coordinates come only from that single biased result, and rideshare links are skipped if coordinates are missing.
-- The weather check only flags rain for one outdoor keyword match (`garden|walk`) — it's a demo signal, not a forecast service.
