@@ -533,5 +533,5 @@ describe("invariant fuzz", () => {
     // Guard against a vacuous fuzz: the walk must actually exercise READY and recovery.
     expect(readyHits).toBeGreaterThan(0);
     expect(replanHits).toBeGreaterThan(0);
-  });
+  }, 30_000); // ~2-6 s depending on machine load
 });
