@@ -1,5 +1,5 @@
 // The tiny web page that runs inside the hands-free WebView: front camera → MediaPipe Face
-// Landmarker (loaded at runtime from a pinned CDN, not an npm dependency) → gaze / tilt →
+// Landmarker (loaded at runtime from a pinned CDN, not an npm dependency) → gaze + yaw / tilt →
 // the shared dwell logic (HANDSFREE_CORE_JS) → postMessage to React Native:
 //   {type:'status', state, face?, progress?, error?, detail?}
 //   {type:'progress', side:'left'|'right'|null, value:0..1}
@@ -60,7 +60,7 @@ export function buildHandsFreeHtml(mode: Mode): string {
   var running = true, stream = null, landmarker = null, lastVideoTime = -1, errors = 0;
   var vision = null, files = null, delegate = null, switching = false;
   var phase = 'starting', lastFace = null;
-  var baseline = { gaze: 0, tilt: 0 };
+  var baseline = { gaze: 0, yaw: 0, tilt: 0 };
   var calib = null;
   var zone = 'center', dwell = initialDwell();
   var sent = { side: null, value: 0 };
@@ -90,7 +90,7 @@ export function buildHandsFreeHtml(mode: Mode): string {
   function resetDwell() { zone = 'center'; dwell = initialDwell(); sendProgress(null, 0, true); }
   function startCalib() {
     window.__hfLive = true;
-    calib = { gaze: [], tilt: [], ms: 0, last: null, sentAt: 0 };
+    calib = { gaze: [], yaw: [], tilt: [], ms: 0, last: null, sentAt: 0 };
     phase = 'calibrating';
     resetDwell();
     post({ type: 'status', state: 'calibrating', face: !!lastFace, progress: 0 });
@@ -135,14 +135,15 @@ export function buildHandsFreeHtml(mode: Mode): string {
     for (var i = 0; i < cats.length; i++) bs[cats[i].categoryName] = cats[i].score;
     var gaze = gazeFromBlendshapes(bs);
     var aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 1;
+    var yaw = yawFromLandmarks(lm[1], lm[33], lm[263], aspect);
     var tilt = tiltFromLandmarks(lm[33], lm[263], aspect);
 
     if (phase === 'calibrating') {
-      calib.gaze.push(gaze); calib.tilt.push(tilt);
+      calib.gaze.push(gaze); calib.yaw.push(yaw); calib.tilt.push(tilt);
       if (calib.last !== null) calib.ms += Math.min(now - calib.last, 100);
       calib.last = now;
       if (calib.ms >= TUNING.calibrateMs) {
-        baseline = { gaze: median(calib.gaze), tilt: median(calib.tilt) };
+        baseline = { gaze: median(calib.gaze), yaw: median(calib.yaw), tilt: median(calib.tilt) };
         calib = null;
         phase = 'tracking';
         resetDwell();
@@ -155,7 +156,7 @@ export function buildHandsFreeHtml(mode: Mode): string {
     }
     if (phase !== 'tracking') return;
     var cfg = TUNING[mode];
-    var v = mode === 'look' ? gaze - baseline.gaze : tilt - baseline.tilt;
+    var v = mode === 'look' ? lookFromSignals(gaze, yaw, baseline) : tilt - baseline.tilt;
     zone = classify(v, zone, cfg.threshold, cfg.hysteresis);
     var r = stepDwell(dwell, zone, now, cfg.dwellMs, TUNING.rearmMs);
     dwell = r.state;

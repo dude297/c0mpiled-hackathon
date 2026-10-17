@@ -60,6 +60,7 @@ function Stamp({ like }: { like: boolean }) {
 function SwipeCard({
   interest,
   compact,
+  cardContent,
   drag,
   enterFrom,
   reduceMotion,
@@ -68,6 +69,7 @@ function SwipeCard({
 }: {
   interest: Interest;
   compact: boolean;
+  cardContent?: ReactNode;
   drag: SharedValue<number>; // 0..1, how far the top card is toward a commit — drives the card behind
   enterFrom: Dir | null; // after Undo, slide back in from the side it left
   reduceMotion: boolean;
@@ -171,7 +173,7 @@ function SwipeCard({
     <GestureDetector gesture={pan}>
       <Animated.View
         style={[{ flex: 1, minHeight: 0 }, cardStyle]}
-        accessible
+        accessible={!cardContent}
         accessibilityLabel={`${interest.label}. Would you enjoy this?`}
         accessibilityHint="Swipe right for yes, left for no, or use the Yes and No buttons below."
         accessibilityActions={[
@@ -182,7 +184,7 @@ function SwipeCard({
           if (e.nativeEvent.actionName === 'like') swipe(1);
           else if (e.nativeEvent.actionName === 'nope') swipe(-1);
         }}>
-        <CardFace interest={interest} compact={compact} />
+        {cardContent ?? <CardFace interest={interest} compact={compact} />}
         <Animated.View style={[st.stampSpot, { left: space.lg }, likeStyle]} pointerEvents="none">
           <Stamp like />
         </Animated.View>
@@ -199,6 +201,7 @@ export function SwipeDeck({
   enterFrom,
   canBack,
   compact = false,
+  cardContent,
   onAnswer,
   onBack,
   left,
@@ -209,6 +212,7 @@ export function SwipeDeck({
   enterFrom: Dir | null;
   canBack: boolean;
   compact?: boolean; // hands-free presentation; gestures and answers stay the same
+  cardContent?: ReactNode; // optional hands-free card face; still uses the same swipe/commit path
   onAnswer: (key: Interest['key'], liked: boolean) => void;
   onBack: () => void;
   left?: ReactNode; // hands-free No / Yes targets replace the action buttons in the bottom row
@@ -252,6 +256,7 @@ export function SwipeDeck({
               ref={cardRef}
               interest={top}
               compact={compact}
+              cardContent={cardContent}
               drag={drag}
               enterFrom={enterFrom}
               reduceMotion={reduceMotion}
