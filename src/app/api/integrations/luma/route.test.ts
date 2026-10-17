@@ -1,4 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
+vi.mock("next/server", () => ({ connection: async () => {} }));
 import { GET } from "./route";
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 it("exposes a disabled discovery envelope without touching the network", async () => {

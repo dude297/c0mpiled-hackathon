@@ -1,20 +1,28 @@
+import { connection } from "next/server";
 import { discoverPublicEvents } from "@/lib/integrations/events";
 
-// EventSource reconnects automatically. Source retrieval remains cached for
-// five minutes per LiveWhale guidance; each connected client checks every minute.
+// Hard lifetime so an open tab never holds a serverless function indefinitely.
+const MAX_STREAM_MS = 5 * 60_000;
+
+// Source retrieval remains cached for five minutes per LiveWhale guidance;
+// each connected client checks every minute, and the stream ends after MAX_STREAM_MS.
 export async function GET(request: Request) {
+  await connection(); // per-request: the flag must not be frozen at build time
+  // Off unless explicitly enabled: no outbound requests in the default (offline) demo or hosted builds.
+  if (process.env.DAYBRIDGE_EVENTS !== "1") return Response.json({ status: "disabled" }, { status: 404, headers: { "Cache-Control": "no-store" } });
   const encoder = new TextEncoder();
   let stop: (close?: boolean) => void = () => {};
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       let closed = false;
       let busy = false;
-      const timer: { id?: ReturnType<typeof setInterval> } = {};
+      const timer: { id?: ReturnType<typeof setInterval>; end?: ReturnType<typeof setTimeout> } = {};
       const onAbort = () => stop();
       stop = (close = true) => {
         if (closed) return;
         closed = true;
         if (timer.id) clearInterval(timer.id);
+        if (timer.end) clearTimeout(timer.end);
         request.signal.removeEventListener("abort", onAbort);
         if (close) controller.close();
       };
@@ -30,8 +38,13 @@ export async function GET(request: Request) {
           if (!closed) controller.enqueue(encoder.encode('event: unavailable\ndata: {}\n\n'));
         } finally { busy = false; }
       };
-      controller.enqueue(encoder.encode("retry: 5000\n\n"));
+      // Long retry so a closed stream doesn't immediately reconnect in a loop.
+      controller.enqueue(encoder.encode("retry: 300000\n\n"));
       timer.id = setInterval(() => { void update(); }, 60_000);
+      timer.end = setTimeout(() => {
+        if (!closed) controller.enqueue(encoder.encode("event: end\ndata: {}\n\n"));
+        stop();
+      }, MAX_STREAM_MS);
       void update();
     },
     cancel() { stop(false); },

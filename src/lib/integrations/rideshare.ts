@@ -36,7 +36,9 @@ function lyftDeepLink(name: string, lat: number, lon: number): string {
     "destination[latitude]": String(lat),
     "destination[longitude]": String(lon),
     "destination[address]": name,
-    pickup: JSON.stringify([DEFAULT_ORIGIN.lat, DEFAULT_ORIGIN.lon]),
+    // Lyft's documented deep-link keys; a JSON-array "pickup" is ignored by the app.
+    "pickup[latitude]": String(DEFAULT_ORIGIN.lat),
+    "pickup[longitude]": String(DEFAULT_ORIGIN.lon),
   });
   return `https://lyft.com/ride?id=lyft&${params.toString()}`;
 }
