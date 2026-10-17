@@ -1,6 +1,6 @@
 # DayBridge — Third-Party Integration Plan
 
-Branch: `intg/third-party`. Owner: Teammate A. Last updated: 2026-10-17.
+Branch: `intg/third-party`. Owner: Teammate B. Last updated: 2026-10-17.
 
 Rule from `docs/handoffs/README.md`: every new npm package needs lead approval before install. Server-only keys never use the `NEXT_PUBLIC_` prefix; only `.env.example` is committed.
 

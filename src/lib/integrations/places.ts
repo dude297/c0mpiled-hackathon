@@ -13,8 +13,12 @@ export type VenueInfo = {
   source: "google" | "none";
 };
 
+// Demo area (Berkeley). locationBias keeps the search from matching venues
+// with the same name anywhere in the world.
+const DEMO_AREA = { lat: 37.8715, lon: -122.273, radiusM: 20_000 };
+
 // Places API (New) — Text Search. Plain fetch, no SDK.
-// Accessibility fields (wheelchairAccessibleEntrance) map to the engine's stepFree.
+// Accessibility fields are crowd-sourced: we report them as unconfirmed.
 async function lookupVenue(name: string): Promise<VenueInfo | null> {
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) return null;
@@ -26,7 +30,16 @@ async function lookupVenue(name: string): Promise<VenueInfo | null> {
         "X-Goog-Api-Key": key,
         "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.accessibilityOptions,places.location",
       },
-      body: JSON.stringify({ textQuery: name, maxResultCount: 1 }),
+      body: JSON.stringify({
+        textQuery: name,
+        maxResultCount: 1,
+        locationBias: {
+          circle: {
+            center: { latitude: DEMO_AREA.lat, longitude: DEMO_AREA.lon },
+            radius: DEMO_AREA.radiusM,
+          },
+        },
+      }),
       signal: AbortSignal.timeout(4_000),
     });
     if (!res.ok) throw new Error(`Places returned ${res.status}`);
@@ -52,7 +65,8 @@ async function lookupVenue(name: string): Promise<VenueInfo | null> {
 export type WeatherNote = { summary: string; outdoorConcern: boolean } | null;
 
 // Open-Meteo — free, no key. Only flags a concern; never changes the plan.
-const DAY_INDEX: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+// The daily forecast starts at today, so index by days-from-today, not weekday name.
+const DAY_OFFSET: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 const OUTDOOR_KEYWORDS = /\bgarden|walk\b/i;
 
 async function lookupWeather(items: PlanItem[]): Promise<WeatherNote> {
@@ -70,8 +84,17 @@ async function lookupWeather(items: PlanItem[]): Promise<WeatherNote> {
     const outdoorItem = items.find((i) => OUTDOOR_KEYWORDS.test(i.name));
     if (!outdoorItem) return null;
     const day = outdoorItem.when.split(" ")[0];
-    const idx = DAY_INDEX[day];
-    if (idx === undefined || !rainy(codes[idx])) return { summary: `No rain forecast for ${day}.`, outdoorConcern: false };
+    const targetDow = DAY_OFFSET[day];
+    if (targetDow === undefined) return null;
+    // days from today until the activity's weekday, in the forecast's timezone
+    const todayName = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Los_Angeles", weekday: "short",
+    }).format(new Date());
+    const todayDow = DAY_OFFSET[todayName];
+    if (todayDow === undefined) return null;
+    const daysFromToday = (targetDow - todayDow + 7) % 7 || 7;
+    const code = codes[daysFromToday];
+    if (code === undefined || !rainy(code)) return { summary: `No rain forecast for ${day}.`, outdoorConcern: false };
     return { summary: `Rain forecast ${day} — ${outdoorItem.name} may move indoors; the venue can confirm.`, outdoorConcern: true };
   } catch (e) {
     console.error("Weather lookup failed:", e instanceof Error ? e.message : e);
@@ -101,13 +124,14 @@ export async function enrichResult(result: {
       venue?.name ?? item.name,
     );
   }
+  // Google's accessibilityOptions are crowd-sourced: report as unconfirmed, never as verified.
   const evidence = [...result.evidence];
   for (const v of venueByItem.values()) {
     if (v?.source === "google" && v.stepFree !== null) {
       evidence.push({
-        claim: `${v.name}: Google lists wheelchair-accessible entrance: ${v.stepFree ? "yes" : "no"}`,
+        claim: `Google says ${v.name} has a ${v.stepFree ? "wheelchair-accessible" : "step"} entrance — unconfirmed by the venue`,
         source: "google:places/accessibilityOptions",
-        verified: true,
+        verified: false,
       });
     }
   }

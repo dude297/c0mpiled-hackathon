@@ -21,6 +21,10 @@ export async function POST(req: Request) {
 
   const base: AnalysisResult = { ...output, explanation, dataSource: ai.name };
   // Additive enrichment: venue data, weather, rideshare, extra evidence. All fail soft.
+  // Integrations can be disabled wholesale for tests/offline demos via DAYBRIDGE_DISABLE_ENRICHMENT=1.
+  if (process.env.DAYBRIDGE_DISABLE_ENRICHMENT === "1") {
+    return Response.json(base);
+  }
   const { venueByItem, weather, evidence, rideshareByItem } = await enrichResult(base);
   const result: AnalysisResult = { ...base, evidence };
   return Response.json({ ...result, venueByItem, weather, rideshareByItem });

@@ -152,7 +152,7 @@ export function PlanPanel({ result, loading, onSave }: {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "error">("idle");
   // Additive enrichments from the API; all optional.
   type Enriched = {
-    venueByItem?: Record<string, { address: string; stepFree: boolean | null }>;
+    venueByItem?: Record<string, { address: string; stepFree: boolean | null } | null>;
     weather?: { summary: string; outdoorConcern: boolean } | null;
     rideshareByItem?: Record<string, { uberLink: string; lyftLink: string; estimate?: { fareLow: number; fareHigh: number } | null } | null>;
   };
@@ -227,7 +227,11 @@ export function PlanPanel({ result, loading, onSave }: {
                       <span className="inline-flex items-center gap-1.5"><Calendar className="size-4" aria-hidden="true" />{i.when}</span>
                       <span className="inline-flex items-center gap-1.5"><MapPin className="size-4" aria-hidden="true" />{i.travel}</span>
                     </p>
-                    {venue?.address && <p className="mt-1 text-sm text-muted-foreground md:text-base">{venue.address}</p>}
+                    {venue?.address && (
+                      <p className="mt-1 text-sm text-muted-foreground md:text-base">
+                        {venue.address} <span className="font-medium">· via Google</span>
+                      </p>
+                    )}
                     {i.barriers.filter((b) => b.severity === "soft").map((b) => (
                       <p key={b.rule} className="mt-2 rounded-md bg-amber-100 p-2 text-sm dark:bg-amber-950/40 md:text-base">
                         <span className="font-medium text-amber-800 dark:text-amber-300">{b.detail}</span>
