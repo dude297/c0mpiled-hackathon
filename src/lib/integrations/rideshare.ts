@@ -74,6 +74,9 @@ async function uberEstimate(lat: number, lon: number): Promise<FareEstimate> {
     }[] = data?.prices;
     if (!Array.isArray(prices) || !prices.length) return null;
     const pick = prices.find((p) => p.display_name === "uberX") ?? prices[0];
+    if (!pick || !Number.isFinite(pick.low_estimate) || !Number.isFinite(pick.high_estimate) ||
+        pick.low_estimate < 0 || pick.high_estimate < pick.low_estimate ||
+        typeof pick.currency_code !== "string" || !/^[A-Z]{3}$/.test(pick.currency_code)) return null;
     return {
       fareLow: pick.low_estimate,
       fareHigh: pick.high_estimate,
@@ -86,10 +89,11 @@ async function uberEstimate(lat: number, lon: number): Promise<FareEstimate> {
   }
 }
 
-// Builds rideshare info for one plan item. Without verified venue coordinates we skip
+// Builds rideshare info for one plan item. Without validated venue coordinates we skip
 // the links entirely rather than aiming a real venue name at a made-up location.
 export async function rideshareFor(item: PlanItem, coords: VenueCoords, venueName: string): Promise<RideshareInfo> {
-  if (!coords) return null;
+  if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lon) ||
+      Math.abs(coords.lat) > 90 || Math.abs(coords.lon) > 180) return null;
   const { lat, lon } = coords;
   const label = venueName || item.name;
   const estimate = await uberEstimate(lat, lon);

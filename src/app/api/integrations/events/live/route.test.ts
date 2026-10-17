@@ -1,0 +1,32 @@
+import { afterEach, expect, it, vi } from "vitest";
+vi.mock("@/lib/integrations/events", () => ({ discoverPublicEvents: vi.fn() }));
+import { discoverPublicEvents } from "@/lib/integrations/events";
+import { GET } from "./route";
+afterEach(() => { vi.useRealTimers(); vi.resetAllMocks(); });
+it("sends an initial snapshot, updates every minute, and stops on disconnect", async () => {
+  vi.useFakeTimers();
+  const result = { status: "live" as const, events: [], sourceUrl: "https://events.berkeley.edu/", checkedAt: "2026-10-17T21:00:00Z" };
+  vi.mocked(discoverPublicEvents).mockResolvedValue(result);
+  const abort = new AbortController();
+  const response = await GET(new Request("http://test/api/integrations/events/live", { signal: abort.signal }));
+  expect(response.headers.get("content-type")).toContain("text/event-stream");
+  const reader = response.body!.getReader(); const decoder = new TextDecoder();
+  expect(decoder.decode((await reader.read()).value)).toContain("retry: 5000");
+  expect(decoder.decode((await reader.read()).value)).toContain('"checkedAt":"2026-10-17T21:00:00Z"');
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(decoder.decode((await reader.read()).value)).toContain("event: events");
+  expect(discoverPublicEvents).toHaveBeenCalledTimes(2);
+  abort.abort();
+  expect((await reader.read()).done).toBe(true);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(discoverPublicEvents).toHaveBeenCalledTimes(2);
+});
+it("stops polling when the reader cancels", async () => {
+  vi.useFakeTimers();
+  vi.mocked(discoverPublicEvents).mockResolvedValue({ status: "unavailable", events: [], sourceUrl: "https://events.berkeley.edu/", checkedAt: null });
+  const response = await GET(new Request("http://test/live"));
+  const reader = response.body!.getReader();
+  await reader.cancel();
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(discoverPublicEvents).toHaveBeenCalledTimes(1);
+});

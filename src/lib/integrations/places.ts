@@ -1,3 +1,4 @@
+import { nextOccurrenceDate } from "./schedule";
 import type { PlanItem } from "@/lib/schema";
 import { rideshareFor } from "./rideshare";
 
@@ -13,61 +14,62 @@ export type VenueInfo = {
   source: "google" | "none";
 };
 
-// Demo area (Berkeley). locationBias keeps the search from matching venues
-// with the same name anywhere in the world.
+// A search result is not a venue identity. Only operator-reviewed Place IDs
+// bound to activity IDs may produce handoffs. Unknown activities fail closed.
 const DEMO_AREA = { lat: 37.8715, lon: -122.273, radiusM: 20_000 };
 
-// Places API (New) — Text Search. Plain fetch, no SDK.
-// Accessibility fields are crowd-sourced: we report them as unconfirmed.
-async function lookupVenue(name: string): Promise<VenueInfo | null> {
+async function lookupVenue(activityId: string): Promise<VenueInfo | null> {
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) return null;
   try {
-    const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
-      method: "POST",
+    const configured: unknown = JSON.parse(process.env.DAYBRIDGE_VENUE_PLACE_IDS ?? "{}");
+    if (!configured || typeof configured !== "object" || Array.isArray(configured)) return null;
+    const placeId = Object.hasOwn(configured, activityId)
+      ? (configured as Record<string, unknown>)[activityId] : undefined;
+    if (typeof placeId !== "string" || !/^[A-Za-z0-9_-]+$/.test(placeId)) return null;
+    const res = await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`, {
       headers: {
-        "Content-Type": "application/json",
         "X-Goog-Api-Key": key,
-        "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.accessibilityOptions,places.location",
+        "X-Goog-FieldMask": "id,displayName,formattedAddress,accessibilityOptions,location",
       },
-      body: JSON.stringify({
-        textQuery: name,
-        maxResultCount: 1,
-        locationBias: {
-          circle: {
-            center: { latitude: DEMO_AREA.lat, longitude: DEMO_AREA.lon },
-            radius: DEMO_AREA.radiusM,
-          },
-        },
-      }),
+      cache: "no-store",
       signal: AbortSignal.timeout(4_000),
     });
-    if (!res.ok) throw new Error(`Places returned ${res.status}`);
-    const data = await res.json();
-    const place = data.places?.[0];
-    if (!place) return null;
+    if (!res.ok) return null;
+    const place = await res.json();
+    const lat = place?.location?.latitude;
+    const lon = place?.location?.longitude;
+    if (place?.id !== placeId || typeof place?.displayName?.text !== "string" ||
+        !place.displayName.text.trim() || typeof place.formattedAddress !== "string" ||
+        !place.formattedAddress.trim() || !isLocalCoordinate(lat, lon)) return null;
     return {
-      name: place.displayName?.text ?? name,
-      address: place.formattedAddress ?? "",
-      lat: typeof place.location?.latitude === "number" ? place.location.latitude : null,
-      lon: typeof place.location?.longitude === "number" ? place.location.longitude : null,
+      name: place.displayName.text,
+      address: place.formattedAddress,
+      lat, lon,
       stepFree: typeof place.accessibilityOptions?.wheelchairAccessibleEntrance === "boolean"
-        ? place.accessibilityOptions.wheelchairAccessibleEntrance
-        : null,
+        ? place.accessibilityOptions.wheelchairAccessibleEntrance : null,
       source: "google",
     };
-  } catch (e) {
-    console.error("Places lookup failed:", e instanceof Error ? e.message : e);
+  } catch {
     return null;
   }
+}
+
+export function isLocalCoordinate(lat: unknown, lon: unknown): boolean {
+  if (typeof lat !== "number" || typeof lon !== "number" ||
+      !Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return false;
+  const radians = (value: number) => value * Math.PI / 180;
+  const a = Math.sin(radians(lat - DEMO_AREA.lat) / 2) ** 2 +
+    Math.cos(radians(DEMO_AREA.lat)) * Math.cos(radians(lat)) *
+    Math.sin(radians(lon - DEMO_AREA.lon) / 2) ** 2;
+  return 6_371_000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) <= DEMO_AREA.radiusM;
 }
 
 export type WeatherNote = { summary: string; outdoorConcern: boolean } | null;
 
 // Open-Meteo — free, no key. Only flags a concern; never changes the plan.
-// The daily forecast starts at today, so index by days-from-today, not weekday name.
-const DAY_OFFSET: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-const OUTDOOR_KEYWORDS = /\bgarden|walk\b/i;
+// Match the scheduled occurrence against the provider's explicit forecast dates.
+const OUTDOOR_KEYWORDS = /\b(garden|walk|walkers|walking)\b/i;
 
 async function lookupWeather(items: PlanItem[]): Promise<WeatherNote> {
   try {
@@ -77,25 +79,22 @@ async function lookupWeather(items: PlanItem[]): Promise<WeatherNote> {
     );
     if (!res.ok) throw new Error(`Weather returned ${res.status}`);
     const data = await res.json();
-    const codes: number[] = data?.daily?.weathercode;
-    if (!Array.isArray(codes)) return null;
-    // WMO codes: 51-67, 80-82, 95+ = rain/showers/thunderstorms
-    const rainy = (code: number) => code >= 51 && code <= 67 || code >= 80 && code <= 82 || code >= 95;
+    const codes: unknown = data?.daily?.weathercode;
+    const dates: unknown = data?.daily?.time;
+    if (!Array.isArray(codes) || !Array.isArray(dates)) return null;
     const outdoorItem = items.find((i) => OUTDOOR_KEYWORDS.test(i.name));
     if (!outdoorItem) return null;
     const day = outdoorItem.when.split(" ")[0];
-    const targetDow = DAY_OFFSET[day];
-    if (targetDow === undefined) return null;
-    // days from today until the activity's weekday, in the forecast's timezone
-    const todayName = new Intl.DateTimeFormat("en-US", {
-      timeZone: "America/Los_Angeles", weekday: "short",
-    }).format(new Date());
-    const todayDow = DAY_OFFSET[todayName];
-    if (todayDow === undefined) return null;
-    const daysFromToday = (targetDow - todayDow + 7) % 7 || 7;
-    const code = codes[daysFromToday];
-    if (code === undefined || !rainy(code)) return { summary: `No rain forecast for ${day}.`, outdoorConcern: false };
-    return { summary: `Rain forecast ${day} — ${outdoorItem.name} may move indoors; the venue can confirm.`, outdoorConcern: true };
+    const occurrence = nextOccurrenceDate(day);
+    if (!occurrence) return null;
+    const index = dates.indexOf(occurrence);
+    if (index < 0) return null;
+    const code = codes[index];
+    const validCodes = [0, 1, 2, 3, 45, 48, 51, 53, 55, 56, 57, 61, 63, 65, 66, 67, 71, 73, 75, 77, 80, 81, 82, 85, 86, 95, 96, 99];
+    if (typeof code !== "number" || !validCodes.includes(code)) return null;
+    // Snow/ice are also outdoor concerns, rather than a misleading dry-weather note.
+    if (code < 51) return { summary: `No precipitation forecast for ${day}.`, outdoorConcern: false };
+    return { summary: `Precipitation forecast ${day} — ${outdoorItem.name} may move indoors; the venue can confirm.`, outdoorConcern: true };
   } catch (e) {
     console.error("Weather lookup failed:", e instanceof Error ? e.message : e);
     return null;
@@ -109,7 +108,7 @@ export async function enrichResult(result: {
   evidence: { claim: string; source: string; verified: boolean }[];
 }) {
   const [venues, weather] = await Promise.all([
-    Promise.all(result.plan.map((i) => lookupVenue(i.name))),
+    Promise.all(result.plan.map((i) => lookupVenue(i.activityId))),
     lookupWeather(result.plan),
   ]);
   const venueByItem = new Map<string, VenueInfo | null>();
@@ -132,7 +131,7 @@ export async function enrichResult(result: {
   for (const v of venueByItem.values()) {
     if (v?.source === "google" && v.stepFree !== null) {
       evidence.push({
-        claim: `Google says ${v.name} has a ${v.stepFree ? "wheelchair-accessible" : "step"} entrance — unconfirmed by the venue`,
+        claim: `Google says ${v.name} ${v.stepFree ? "reports a wheelchair-accessible entrance" : "does not report a wheelchair-accessible entrance"} — unconfirmed by the venue`,
         source: "google:places/accessibilityOptions",
         verified: false,
       });
