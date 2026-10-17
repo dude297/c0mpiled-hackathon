@@ -1,11 +1,11 @@
 // Easier view: NYT-Connections-style grid. Tap a tile to pick it; no swiping anywhere.
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { INTEREST_META } from '@/lib/onboarding';
 import { colors, radius, space, type } from '@/lib/theme';
 
-import { PillButton, s as ui } from './ui';
+import { PillButton, s as ui, useHeadingFocus } from './ui';
 
 type Key = (typeof INTEREST_META)[number]['key'];
 
@@ -23,10 +23,12 @@ export function InterestGrid({
   bottomInset: number;
 }) {
   const n = picked.size;
+  const heading = useHeadingFocus();
+  const { fontScale } = useWindowDimensions();
   return (
     <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={st.content}>
-        <Text accessibilityRole="header" style={[type.title, { color: colors.text }]}>What sounds fun?</Text>
+        <Text ref={heading} accessibilityRole="header" style={[type.title, { color: colors.text }]}>What sounds fun?</Text>
         <Text style={[type.body, { color: colors.textMuted }]}>Tap everything you would enjoy. Tap again to remove it.</Text>
         <Text accessibilityLiveRegion="polite" style={[type.bodyStrong, { color: colors.text }]}>
           {n} picked
@@ -39,10 +41,10 @@ export function InterestGrid({
               <Pressable
                 key={i.key}
                 accessibilityRole="checkbox"
-                aria-checked={on}
+                accessibilityState={{ checked: on }}
                 accessibilityLabel={i.label}
                 onPress={() => onToggle(i.key)}
-                style={({ pressed }) => [st.tile, on && st.tileOn, pressed && ui.pressed]}>
+                style={({ pressed }) => [st.tile, fontScale > 1.3 && { flexBasis: '100%' }, on && st.tileOn, pressed && ui.pressed]}>
                 {on && <Ionicons name="checkmark-circle" size={28} color={fg} style={st.check} />}
                 <Text style={st.emoji} importantForAccessibility="no">{i.emoji}</Text>
                 <Text style={[type.label, { color: fg, fontWeight: '700', fontSize: 20, lineHeight: 24, textAlign: 'center' }]}>

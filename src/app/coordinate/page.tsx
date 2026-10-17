@@ -13,6 +13,7 @@ import type {
   ActionRequest, CommandResult, CoordinationEvent, CoordinationPlan, Dependency,
 } from "@/lib/schema";
 import { describePlan } from "@/domain/coordination/narrative";
+import { coordinationProfile, PROFILE_SESSION_KEY } from "@/components/coordination/handoff";
 
 // Coordination screen: DayBridge gets the person there, with consent at every step.
 // Everything here consumes the Coordination contract v1.0.0 (see docs/daybridge/COORDINATION_CONTRACT.md).
@@ -236,10 +237,9 @@ function StepTracker({ state }: { state: CoordinationPlan["state"] }) {
   );
 }
 
-function storedProfile(): unknown {
+function storedProfile(activityId: string | null) {
   try {
-    const raw = sessionStorage.getItem("daybridge:profile");
-    return raw ? JSON.parse(raw) : null;
+    return coordinationProfile(sessionStorage.getItem(PROFILE_SESSION_KEY), activityId);
   } catch {
     return null;
   }
@@ -292,6 +292,9 @@ function CoordinateInner() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [missingPlan, setMissingPlan] = useState(false);
+  const [person, setPerson] = useState<string | null>(null);
+  const [demoMode, setDemoMode] = useState(false);
   const seqCounter = useRef(new Map<string, number>());
 
   const apply = useCallback((r: CommandResult) => {
@@ -348,29 +351,27 @@ function CoordinateInner() {
     }
   }, [plan, apply]);
 
-  const loadDemo = useCallback(async () => {
+  const loadPlan = useCallback(async (useDemo = false) => {
+    const activityId = params.get("activityId");
+    const profile = useDemo ? null : storedProfile(activityId);
+    if (!useDemo && !profile) {
+      setMissingPlan(true);
+      return;
+    }
+    setDemoMode(useDemo);
+    setMissingPlan(false);
+    setPerson(useDemo ? "Maya (demo)" : profile!.name);
     setBusy(true);
     setError(null);
     setEvents([]);
     seqCounter.current = new Map();
     try {
-      const res = await fetch("/api/coordination/plans", {
+      const res = await fetch(useDemo ? "/api/coordination/demo" : "/api/coordination/plans", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          activityId: params.get("activityId") ?? "fellowship",
-          // integration: opened from the planner's "Get me there" → same person; otherwise the Maya demo.
-          profile: (params.get("activityId") && storedProfile()) || {
-            name: "Maya",
-            interests: ["faith"],
-            mobility: "walker",
-            transport: ["family", "paratransit"],
-            maxTravelMin: 30,
-            times: ["afternoon"],
-            budgetPerWeek: 10,
-            hearingImpaired: false,
-            prefersSmallGroups: true,
-          },
+        body: JSON.stringify(useDemo ? { scenario: "maya" } : {
+          activityId,
+          profile,
           contacts: [
             { id: "elaine", name: "Elaine", relation: "friend", canDrive: false },
             { id: "dan", name: "Dan", relation: "son", canDrive: true },
@@ -379,10 +380,6 @@ function CoordinateInner() {
       });
       const data = await res.json();
       if (!res.ok) {
-        // integration: a stale/invalid stored profile must not wedge the page; the retry falls back to the Maya demo.
-        try {
-          sessionStorage.removeItem("daybridge:profile");
-        } catch {}
         throw new Error(data.error ?? "Request failed");
       }
       setPlan(data.plan);
@@ -397,7 +394,7 @@ function CoordinateInner() {
 
   useEffect(() => {
     if (!plan) {
-      const t = setTimeout(() => void loadDemo(), 0);
+      const t = setTimeout(() => void loadPlan(), 0);
       return () => clearTimeout(t);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -406,12 +403,25 @@ function CoordinateInner() {
   if (!plan) {
     return (
       <main className="mx-auto w-full max-w-3xl p-6 text-base md:text-lg">
-        <BackToMatches />
-        <div className="flex items-center gap-3 py-16 text-muted-foreground" role="status">
-          <LoaderCircle className="size-6 animate-spin" aria-hidden="true" />
-          {error ? "That didn’t go through — try again or go back to your matches." : "Setting up the coordination demo…"}
-        </div>
-        <Button size="lg" onClick={loadDemo} disabled={busy}>Try again</Button>
+        {missingPlan ? (
+          <section className="space-y-4 py-10">
+            <h1 className="text-2xl font-semibold">We couldn&apos;t find the plan you came from.</h1>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link href="/" className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 font-medium text-primary underline underline-offset-4">Start over</Link>
+              <Button size="lg" onClick={() => void loadPlan(true)} disabled={busy}>Use the Maya demo</Button>
+            </div>
+          </section>
+        ) : (
+          <>
+            <BackToMatches />
+            {person && <h1 className="mt-4 text-2xl font-semibold">Coordinating for {person}</h1>}
+            <div className="flex items-center gap-3 py-16 text-muted-foreground" role="status">
+              {!error && <LoaderCircle className="size-6 animate-spin" aria-hidden="true" />}
+              {error ? "That didn’t go through — try again or go back to your matches." : "Setting up coordination…"}
+            </div>
+            {error && <Button size="lg" onClick={() => void loadPlan(demoMode)} disabled={busy}>Try again</Button>}
+          </>
+        )}
       </main>
     );
   }
@@ -451,7 +461,7 @@ function CoordinateInner() {
       <header className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="flex items-center gap-2 text-2xl font-semibold">
           <Hand className="size-6 text-primary" aria-hidden="true" />
-          Get them there
+          Coordinating for {plan.profile.name}{demoMode ? " (Maya demo)" : ""}
         </h1>
         <div className="flex flex-wrap items-center gap-2">
           {busy && (
@@ -861,8 +871,8 @@ function CoordinateInner() {
         {plan.state !== "CANCELLED" && plan.state !== "COMPLETED" && (
           <Button variant="outline" size="lg" disabled={busy} onClick={() => command({ type: "cancel" })}>Cancel plan</Button>
         )}
-        <Button variant="ghost" size="lg" disabled={busy} onClick={loadDemo}>
-          <RotateCcw className="size-4" aria-hidden="true" />Restart demo
+        <Button variant="ghost" size="lg" disabled={busy} onClick={() => void loadPlan(demoMode)}>
+          <RotateCcw className="size-4" aria-hidden="true" />Restart coordination
         </Button>
       </footer>
     </main>

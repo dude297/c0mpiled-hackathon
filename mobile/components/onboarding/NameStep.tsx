@@ -1,10 +1,10 @@
 // First screen: sample-person demos, name, and all three ways to answer (swipe / easier view / hands-free).
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 
 import { colors, radius, space, tap, type } from '@/lib/theme';
 
-import { PillButton, s as ui } from './ui';
+import { PillButton, s as ui, useHeadingFocus } from './ui';
 
 export type AnswerMode = 'swipe' | 'easy' | 'hands';
 export type DemoKey = 'margaret' | 'harold';
@@ -41,21 +41,23 @@ export function NameStep({
   busy?: boolean;
   bottomInset: number;
 }) {
+  const heading = useHeadingFocus();
+  const { fontScale } = useWindowDimensions();
   return (
     <View style={{ flex: 1 }}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={st.content}>
-        <Text accessibilityRole="header" style={[type.title, { color: colors.text }]}>
+        <Text ref={heading} accessibilityRole="header" style={[type.title, { color: colors.text }]}>
           Let&apos;s find things you&apos;ll love
         </Text>
 
-        <View style={st.demos}>
+        <View style={[st.demos, fontScale > 1.3 && { flexDirection: 'column' }]}>
           {DEMOS.map((d) => (
             <Pressable
               key={d.key}
               accessibilityRole="button"
               accessibilityLabel={`${d.label}, sample person`}
               accessibilityHint="Skips the questions and shows matches for this sample person"
-              aria-disabled={!!busy}
+              accessibilityState={{ disabled: !!busy }}
               disabled={busy}
               onPress={() => onDemo(d.key)}
               style={({ pressed }) => [st.demo, busy && ui.disabled, pressed && ui.pressed]}>
@@ -79,13 +81,15 @@ export function NameStep({
             onSubmitEditing={busy ? undefined : onStart} // Enter / Done starts the questions
             accessibilityLabel="Your first name"
             accessibilityHint="Optional"
+            editable={!busy}
+            accessibilityState={{ disabled: !!busy }}
             style={st.input}
           />
         </View>
 
         <View style={{ gap: space.xs }}>
           <Text accessibilityRole="header" style={[type.label, { color: colors.text }]}>How would you like to answer?</Text>
-          <View accessibilityRole="radiogroup" style={{ gap: space.sm }}>
+          <View accessibilityRole="radiogroup" accessibilityLabel="How would you like to answer?" style={{ gap: space.sm }}>
             {MODES.map((m) => {
               const on = m.key === mode;
               const fg = on ? colors.onTileSelected : colors.text;
@@ -93,8 +97,9 @@ export function NameStep({
                 <Pressable
                   key={m.key}
                   accessibilityRole="radio"
-                  aria-checked={on}
+                  accessibilityState={{ checked: on, disabled: !!busy }}
                   accessibilityLabel={`${m.label}, ${m.detail}`}
+                  disabled={busy}
                   onPress={() => onMode(m.key)}
                   style={({ pressed }) => [st.mode, on && st.modeOn, pressed && ui.pressed]}>
                   <Ionicons name={m.icon} size={26} color={fg} />
@@ -129,7 +134,7 @@ const st = StyleSheet.create({
     borderRadius: radius.lg,
     backgroundColor: colors.primary,
   },
-  demoSub: { fontSize: 15, lineHeight: 18, fontWeight: '500', color: colors.onPrimary },
+  demoSub: { fontSize: 16, lineHeight: 22, fontWeight: '500', color: colors.onPrimary },
   input: {
     minHeight: tap.min,
     fontSize: 22,
@@ -154,5 +159,5 @@ const st = StyleSheet.create({
   },
   modeOn: { backgroundColor: colors.tileSelected, borderColor: colors.tileSelected },
   modeLabel: { fontSize: 19, lineHeight: 24, fontWeight: '600' },
-  modeHint: { fontSize: 15, lineHeight: 20 },
+  modeHint: { fontSize: 16, lineHeight: 22 },
 });

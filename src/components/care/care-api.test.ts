@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { DEMO_PROFILES } from "@/domain/activities";
-import { CareApiError, CheckInDraft, canUseDeviceFallback, careErrorMessage, createCareApi, dependencyStatus, isAccessError, readableDate } from "./care-api";
+import { CareAccessBoundary, CareApiError, CheckInDraft, canUseDeviceFallback, careErrorMessage, createCareApi, dependencyStatus, isAccessError, readableDate } from "./care-api";
 import { CheckInForm } from "./BackendCareDashboard";
 
 const labels = { storage: "memory", providers: "simulated", generatedAt: "2026-10-17T22:00:00Z" };
@@ -116,6 +116,29 @@ describe("caregiver UI API boundary", () => {
 });
 
 describe("check-in retries and accessibility", () => {
+  it("an in-flight old-grant read cannot restore notes after an access denial", async () => {
+    const boundary = new CareAccessBoundary();
+    const oldRevision = boundary.revision;
+    let notes: string[] = ["manager-only note"];
+    const staleRead = Promise.resolve(["manager-only note"]).then((value) => { if (boundary.isCurrent(oldRevision)) notes = value; });
+    expect(boundary.invalidate()).toBe(true);
+    notes = [];
+    await staleRead;
+    expect(notes).toEqual([]);
+    const freshRevision = boundary.revision;
+    if (boundary.isCurrent(freshRevision)) notes = ["redacted note placeholder"];
+    expect(notes).toEqual(["redacted note placeholder"]);
+  });
+
+  it("inconsistent history permissions get one automatic revalidation, then require an explicit retry", () => {
+    const boundary = new CareAccessBoundary();
+    expect(boundary.invalidate(true)).toBe(true);
+    expect(boundary.invalidate(true)).toBe(false);
+    expect(boundary.invalidate(true)).toBe(false);
+    boundary.reset();
+    expect(boundary.invalidate(true)).toBe(true);
+    expect(boundary.invalidate()).toBe(true); // A new user action can revalidate permissions.
+  });
   it("reuses a key after a lost POST response; a duplicate saves once, then rotates the next key", async () => {
     const keys = vi.fn().mockReturnValueOnce("first-key").mockReturnValueOnce("next-key");
     const draft = new CheckInDraft(keys);

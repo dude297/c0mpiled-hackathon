@@ -2,11 +2,12 @@
 // Landmarker (loaded at runtime from a pinned CDN, not an npm dependency) → gaze + yaw / tilt →
 // the shared dwell logic (HANDSFREE_CORE_JS) → postMessage to React Native:
 //   {type:'status', state, face?, progress?, error?, detail?}
-//   {type:'progress', side:'left'|'right'|null, value:0..1}
-//   {type:'answer', liked:boolean}
+//   {type:'ready', swapSides:boolean} (native replays the latest selected mode)
+//   {type:'progress', side:'left'|'right'|null, value:0..1, signal:-1..1, zone, mode}
+//   {type:'answer', liked:boolean, mode}
 // React Native talks back with injectJavaScript: window.__hf.setMode('look'|'tilt'), .recalibrate(), .stop().
 // Nothing leaves the device: frames go from the camera to the on-device model and are never sent or saved.
-import { HANDSFREE_CORE_JS, type Mode } from './handsfree';
+import { HANDSFREE_CORE_JS, type Mode, type Zone } from './handsfree';
 
 export const MEDIAPIPE_VERSION = '0.10.14';
 const CDN = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}`;
@@ -15,11 +16,14 @@ const MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/f
 export const HANDSFREE_BASE_URL = 'https://daybridge.local/';
 
 export type PageError = 'denied' | 'nocamera' | 'load';
-export type PageMessage =
+export type PageStamp = { session: number; revision: number };
+export type PageContext = PageStamp & { live: boolean };
+export type PageMessage = PageStamp & (
+  | { type: 'ready'; swapSides: boolean }
   | { type: 'status'; state: 'starting' | 'loading' | 'calibrating' | 'tracking' | 'stopped'; face?: boolean; progress?: number; detail?: string }
   | { type: 'status'; state: 'error'; error: PageError; detail?: string }
-  | { type: 'progress'; side: 'left' | 'right' | null; value: number }
-  | { type: 'answer'; liked: boolean };
+  | { type: 'progress'; side: 'left' | 'right' | null; value: number; signal: number; zone: Zone; mode: Mode }
+  | { type: 'answer'; liked: boolean; mode: Mode });
 
 // Narrow an untrusted postMessage string to a PageMessage (or null).
 export function parsePageMessage(data: string): PageMessage | null {
@@ -31,17 +35,25 @@ export function parsePageMessage(data: string): PageMessage | null {
   }
   if (!m || typeof m !== 'object') return null;
   const o = m as Record<string, unknown>;
-  if (o.type === 'answer' && typeof o.liked === 'boolean') return { type: 'answer', liked: o.liked };
-  if (o.type === 'progress' && (o.side === 'left' || o.side === 'right' || o.side === null) && typeof o.value === 'number')
-    return { type: 'progress', side: o.side, value: Math.min(1, Math.max(0, o.value)) };
+  if (!Number.isSafeInteger(o.session) || (o.session as number) < 0 || !Number.isSafeInteger(o.revision) || (o.revision as number) < 0) return null;
+  const stamp = { session: o.session as number, revision: o.revision as number };
+  if (o.type === 'ready' && typeof o.swapSides === 'boolean') return { ...stamp, type: 'ready', swapSides: o.swapSides };
+  if (o.type === 'answer' && typeof o.liked === 'boolean' && (o.mode === 'look' || o.mode === 'tilt'))
+    return { ...stamp, type: 'answer', liked: o.liked, mode: o.mode };
+  if (o.type === 'progress' && (o.side === 'left' || o.side === 'right' || o.side === null)
+      && typeof o.value === 'number' && Number.isFinite(o.value)
+      && typeof o.signal === 'number' && Number.isFinite(o.signal)
+      && (o.zone === 'left' || o.zone === 'center' || o.zone === 'right') && (o.mode === 'look' || o.mode === 'tilt'))
+    return { ...stamp, type: 'progress', side: o.side, value: Math.min(1, Math.max(0, o.value)),
+      signal: Math.min(1, Math.max(-1, o.signal)), zone: o.zone, mode: o.mode };
   if (o.type === 'status') {
     if (o.state === 'error') {
       const error = o.error === 'denied' || o.error === 'nocamera' ? o.error : 'load';
-      return { type: 'status', state: 'error', error, detail: typeof o.detail === 'string' ? o.detail : undefined };
+      return { ...stamp, type: 'status', state: 'error', error, detail: typeof o.detail === 'string' ? o.detail : undefined };
     }
     if (o.state === 'starting' || o.state === 'loading' || o.state === 'calibrating' || o.state === 'tracking' || o.state === 'stopped')
       return {
-        type: 'status',
+        ...stamp, type: 'status',
         state: o.state,
         face: typeof o.face === 'boolean' ? o.face : undefined,
         progress: typeof o.progress === 'number' ? o.progress : undefined,
@@ -51,23 +63,41 @@ export function parsePageMessage(data: string): PageMessage | null {
   return null;
 }
 
-export function buildHandsFreeHtml(mode: Mode): string {
+// One command path for taps and the ready handshake; tested against the actual injected page.
+export function handsFreeModeScript(mode: Mode): string {
+  return `window.__hf && window.__hf.setMode(${JSON.stringify(mode)}); true;`;
+}
+
+export function isCurrentPageMessage(message: PageMessage, context: PageContext): boolean {
+  return context.live && message.session === context.session && message.revision === context.revision;
+}
+
+export function handsFreeContextScript(session: number, revision: number): string {
+  return `window.__hf && window.__hf.setContext(${session}, ${revision}); true;`;
+}
+
+export function buildHandsFreeHtml(mode: Mode, session = 0): string {
   const app = String.raw`
 (function () {
   var CDN = ${JSON.stringify(CDN)};
   var MODEL = ${JSON.stringify(MODEL)};
   var mode = ${JSON.stringify(mode)};
+  var session = ${JSON.stringify(session)}, revision = 0;
+  var swapSides = false;
+  var swapKey = 'daybridge.handsfree.swapSides';
+  try { swapSides = window.localStorage.getItem(swapKey) === 'true'; } catch (e) {}
   var running = true, stream = null, landmarker = null, lastVideoTime = -1, errors = 0;
   var vision = null, files = null, delegate = null, switching = false;
   var phase = 'starting', lastFace = null;
   var baseline = { gaze: 0, yaw: 0, tilt: 0 };
   var calib = null;
   var zone = 'center', dwell = initialDwell();
-  var sent = { side: null, value: 0 };
+  var signal = 0;
+  var sent = {};
   var video = document.getElementById('v');
 
   function post(m) {
-    try { window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {}
+    try { window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({}, m, { session: session, revision: revision }))); } catch (e) {}
   }
   function fail(error, detail) {
     if (phase === 'error') return;
@@ -83,11 +113,17 @@ export function buildHandsFreeHtml(mode: Mode): string {
     if (!silent) post({ type: 'status', state: 'stopped' });
   }
   function sendProgress(side, value, force) {
-    if (!force && side === sent.side && Math.abs(value - sent.value) < 0.03) return;
-    sent = { side: side, value: value };
-    post({ type: 'progress', side: side, value: value });
+    if (!force && side === sent.side && mode === sent.mode && zone === sent.zone
+        && Math.abs(value - sent.value) < 0.03 && Math.abs(signal - sent.signal) < 0.03) return;
+    sent = { type: 'progress', side: side, value: value, signal: signal, zone: zone, mode: mode };
+    post(sent);
   }
-  function resetDwell() { zone = 'center'; dwell = initialDwell(); sendProgress(null, 0, true); }
+  function resetDwell() { zone = 'center'; signal = 0; dwell = initialDwell(); sendProgress(null, 0, true); }
+  function rearm() {
+    zone = 'center'; signal = 0;
+    dwell = phase === 'tracking' ? rearmDwell() : initialDwell();
+    sendProgress(null, 0, true);
+  }
   function startCalib() {
     window.__hfLive = true;
     calib = { gaze: [], yaw: [], tilt: [], ms: 0, last: null, sentAt: 0 };
@@ -104,17 +140,29 @@ export function buildHandsFreeHtml(mode: Mode): string {
   }
 
   window.__hf = {
+    setContext: function (s, r) {
+      if (s !== session || !Number.isSafeInteger(r) || r < revision) return;
+      revision = r; rearm();
+    },
     setMode: function (m) {
-      if (m !== 'look' && m !== 'tilt') return;
-      mode = m; zone = 'center';
+      if ((m !== 'look' && m !== 'tilt') || m === mode) return;
+      mode = m;
       // Wait for the middle before the next answer (don't let a held side fire under the new mode).
-      if (phase === 'tracking') { dwell = rearmDwell(); sendProgress(null, 0, true); } else resetDwell();
+      rearm();
+    },
+    setSwapSides: function (swap) {
+      if (typeof swap !== 'boolean' || swap === swapSides) return;
+      swapSides = swap;
+      try { window.localStorage.setItem(swapKey, String(swap)); } catch (e) {}
+      rearm();
     },
     recalibrate: function () { if (running && landmarker) startCalib(); },
     stop: function () { stop(false); }
   };
+  post({ type: 'ready', swapSides: swapSides });
 
   function handle(res, now) {
+    if (!running || document.hidden) return;
     var face = !!(res && res.faceLandmarks && res.faceLandmarks.length);
     if (face !== lastFace) {
       lastFace = face;
@@ -124,7 +172,7 @@ export function buildHandsFreeHtml(mode: Mode): string {
       if (calib) calib.last = null;
       if (phase === 'tracking') {
         var r0 = stepDwell(dwell, null, now, TUNING[mode].dwellMs, TUNING.rearmMs);
-        dwell = r0.state; zone = 'center';
+        dwell = r0.state; zone = 'center'; signal = 0;
         sendProgress(null, 0);
       }
       return;
@@ -157,12 +205,14 @@ export function buildHandsFreeHtml(mode: Mode): string {
     if (phase !== 'tracking') return;
     var cfg = TUNING[mode];
     var v = mode === 'look' ? lookFromSignals(gaze, yaw, baseline) : tilt - baseline.tilt;
+    if (swapSides) v = -v;
+    signal = clamp(v / cfg.threshold, -1, 1);
     zone = classify(v, zone, cfg.threshold, cfg.hysteresis);
     var r = stepDwell(dwell, zone, now, cfg.dwellMs, TUNING.rearmMs);
     dwell = r.state;
     if (r.fired) {
       sendProgress(r.fired, 1, true);
-      post({ type: 'answer', liked: r.fired === 'right' });
+      post({ type: 'answer', liked: r.fired === 'right', mode: mode });
       sendProgress(null, 0, true);
       return;
     }
@@ -240,6 +290,11 @@ export function buildHandsFreeHtml(mode: Mode): string {
     requestAnimationFrame(loop);
   }
 
+  document.addEventListener('visibilitychange', function () {
+    rearm();
+    if (calib) { calib.last = null; calib.ms = 0; calib.gaze = []; calib.yaw = []; calib.tilt = []; }
+  });
+  window.addEventListener('pagehide', function () { stop(false); });
   window.addEventListener('error', function (e) { if (phase === 'starting' || phase === 'loading') fail('load', e.message); });
   start();
 })();`;
@@ -254,7 +309,7 @@ video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1)}
 <body><video id="v" autoplay muted playsinline></video>
 <script>
 (function () {
-  function post(m) { try { window.ReactNativeWebView.postMessage(JSON.stringify(m)); } catch (e) {} }
+  function post(m) { try { window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({}, m, { session: ${JSON.stringify(session)}, revision: 0 }))); } catch (e) {} }
   post({ type: 'status', state: 'starting', detail: 'Hands-free page loaded…' });
   window.addEventListener('error', function (e) { if (!window.__hf) post({ type: 'status', state: 'error', error: 'load', detail: 'Script error: ' + (e && e.message) }); });
   window.addEventListener('unhandledrejection', function (e) { if (!window.__hfLive) post({ type: 'status', state: 'error', error: 'load', detail: 'Error: ' + String(e && e.reason && (e.reason.message || e.reason)).slice(0, 150) }); });

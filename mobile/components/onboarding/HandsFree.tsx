@@ -3,13 +3,13 @@
 // (lib/handsfreePage.ts) that posts progress / answer messages; everything you see here is native.
 // Answers go through SwipeDeck's own swipe(), the same path as the No / Yes buttons, which keep working.
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useEffect, useRef, useState, type ComponentType, type Ref } from 'react';
-import { AccessibilityInfo, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState, type ComponentType, type Ref } from 'react';
+import { AccessibilityInfo, AppState, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } from 'react-native-webview';
 
-import type { Mode } from '@/lib/handsfree';
-import { buildHandsFreeHtml, HANDSFREE_BASE_URL, parsePageMessage, type PageError } from '@/lib/handsfreePage';
+import type { Mode, Zone } from '@/lib/handsfree';
+import { buildHandsFreeHtml, HANDSFREE_BASE_URL, handsFreeContextScript, handsFreeModeScript, isCurrentPageMessage, parsePageMessage, type PageContext, type PageError } from '@/lib/handsfreePage';
 import { INTEREST_META } from '@/lib/onboarding';
 import { colors, radius, space, tap, type } from '@/lib/theme';
 
@@ -129,7 +129,36 @@ export function HandsFreeDeck({
   const reduceMotion = useReducedMotion();
   const deckRef = useRef<SwipeDeckHandle>(null);
   const webRef = useRef<WebViewHandle>(null);
+  const contextRef = useRef<PageContext>({ session: 0, revision: 0, live: false });
+  const resetInput = useCallback(() => {
+    const context = contextRef.current;
+    if (!context.live) return;
+    context.revision++;
+    webRef.current?.injectJavaScript(handsFreeContextScript(context.session, context.revision));
+    setProgress({ side: null, value: 0 });
+  }, []);
+  useEffect(() => { resetInput(); }, [cursor, resetInput]);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      // Permission prompts can temporarily be inactive; a genuine background transition stops input.
+      if (state !== 'background') return;
+      contextRef.current.live = false;
+      webRef.current?.injectJavaScript('window.__hf && window.__hf.stop(); true;');
+      setPhase('idle');
+      setProgress({ side: null, value: 0 });
+    });
+    return () => {
+      subscription.remove();
+      contextRef.current.live = false;
+      webRef.current?.injectJavaScript('window.__hf && window.__hf.stop(); true;');
+    };
+  }, []);
   const [mode, setMode] = useState<Mode>('look');
+  // Read by the ready handshake even if the selection changed while the WebView was loading.
+  const modeRef = useRef<Mode>('look');
+  const [swapSides, setSwapSides] = useState(false); // persisted in the camera page's localStorage
+  const [pageReady, setPageReady] = useState(false);
+  const [meter, setMeter] = useState<{ signal: number; zone: Zone; mode: Mode }>({ signal: 0, zone: 'center', mode: 'look' });
   const [phase, setPhase] = useState<Phase>('idle');
   const [attempt, setAttempt] = useState(0); // bump to (re)mount the camera page
   const [html, setHtml] = useState(''); // built per start; later mode changes are sent to the running page
@@ -150,6 +179,7 @@ export function HandsFreeDeck({
     const id = setInterval(() => {
       const quiet = Date.now() - lastMsg.current;
       if (quiet > START_TIMEOUT_MS) {
+        contextRef.current.live = false;
         webRef.current?.injectJavaScript('window.__hf && window.__hf.stop(); true;');
         setError('timeout');
         setPhase('error');
@@ -159,30 +189,44 @@ export function HandsFreeDeck({
   }, [phase]);
 
   const start = () => {
+    contextRef.current = { session: contextRef.current.session + 1, revision: 0, live: true };
     lastMsg.current = Date.now();
     setError(null);
     setDetail('Opening the camera page…');
     setFace(null);
     setCalib(0);
+    setPageReady(false);
     setProgress({ side: null, value: 0 });
-    setHtml(buildHandsFreeHtml(mode));
+    setMeter({ signal: 0, zone: 'center', mode: modeRef.current });
+    setHtml(buildHandsFreeHtml(mode, contextRef.current.session));
     setAttempt((a) => a + 1);
     setPhase('starting');
   };
   const stop = () => {
+    contextRef.current.live = false;
     webRef.current?.injectJavaScript('window.__hf && window.__hf.stop(); true;');
     setPhase('idle');
     setProgress({ side: null, value: 0 });
   };
   const pickMode = (m: Mode) => {
+    resetInput();
+    modeRef.current = m;
     setMode(m);
     setProgress({ side: null, value: 0 });
-    webRef.current?.injectJavaScript(`window.__hf && window.__hf.setMode(${JSON.stringify(m)}); true;`);
+    webRef.current?.injectJavaScript(handsFreeModeScript(m));
+  };
+  const swap = () => {
+    resetInput();
+    const next = !swapSides;
+    setSwapSides(next);
+    setProgress({ side: null, value: 0 });
+    webRef.current?.injectJavaScript(`window.__hf && window.__hf.setSwapSides(${next}); true;`);
   };
 
   // Every answer lands here — gaze/yaw/tilt, the No/Yes bar and a finger swipe —
   // so each one is announced ("Liked Gardening") before it's recorded.
   const recordAnswer = (key: Interest['key'], liked: boolean) => {
+    resetInput();
     const label = INTEREST_META.find((i) => i.key === key)?.label;
     if (label) {
       const msg = `${liked ? 'Liked' : 'Passed on'} ${label}`;
@@ -197,14 +241,31 @@ export function HandsFreeDeck({
   const onMessage = (e: WebViewMessageEvent) => {
     const m = parsePageMessage(e.nativeEvent.data);
     if (!m) return;
+    const context = contextRef.current;
+    if (!context.live || m.session !== context.session) return;
+    if (m.type !== 'ready' && !isCurrentPageMessage(m, context)) return;
     lastMsg.current = Date.now();
-    if (m.type === 'progress') setProgress({ side: m.side, value: m.value });
-    else if (m.type === 'answer') answer(m.liked);
-    else if (m.state === 'error') {
+    if (m.type === 'ready') {
+      setPageReady(true);
+      setSwapSides(m.swapSides);
+      webRef.current?.injectJavaScript(handsFreeContextScript(context.session, context.revision));
+      webRef.current?.injectJavaScript(handsFreeModeScript(modeRef.current));
+    } else if (m.type === 'progress') {
+      // Drop queued frames from the previous mode so old holds cannot repaint the panel.
+      if (m.mode !== modeRef.current) return;
+      setProgress({ side: m.side, value: m.value });
+      setMeter({ signal: m.signal, zone: m.zone, mode: m.mode });
+    } else if (m.type === 'answer') {
+      if (m.mode === modeRef.current) {
+        resetInput();
+        answer(m.liked);
+      }
+    } else if (m.state === 'error') {
+      contextRef.current.live = false;
       setError(m.error);
       setDetail(m.detail ?? '');
       setPhase('error');
-    } else if (m.state === 'stopped') setPhase('idle');
+    } else if (m.state === 'stopped') { contextRef.current.live = false; setPhase('idle'); }
     else {
       setPhase(m.state);
       if (m.detail) setDetail(m.detail);
@@ -213,6 +274,7 @@ export function HandsFreeDeck({
     }
   };
   const pageFailed = (e?: { nativeEvent?: object }) => {
+    contextRef.current.live = false;
     const n = e?.nativeEvent as { description?: string; statusCode?: number } | undefined;
     setError('load');
     setDetail(n?.description ? `WebView: ${n.description}` : n?.statusCode ? `WebView HTTP ${n.statusCode}` : 'The camera page stopped.');
@@ -245,7 +307,7 @@ export function HandsFreeDeck({
       enterFrom={enterFrom}
       canBack
       onAnswer={recordAnswer}
-      onBack={onBack}
+      onBack={() => { resetInput(); onBack(); }}
       header={(
         <ScrollView style={st.panel} contentContainerStyle={st.panelContent}>
           {web ? (
@@ -299,12 +361,28 @@ export function HandsFreeDeck({
                   ) : null}
                 </View>
               </View>
+              <View style={st.meter}>
+                <View style={st.liveRow}>
+                  <Text style={st.privacy}>No</Text>
+                  <View style={st.meterTrack}>
+                    <View style={st.meterCenter} />
+                    <View style={[st.meterDot, { left: `${(meter.signal + 1) * 50}%` }]} />
+                  </View>
+                  <Text style={st.privacy}>Yes</Text>
+                </View>
+                <Text style={st.privacy}>Seeing: {meter.zone} · {meter.mode === 'look' ? 'Look' : 'Tilt'}</Text>
+              </View>
               <View style={st.liveRow}>
                 <View style={{ flex: 1 }}>
                   <ModeSwitch mode={mode} onMode={pickMode} />
                 </View>
                 <PillButton variant="outline" icon="stop-circle-outline" label="Stop" onPress={stop} hint="Turns the camera off" style={st.stop} />
               </View>
+              <Pressable accessibilityRole="switch" accessibilityState={{ checked: swapSides }} accessibilityLabel="Swap sides"
+                disabled={!pageReady} onPress={swap} style={({ pressed }) => [st.swap, pressed && ui.pressed]}>
+                <Text style={[type.label, { color: colors.text }]}>Swap sides</Text>
+                <Ionicons name={swapSides ? 'toggle' : 'toggle-outline'} size={28} color={swapSides ? colors.like : colors.textMuted} />
+              </Pressable>
             </>
           ) : (
             <>
@@ -344,7 +422,7 @@ const st = StyleSheet.create({
   panel: {
     marginHorizontal: space.md,
     marginTop: space.xs,
-    maxHeight: 212,
+    maxHeight: 292,
     flexGrow: 0,
     flexShrink: 0,
     borderRadius: radius.lg,
@@ -354,6 +432,11 @@ const st = StyleSheet.create({
   },
   panelContent: { padding: space.sm, gap: space.xs },
   liveRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  meter: { gap: 3, paddingHorizontal: space.xs },
+  meterTrack: { flex: 1, height: 6, borderRadius: 3, backgroundColor: colors.border, marginHorizontal: 6 },
+  meterCenter: { position: 'absolute', left: '50%', top: -3, height: 12, width: 1, backgroundColor: colors.textMuted },
+  meterDot: { position: 'absolute', top: -3, marginLeft: -6, width: 12, height: 12, borderRadius: 6, backgroundColor: colors.text },
+  swap: { minHeight: tap.min, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space.xs },
   stop: { minHeight: tap.min, paddingHorizontal: space.md },
   instruction: { fontSize: 15, lineHeight: 19, color: colors.text },
   privacy: { fontSize: 13, lineHeight: 16, color: colors.textMuted },
