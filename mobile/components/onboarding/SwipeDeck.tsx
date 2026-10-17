@@ -202,6 +202,8 @@ export function SwipeDeck({
   canBack,
   compact = false,
   cardContent,
+  header,
+  contentOverlay,
   onAnswer,
   onBack,
   left,
@@ -213,6 +215,8 @@ export function SwipeDeck({
   canBack: boolean;
   compact?: boolean; // hands-free presentation; gestures and answers stay the same
   cardContent?: ReactNode; // optional hands-free card face; still uses the same swipe/commit path
+  header?: ReactNode; // optional hands-free camera/status panel above the card
+  contentOverlay?: ReactNode; // visual feedback above the content, outside the answer bar
   onAnswer: (key: Interest['key'], liked: boolean) => void;
   onBack: () => void;
   left?: ReactNode; // hands-free No / Yes targets replace the action buttons in the bottom row
@@ -240,30 +244,34 @@ export function SwipeDeck({
 
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
-      <View style={st.cardArea}>
-        <View style={[st.stack, compact && st.compactStack]}>
-          {next && !compact && (
-            <Animated.View
-              style={[StyleSheet.absoluteFill, behindStyle]}
-              importantForAccessibility="no-hide-descendants"
-              accessibilityElementsHidden>
-              <CardFace interest={next} />
-            </Animated.View>
-          )}
-          {top && (
-            <SwipeCard
-              key={top.key}
-              ref={cardRef}
-              interest={top}
-              compact={compact}
-              cardContent={cardContent}
-              drag={drag}
-              enterFrom={enterFrom}
-              reduceMotion={reduceMotion}
-              onCommit={commit}
-            />
-          )}
+      <View style={{ flex: 1, minHeight: 0 }}>
+        {header}
+        <View style={st.cardArea}>
+          <View style={[st.stack, compact && st.compactStack]}>
+            {next && !compact && (
+              <Animated.View
+                style={[StyleSheet.absoluteFill, behindStyle]}
+                importantForAccessibility="no-hide-descendants"
+                accessibilityElementsHidden>
+                <CardFace interest={next} />
+              </Animated.View>
+            )}
+            {top && (
+              <SwipeCard
+                key={top.key}
+                ref={cardRef}
+                interest={top}
+                compact={compact}
+                cardContent={cardContent}
+                drag={drag}
+                enterFrom={enterFrom}
+                reduceMotion={reduceMotion}
+                onCommit={commit}
+              />
+            )}
+          </View>
         </View>
+        {contentOverlay}
       </View>
       <View style={[st.bar, compact && st.compactBar]}>
         <CircleButton icon="arrow-undo" label="Back" a11yLabel="Back: undo last answer" color={colors.text} size={60} disabled={!canBack} onPress={onBack} />
