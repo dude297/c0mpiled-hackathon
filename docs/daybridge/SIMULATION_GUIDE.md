@@ -14,7 +14,8 @@ activity catalog, the AI adapter, or the coordination engine internals.
 - **Real coordinator.** Phase 2 tests drive the actual coordination engine
   (`src/domain/coordination/coordinator.ts`) through its public surface
   (`create` / `command` / `ingest` / `get`). The harness cannot bypass the approval
-  system or fabricate authoritative states.
+  system or fabricate authoritative states because `ingest` routes every provider
+  event through the same validation as the HTTP endpoint.
 - **Deterministic.** No randomness, no wall-clock (fixed clock via `now: () => new Date(t)`),
   no network. Repeated runs give identical results.
 - **No false success.** Every test asserts negative space too: what must NOT appear
@@ -23,6 +24,8 @@ activity catalog, the AI adapter, or the coordination engine internals.
 - **Isolation.** Nothing here imports production data or hits real services. Provider
   doubles are injected via `createCoordinator({ provider })`; production code never
   sees them.
+- **Findings are never papered over.** Tests document actual engine behavior and flag
+  deviations from the contract for review (see the PR reports).
 
 ## Layout
 

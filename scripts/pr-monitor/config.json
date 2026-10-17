@@ -1,0 +1,27 @@
+{
+  "repository": "dude297/c0mpiled-hackathon",
+  "requiredChecks": ["app-check", "app-build", "monitor-tests"],
+  "blockingLabels": ["blocked", "do-not-merge", "needs-contract"],
+  "contractPaths": ["src/lib/schema.ts", "docs/daybridge/COORDINATION_CONTRACT.md", "src/domain/coordination/provider.ts"],
+  "owners": [
+    { "prefix": "src/simulation/", "owner": "GLM" },
+    { "prefix": "src/domain/coordination/", "owner": "Opus" },
+    { "prefix": "src/app/api/coordination/", "owner": "Opus" },
+    { "prefix": "src/lib/schema.ts", "owner": "Opus + human lead" },
+    { "prefix": "src/domain/activities.ts", "owner": "Teammate B" },
+    { "prefix": "src/integrations/", "owner": "Teammate B" },
+    { "prefix": "src/lib/integrations/", "owner": "Teammate B + human lead" },
+    { "prefix": "src/app/api/integrations/", "owner": "Teammate B" },
+    { "prefix": "src/app/api/", "owner": "human lead" },
+    { "prefix": "src/lib/ai/", "owner": "human lead" },
+    { "prefix": "supabase/", "owner": "human lead" },
+    { "prefix": ".env", "owner": "human lead" },
+    { "prefix": "src/app/", "owner": "Teammate A" },
+    { "prefix": "src/components/", "owner": "Teammate A" },
+    { "prefix": "docs/daybridge/COORDINATION_CONTRACT.md", "owner": "Opus" },
+    { "prefix": "docs/daybridge/SIMULATION_GUIDE.md", "owner": "GLM" },
+    { "prefix": "docs/", "owner": "Work + Opus" },
+    { "prefix": "scripts/pr-monitor/", "owner": "Work" },
+    { "prefix": ".github/", "owner": "Work + human lead" }
+  ]
+}
