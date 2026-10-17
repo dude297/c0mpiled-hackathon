@@ -108,7 +108,8 @@ export default function Home() {
     return withLive(
       <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
         <Hero onStart={startDeck} onDemo={() => demo("margaret")} loading={loading} />
-        <div ref={deckRef} className="scroll-mt-4">
+        <div ref={deckRef} className="onboarding-workspace scroll-mt-4" aria-label="Set up your preferences" role="region">
+          <div className="workspace-heading"><span className="eyebrow">Let&rsquo;s get to know you</span><span>YOUR PERSONAL STARTING POINT</span></div>
           <CardDeck
             onComplete={(p) => {
               setProfile(p);
@@ -117,7 +118,6 @@ export default function Home() {
             loading={loading}
             onDemo={demo}
           />
-        </div>
         {(loading || error) && (
           <div className="mx-auto mt-4 max-w-3xl">
             <PlanStages loading={loading} result={null} error={error} />
@@ -129,8 +129,9 @@ export default function Home() {
             className={`inline-flex min-h-11 items-center rounded-md px-3 text-base text-foreground underline underline-offset-4 ${FOCUS}`}
             onClick={() => setMode("dashboard")}
           >
-            Or use the classic form
+            Prefer a form? Set up your preferences
           </button>
+        </div>
         </div>
       </div>,
     );
