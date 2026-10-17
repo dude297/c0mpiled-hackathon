@@ -29,12 +29,14 @@ function HeartToggle({ name, added, onToggle }: { name: string; added: boolean; 
         onToggle();
       }}
       accessibilityRole="switch"
-      aria-checked={added}
+      accessibilityState={{ checked: added }}
       accessibilityLabel={`Add ${name} to my week`}
       accessibilityHint={added ? 'Removes it from My week' : 'Adds it to My week'}
       style={({ pressed }) => [
         {
           minHeight: tap.min,
+          paddingHorizontal: space.sm,
+          paddingVertical: space.sm,
           flexDirection: 'row',
           alignItems: 'center',
           justifyContent: 'center',
@@ -47,7 +49,7 @@ function HeartToggle({ name, added, onToggle }: { name: string; added: boolean; 
         pressed && { opacity: 0.85, transform: reduce ? [] : [{ scale: 0.97 }] },
       ]}>
       <Ionicons name={added ? 'heart' : 'heart-outline'} size={30} color={added ? colors.onPrimary : colors.text} />
-      <Text style={[type.button, { color: added ? colors.onPrimary : colors.text }]}>{added ? 'In my week ✓' : 'Add to my week'}</Text>
+      <Text style={[type.button, { color: added ? colors.onPrimary : colors.text, flexShrink: 1, textAlign: 'center' }]}>{added ? 'In my week ✓' : 'Add to my week'}</Text>
     </Pressable>
   );
 }

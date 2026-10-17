@@ -1,24 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { Ban, Calendar, Check, ChevronDown, CircleX, LoaderCircle, MapPin, Printer, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { Ban, Calendar, Check, ChevronDown, CircleX, Hand, LoaderCircle, MapPin, Printer, ShieldCheck, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Interest, Mobility, TimeSlot, Transport, type AnalysisResult, type Profile } from "@/lib/schema";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto w-full max-w-3xl p-4 text-base md:p-6 md:text-lg">
-      <header className="mb-5">
-        <h1 className="flex items-center gap-2 text-3xl font-semibold">
-          <Sparkles className="size-7 text-primary" aria-hidden="true" />
-          DayBridge
-        </h1>
-        <p className="mt-1 text-lg text-muted-foreground md:text-xl">
-          A weekly social plan that fits their life — in one click.
-        </p>
+    <div className="dashboard-page mx-auto w-full max-w-5xl px-5 py-10 text-base md:px-8">
+      <header className="mb-8">
+        <p className="eyebrow">Discover & connect</p>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight md:text-4xl">A week to look forward to.</h1>
+        <p className="mt-3 text-muted-foreground">Thoughtful matches, practical details, and a plan that fits your life.</p>
       </header>
       <div className="flex flex-col gap-4">{children}</div>
       <footer className="mt-8 text-center text-sm text-muted-foreground print:hidden">
@@ -168,7 +163,7 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-base md:text-lg">
-        {loading && !result ? (
+        {loading ? (
           <div className="flex items-center gap-3 py-8 text-muted-foreground" role="status" aria-live="polite">
             <LoaderCircle className="size-6 animate-spin" aria-hidden="true" />
             Building the plan…
@@ -177,7 +172,7 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
           <div className="rounded-xl border-2 border-dashed p-8 text-center">
             <p className="text-lg font-semibold">No plan yet</p>
             <p className="mt-1 text-base text-muted-foreground">
-              Pick a demo above and hit Build plan — it takes one click.
+              Open the profile below, pick a demo, and hit Build plan — it takes one click.
             </p>
           </div>
         ) : result.plan.length === 0 ? (
@@ -217,6 +212,13 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
                       {b.mitigation}
                     </p>
                   ))}
+                  <a
+                    href={`/coordinate?activityId=${i.activityId}`}
+                    className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80 focus-visible:ring-3 focus-visible:ring-ring/50 md:text-base print:hidden"
+                  >
+                    <Hand className="size-4" aria-hidden="true" />
+                    Get me there →
+                  </a>
                 </li>
               ))}
             </ul>
@@ -304,82 +306,5 @@ export function EvidencePanel({ result }: { result: AnalysisResult | null }) {
         </details>
       </CardContent>
     </Card>
-  );
-}
-
-// Teammate slots — endpoints the lead is building. Each shows "coming soon" until wired.
-export function IntakeSlot({ onIntake }: { onIntake: (text: string) => Promise<void> }) {
-  const [value, setValue] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const available = false; // flip when POST /api/intake exists
-  async function submit() {
-    if (!value.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await onIntake(value.trim());
-      setValue("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not read that.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-xl">
-          <Users className="size-5 text-primary" aria-hidden="true" />
-          Describe them in your own words
-        </CardTitle>
-        <CardDescription className="text-sm md:text-base">
-          e.g. “Margaret is 82, uses a walker, loves choir and gardening, can spend $10 a week, and rides the bus.”
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <Textarea
-          aria-label="Describe the person in your own words"
-          className="min-h-20 text-base md:text-lg"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="Type a sentence about them…"
-        />
-        <div className="flex items-center gap-3">
-          <Button size="lg" onClick={submit} disabled={busy || !value.trim() || !available}>
-            {busy ? "Reading…" : "Fill the form"}
-          </Button>
-          {!available && <span className="text-sm text-muted-foreground md:text-base">Coming soon.</span>}
-          {error && <p role="alert" className="text-destructive">{error}</p>}
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-export function SaveShareSlot({ onSave }: { onSave: () => Promise<void> }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const available = false; // flip when POST /api/plans exists
-  async function submit() {
-    setBusy(true);
-    setError(null);
-    try {
-      await onSave();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not save.");
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="flex items-center gap-3 print:hidden">
-      <Button size="lg" onClick={submit} disabled={busy || !available}>
-        <Printer aria-hidden="true" />
-        Save &amp; share
-      </Button>
-      {!available && <span className="text-sm text-muted-foreground md:text-base">Coming soon.</span>}
-      {error && <p role="alert" className="text-destructive">{error}</p>}
-    </div>
   );
 }

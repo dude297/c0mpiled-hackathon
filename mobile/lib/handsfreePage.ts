@@ -73,7 +73,7 @@ export function buildHandsFreeHtml(mode: Mode): string {
   var mode = ${JSON.stringify(mode)};
   var swapSides = false;
   var swapKey = 'daybridge.handsfree.swapSides';
-  try { swapSides = window.localStorage.getItem(swapKey) === 'true'; } catch (e) {}
+  try { window.localStorage.removeItem(swapKey); } catch (e) {} // Swap sides always starts OFF each session
   var running = true, stream = null, landmarker = null, lastVideoTime = -1, errors = 0;
   var vision = null, files = null, delegate = null, switching = false;
   var phase = 'starting', lastFace = null;

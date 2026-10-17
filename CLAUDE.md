@@ -1,5 +1,19 @@
 @AGENTS.md
 
+<!-- DAYBRIDGE FINAL SPRINT PRIORITY -->
+## DayBridge final sprint: parallel work, verified release
+
+**Before taking new tasks, read `docs/daybridge/FINAL_SPRINT_DECISION_ADDENDUM.md` and `docs/daybridge/DECISIONS.md`.** The golden local demo is the required fallback; Supabase/auth/Vercel is an isolated experimental cloud lane, not a prerequisite for judging. PR #12 can enter the demo only if its complete golden-path checks pass. Attempt small confirm-before-apply intake in parallel and opt-in redacted read-only save/share only after privacy gates. Spawn non-overlapping subagents aggressively; protect a known-green release. No unapproved public deployment, real provider actions or cloud code merger.
+<!-- END FINAL SPRINT PRIORITY -->
+
+
+<!-- P0: CLAUDE/OPUS PARALLEL EXECUTION PRIORITY -->
+## DayBridge Opus: Launch independent subagents aggressively
+
+**Before implementation, read `docs/daybridge/OPUS_SUBAGENT_ADDENDUM.md`.** When the environment supports subagents, delegate independent coordination workstreams **early and concurrently**: state machine, approval policy, event/idempotency, API boundary, adversarial unit tests, and a read-only critical review. Freeze a minimal typed contract and assign **one owner per file** first. The primary Opus agent retains contract ownership, integration, tests, and PR responsibility. Do not let subagents edit UI, real-data/provider integrations, local AI, Supabase, GLM simulation, or GPT Work docs. If subagents are unavailable, report this rather than pretending to spawn them. Optimize for a verified offline P0 loop; no deployments or main pushes.
+
+<!-- END:OPUS PARALLEL EXECUTION PRIORITY -->
+
 # Project rules (c0mpiled-14)
 
 ## Deployment — CRITICAL

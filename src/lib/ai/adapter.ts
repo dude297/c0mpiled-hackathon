@@ -36,7 +36,7 @@ export const liveAdapter: AiAdapter = {
       body: JSON.stringify({
         model: process.env.AI_MODEL || "qwen3-4b-instruct-2507",
         temperature: 0.2,
-        max_tokens: 160,
+        max_tokens: 320, // 160 cut every explanation mid-sentence (measured)
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           // Compact payload: prompt prefill dominates latency on CPU-only local models.

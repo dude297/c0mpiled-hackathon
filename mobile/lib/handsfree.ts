@@ -11,7 +11,7 @@ export type Zone = 'left' | 'center' | 'right'; // left = ✕ (no), right = ❤�
 // Tilt uses only head roll in degrees. Neither mode mixes in the other signal or head yaw.
 export const TUNING = {
   look: { dwellMs: 1000, threshold: 0.09, hysteresis: 0.03, alpha: 0.35 },
-  tilt: { dwellMs: 800, threshold: 15, hysteresis: 3 },
+  tilt: { dwellMs: 800, threshold: 10, hysteresis: 3 },
   rearmMs: 400, // must look/hold back at the middle this long before the next answer
   calibrateMs: 2000, // "look at the middle" step at start
 } as const;
@@ -110,7 +110,7 @@ export function stepDwell(s: DwellState, zone: Zone | null, now: number, dwellMs
 export const HANDSFREE_CORE_JS = String.raw`
 var TUNING = {
   look: { dwellMs: 1000, threshold: 0.09, hysteresis: 0.03, alpha: 0.35 },
-  tilt: { dwellMs: 800, threshold: 15, hysteresis: 3 },
+  tilt: { dwellMs: 800, threshold: 10, hysteresis: 3 },
   rearmMs: 400,
   calibrateMs: 2000
 };

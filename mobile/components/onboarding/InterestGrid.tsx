@@ -1,6 +1,6 @@
 // Easier view: NYT-Connections-style grid. Tap a tile to pick it; no swiping anywhere.
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { INTEREST_META } from '@/lib/onboarding';
 import { colors, radius, space, type } from '@/lib/theme';
@@ -26,6 +26,7 @@ export function InterestGrid({
 }) {
   const heading = useHeadingFocus();
   const n = picked.size;
+  const { fontScale } = useWindowDimensions();
   return (
     <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={st.content}>
@@ -43,11 +44,11 @@ export function InterestGrid({
               <Pressable
                 key={i.key}
                 accessibilityRole="checkbox"
-                aria-checked={on}
+                accessibilityState={{ checked: on }}
                 accessibilityLabel={i.label}
                 accessibilityHint={presenterHint}
                 onPress={() => onToggle(i.key)}
-                style={({ pressed }) => [st.tile, on && st.tileOn, pressed && ui.pressed]}>
+                style={({ pressed }) => [st.tile, fontScale > 1.3 && { flexBasis: '100%' }, on && st.tileOn, pressed && ui.pressed]}>
                 {on && <Ionicons name="checkmark-circle" size={28} color={fg} style={st.check} />}
                 <Text style={st.emoji} importantForAccessibility="no">{i.emoji}</Text>
                 <Text style={[type.label, { color: fg, fontWeight: '700', fontSize: 20, lineHeight: 24, textAlign: 'center' }]}>

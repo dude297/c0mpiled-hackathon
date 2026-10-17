@@ -45,3 +45,33 @@ Send Sparsh one message that lists anything that felt wrong or confusing. Includ
 ## Known limits
 - Haptics, swiping, and hands-free mode only work in Expo Go on a real phone. They don't work in a web browser.
 - Rides and invites on "Get me there" are simulated, and the app labels them that way.
+
+## Accessibility check before publishing an update
+
+These are manual acceptance checks, not completed device-test results. Use a small phone
+viewport (375 × 667 points), then repeat with the largest system text size. A local
+TypeScript check or Expo export does not validate VoiceOver, TalkBack, or camera behavior.
+
+1. On the name screen, read each sample-person button and answer-mode option with VoiceOver
+   or TalkBack. The selected mode and disabled controls should be announced correctly.
+   Start without entering a name, then return to confirm the optional name still works.
+2. On an interest card, open the screen reader's actions menu. Its Yes and No actions must
+   answer that interest exactly once, just like the visible buttons. Back must undo the
+   same answer. Decorative cards behind the current one and LIKE/NOPE stamps must not be read.
+3. At large text sizes, scroll within the interest card to read its complete name and
+   instructions. Check that a vertical scroll does not answer the card and that Back,
+   No, and Yes remain reachable. In Easier view, each full tile label must remain readable.
+4. In a required question, hear the checked state of each answer and the disabled state
+   of Continue until an answer is selected. At review, check every Change button remains
+   visible, named for its answer, and reachable without overlapping enlarged text.
+5. In Matches, hear the added/not-added state of each "Add to my week" switch. Expand and
+   collapse the source explanation and blocked-activity list, checking the expanded state.
+   Check all three tab labels at large text sizes; labels must wrap rather than truncate.
+6. Hands-free is optional: only tap **Turn on camera** when you want to test it. On iOS,
+   status changes and answers should be spoken once; Android uses live status regions.
+   Calibration percentages must not be announced every frame. Stop should announce that
+   the camera is off. Error and privacy text must be fully readable by scrolling, and the
+   manual No/Yes buttons must work even if camera permission is denied.
+
+All buttons and answer tiles should provide at least a 56 × 56 point touch area. Native
+device checks are still required for font rendering, touch areas, and announcements.

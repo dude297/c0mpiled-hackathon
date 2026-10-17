@@ -1,4 +1,8 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
 import { CalendarHeart, MapPin, TriangleAlert } from "lucide-react";
+import { costLabel, pendingCalendarReveal } from "@/components/feed/MatchFeed";
 import type { PlanItem } from "@/lib/schema";
 
 export const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -43,21 +47,32 @@ export function placeOnWeek(items: PlanItem[]): PlacedWeek {
   return { days, unscheduled };
 }
 
-const money = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
+/** "2 outings · $5/week", "1 outing · Free", or "Nothing added yet" — same cost rule as the match cards. */
+export function weekSummary(items: PlanItem[]): string {
+  if (items.length === 0) return "Nothing added yet";
+  const total = items.reduce((sum, i) => sum + i.costPerWeek, 0);
+  return `${items.length} ${items.length === 1 ? "outing" : "outings"} · ${costLabel(total)}`;
+}
 
-function Activity({ item, compact }: { item: PlanItem; compact?: boolean }) {
+/** Ids in `now` that weren't in `before` — the blocks that should pop in. */
+export function newlyAdded(before: ReadonlySet<string>, now: readonly string[]): Set<string> {
+  return new Set(now.filter((id) => !before.has(id)));
+}
+
+function Activity({ item, compact, fresh }: { item: PlanItem; compact?: boolean; fresh?: boolean }) {
   const soft = item.barriers.filter((b) => b.severity === "soft");
   const small = compact ? "text-sm" : "text-base";
+  // Pop (outer) and flash (inner) sit on separate elements so the two animations don't override each other.
   return (
-    <div className="break-inside-avoid rounded-xl border bg-card p-2.5 shadow-sm md:p-2">
-      <p className={`font-semibold leading-snug ${compact ? "text-sm md:text-base" : "text-lg"}`}>{item.name}</p>
+    <div className={`min-w-0 break-inside-avoid rounded-xl ${fresh ? "db-pop" : ""}`}>
+    <div className={`min-w-0 break-inside-avoid rounded-xl border bg-card p-2.5 shadow-sm md:p-2 ${fresh ? "db-flash-ok" : ""}`}>
+      <p className={`min-w-0 font-semibold leading-snug break-words ${compact ? "text-sm md:text-base" : "text-lg"}`}>{item.name}</p>
       <p className={`mt-1 flex items-start gap-1 text-muted-foreground ${small}`}>
         <MapPin className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-        <span>{item.travel}</span>
+        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{item.travel}</span>
       </p>
       <p className={small}>
-        <b>{money(item.costPerWeek)}</b>
-        <span className="text-muted-foreground">/week</span>
+        <b>{costLabel(item.costPerWeek)}</b>
       </p>
       {soft.map((b) => (
         <p key={b.rule} className={`mt-1.5 rounded-md bg-amber-100 p-1.5 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100 ${small}`}>
@@ -69,10 +84,30 @@ function Activity({ item, compact }: { item: PlanItem; compact?: boolean }) {
         </p>
       ))}
     </div>
+    </div>
   );
 }
 
 export function WeekCalendar({ items }: { items: PlanItem[] }) {
+  const ids = items.map((i) => i.activityId);
+  const idsKey = ids.join("|");
+  // First mount: pop anything just added from the feed (the Week tab mounts after the tap).
+  // Later renders: pop whatever is new since the last render. Adjust-state-during-render, no timers.
+  const [tracked, setTracked] = useState(() => ({
+    key: idsKey,
+    seen: new Set(ids),
+    fresh: new Set(ids.filter((id) => pendingCalendarReveal.has(id))),
+  }));
+  if (tracked.key !== idsKey) {
+    setTracked({ key: idsKey, seen: new Set(ids), fresh: newlyAdded(tracked.seen, ids) });
+  }
+  const fresh = tracked.fresh;
+  const rootRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    // Only the visible copy (not the print-only one) marks the reveal as shown.
+    if (rootRef.current?.offsetParent) for (const id of fresh) pendingCalendarReveal.delete(id);
+  }, [fresh]);
+
   if (items.length === 0) {
     return (
       <div className="rounded-xl border-2 border-dashed p-8 text-center text-base md:text-lg" role="status">
@@ -84,16 +119,15 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
   }
 
   const { days, unscheduled } = placeOnWeek(items);
-  const total = items.reduce((sum, i) => sum + i.costPerWeek, 0);
 
   return (
-    <section aria-label="My week" className="text-base md:text-lg">
+    <section ref={rootRef} aria-label="My week" className="text-base md:text-lg">
       {/* Desktop + print: Mon–Sun grid */}
       <table className="hidden w-full table-fixed border-separate border-spacing-1 md:table print:table">
         <caption className="sr-only">My week: activities by day and time of day</caption>
         <thead>
           <tr>
-            <td className="w-24" />
+            <td className="w-16" />
             {days.map((d) => (
               <th key={d.day} scope="col" className="pb-1 text-center text-base font-semibold">
                 <abbr title={DAY_NAMES[d.day]} className="no-underline">{d.day}</abbr>
@@ -104,7 +138,7 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
         <tbody>
           {SLOTS.map((slot, si) => (
             <tr key={slot}>
-              <th scope="row" className="pr-1 text-left align-top text-sm font-semibold">
+              <th scope="row" className="pr-1 text-left align-top text-xs font-semibold break-words">
                 <span aria-hidden="true" className="block text-xl">{SLOT_LABELS[slot].emoji}</span>
                 {SLOT_LABELS[slot].label}
               </th>
@@ -114,7 +148,7 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
                   <td key={d.day} className={`h-20 rounded-lg align-top ${here.length ? "" : "bg-muted/30"}`}>
                     {here.length ? (
                       <div className="flex flex-col gap-1">
-                        {here.map((i) => <Activity key={i.activityId} item={i} compact />)}
+                        {here.map((i) => <Activity key={i.activityId} item={i} compact fresh={fresh.has(i.activityId)} />)}
                       </div>
                     ) : (
                       <span className="sr-only">Nothing planned</span>
@@ -146,7 +180,7 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
                         <span aria-hidden="true">{SLOT_LABELS[s.slot].emoji} </span>
                         {SLOT_LABELS[s.slot].label}
                       </p>
-                      <Activity item={i} />
+                      <Activity item={i} fresh={fresh.has(i.activityId)} />
                     </li>
                   )),
                 )}
@@ -162,7 +196,7 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
           <ul className="mt-2 grid gap-2 sm:grid-cols-2">
             {unscheduled.map((i) => (
               <li key={i.activityId}>
-                <Activity item={i} />
+                <Activity item={i} fresh={fresh.has(i.activityId)} />
               </li>
             ))}
           </ul>
@@ -170,7 +204,8 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
       )}
 
       <p className="mt-3 border-t pt-3 text-center font-medium">
-        {items.length} {items.length === 1 ? "outing" : "outings"} · {money(total)}/week
+        {/* Re-keyed on change so the total pops when an outing is added or removed. */}
+        <span key={weekSummary(items)} className="db-pop inline-block">{weekSummary(items)}</span>
       </p>
     </section>
   );

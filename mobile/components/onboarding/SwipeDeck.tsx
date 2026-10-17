@@ -180,20 +180,20 @@ function SwipeCard({
         style={[{ flex: 1, minHeight: 0 }, cardStyle]}
         accessible={!cardContent}
         accessibilityLabel={`${interest.label}. Would you enjoy this?${presenterHint ? ` ${presenterHint}` : ''}`}
-        accessibilityHint="Swipe right for yes, left for no, or use the Yes and No buttons below."
+        accessibilityHint="Use the Yes or No actions, or the Yes and No buttons below."
         accessibilityActions={[
-          { name: 'like', label: 'Yes, I would enjoy this' },
-          { name: 'nope', label: 'No thanks' },
+          { name: 'like', label: `Yes, I would enjoy ${interest.label}` },
+          { name: 'nope', label: `No, not ${interest.label}` },
         ]}
         onAccessibilityAction={(e) => {
           if (e.nativeEvent.actionName === 'like') swipe(1);
           else if (e.nativeEvent.actionName === 'nope') swipe(-1);
         }}>
         {cardContent ?? <CardFace interest={interest} compact={compact} presenterHint={presenterHint} />}
-        <Animated.View style={[st.stampSpot, { left: space.lg }, likeStyle]} pointerEvents="none">
+        <Animated.View style={[st.stampSpot, { left: space.lg }, likeStyle]} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
           <Stamp like />
         </Animated.View>
-        <Animated.View style={[st.stampSpot, { right: space.lg }, nopeStyle]} pointerEvents="none">
+        <Animated.View style={[st.stampSpot, { right: space.lg }, nopeStyle]} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
           <Stamp like={false} />
         </Animated.View>
       </Animated.View>

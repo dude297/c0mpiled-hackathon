@@ -53,6 +53,7 @@ export function NameStep({
               key={p.key}
               accessibilityRole="radio"
               aria-checked={person === p.key}
+              accessibilityState={{ checked: person === p.key, disabled: !!busy }}
               accessibilityLabel={p.label}
               accessibilityHint={p.key === 'margaret' ? 'Pre-fills sample answers for you to review and change' : 'Enter your first name below'}
               aria-disabled={!!busy}
@@ -79,6 +80,7 @@ export function NameStep({
             editable={!busy}
             onSubmitEditing={!busy && canStart ? onStart : undefined}
             accessibilityLabel="Your first name"
+            accessibilityState={{ disabled: !!busy }}
             accessibilityHint="Enter your name, then choose how you would like to answer"
             style={st.input}
           />
@@ -95,6 +97,7 @@ export function NameStep({
                   key={m.key}
                   accessibilityRole="radio"
                   aria-checked={on}
+                  accessibilityState={{ checked: on, disabled: !!busy }}
                   accessibilityLabel={`${m.label}, ${m.detail}`}
                   aria-disabled={!!busy}
                   disabled={busy}
@@ -117,6 +120,7 @@ export function NameStep({
             accessibilityLabel="Skip to Margaret's results"
             accessibilityHint="Skips the intake and uses Margaret's original sample profile"
             aria-disabled={!!busy}
+            accessibilityState={{ disabled: !!busy }}
             disabled={busy}
             onPress={onSkipDemo}
             style={({ pressed }) => [st.skip, busy && ui.disabled, pressed && ui.pressed]}>
