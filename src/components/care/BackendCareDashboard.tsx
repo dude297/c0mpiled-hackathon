@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CircleAlert, CircleCheck, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,16 +9,17 @@ import { FOCUS } from "@/components/shell/focus";
 import { PlanStatusLabel } from "@/components/shell/PlanStatusLabel";
 import { planStatusView } from "@/components/shell/helpers";
 import type { CheckInInput } from "@/domain/caregiver/contract";
-import { CareApiError, CheckInDraft, canUseDeviceFallback, careErrorMessage, createCareApi, dependencyStatus, isAccessError, readableDate, type CareLabels, type History, type Overview, type PersonDetail } from "./care-api";
+import { CareAccessBoundary, CareApiError, CheckInDraft, canUseDeviceFallback, careErrorMessage, createCareApi, dependencyStatus, isAccessError, readableDate, type CareLabels, type History, type Overview, type PersonDetail } from "./care-api";
 import type { z } from "zod";
 
 const IDENTITY_KEY = "daybridge:care:demo-identity";
 const IDENTITIES = [{ id: "cg-dana", label: "Dana — caregiver demo" }, { id: "cg-lee", label: "Lee — view-only demo" }, { id: "self-maya", label: "Maya — self demo" }];
-const H1 = "text-[2.25rem] font-semibold leading-tight";
+const H1 = "text-[2.25rem] font-semibold leading-tight break-words";
 const H2 = "text-[1.375rem] font-semibold leading-tight";
 const LINK = `inline-flex min-h-11 items-center rounded-md underline underline-offset-4 ${FOCUS}`;
 const PANEL = "space-y-4 rounded-2xl border border-border p-4 sm:p-6";
 type Api = ReturnType<typeof createCareApi>;
+type AccessErrorHandler = (failure: unknown, fromHistory?: boolean) => void;
 
 function Loading() { return <div className="space-y-4"><h1 className={H1}>Caregiver view</h1><p role="status">Loading caregiver information…</p></div>; }
 
@@ -87,16 +88,22 @@ function SelfDemoView({ api, fallback }: { api: Api; fallback: ReactNode }) {
   const [profile, setProfile] = useState<Awaited<ReturnType<Api["profile"]>> | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [version, setVersion] = useState(0);
+  const accessBoundary = useRef(new CareAccessBoundary());
   useEffect(() => {
     const controller = new AbortController();
-    api.profile(personId, controller.signal).then((value) => { if (!controller.signal.aborted) { setProfile(value); setError(null); } }).catch((failure) => { if (!controller.signal.aborted) setError(failure); });
+    const revision = accessBoundary.current.revision;
+    api.profile(personId, controller.signal).then((value) => { if (!controller.signal.aborted && accessBoundary.current.isCurrent(revision)) { setProfile(value); setError(null); } }).catch((failure) => { if (!controller.signal.aborted && accessBoundary.current.isCurrent(revision)) setError(failure); });
     return () => controller.abort();
   }, [api, version]);
-  const reload = () => setVersion((value) => value + 1);
+  const reload = () => { accessBoundary.current.reset(); setVersion((value) => value + 1); };
+  const revalidateAccess = useCallback(() => {
+    accessBoundary.current.invalidate();
+    setProfile(null); setError(null); setVersion((value) => value + 1);
+  }, []);
   if (!profile && !error) return <Loading />;
   if (error) return canUseDeviceFallback(error) ? <Unavailable error={error} fallback={fallback} retry={reload} /> : <LoadError error={error} retry={reload} />;
   if (!profile) return null;
-  return <div className="space-y-6"><h1 className={H1}>{profile.profile.name}&apos;s check-in</h1><p>This self demo can record a check-in and read its own profile. Caregiver plans and history require an explicit sharing grant.</p><CheckInForm api={api} personId={personId} self onSaved={() => {}} /><StorageLabels labels={profile.labels} /></div>;
+  return <div className="space-y-6"><h1 className={H1}>{profile.profile.name}&apos;s check-in</h1><p>This self demo can record a check-in and read its own profile. Caregiver plans and history require an explicit sharing grant.</p><CheckInForm api={api} personId={personId} self onSaved={() => {}} onAccessError={revalidateAccess} /><StorageLabels labels={profile.labels} /></div>;
 }
 
 function PeopleView({ api, fallback }: { api: Api; fallback: ReactNode }) {
@@ -153,14 +160,25 @@ function PersonView({ api, identity, personId, fallback }: { api: Api; identity:
   const [ackBusy, setAckBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
   const [notice, setNotice] = useState("");
+  const accessBoundary = useRef(new CareAccessBoundary());
   useEffect(() => {
     const controller = new AbortController();
-    api.person(personId, controller.signal).then((value) => { if (!controller.signal.aborted) { setData(value); setError(null); } }).catch((failure) => {
-      if (!controller.signal.aborted) { setError(failure); if (isAccessError(failure)) setData(null); }
-    }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
+    const revision = accessBoundary.current.revision;
+    api.person(personId, controller.signal).then((value) => { if (!controller.signal.aborted && accessBoundary.current.isCurrent(revision)) { setData(value); setError(null); } }).catch((failure) => {
+      if (!controller.signal.aborted && accessBoundary.current.isCurrent(revision)) { setError(failure); if (isAccessError(failure)) setData(null); }
+    }).finally(() => { if (!controller.signal.aborted && accessBoundary.current.isCurrent(revision)) setBusy(false); });
     return () => controller.abort();
   }, [api, personId, version]);
-  const reload = () => { setBusy(true); setVersion((value) => value + 1); };
+  const reload = () => { accessBoundary.current.reset(); setBusy(true); setVersion((value) => value + 1); };
+  const revalidateAccess: AccessErrorHandler = useCallback((failure, fromHistory = false) => {
+    // Never leave notes or controls from a former grant visible after an access denial.
+    setData(null); setActionError(""); setNotice("");
+    if (!accessBoundary.current.invalidate(fromHistory)) {
+      // An inconsistent history/detail permission response must not create a refetch loop.
+      setError(failure); setBusy(false); return;
+    }
+    setError(null); setBusy(true); setVersion((value) => value + 1);
+  }, []);
   async function acknowledge(itemId: string) {
     setAckBusy(itemId); setActionError(""); setNotice("");
     try {
@@ -168,8 +186,11 @@ function PersonView({ api, identity, personId, fallback }: { api: Api; identity:
       setData((current) => current ? { ...current, attention: current.attention.map((item) => item.itemId === itemId ? { ...item, acknowledgedByMe: true } : item) } : current);
       setNotice("Acknowledged by you. This records that you've seen it; the item stays until the underlying situation changes.");
     } catch (failure) {
-      if (failure instanceof CareApiError && failure.status === 404) { setActionError("This item is no longer current."); reload(); }
-      else { setActionError(careErrorMessage(failure)); if (failure instanceof CareApiError && failure.status === 403) reload(); }
+      if (isAccessError(failure)) {
+        revalidateAccess(failure);
+        if (failure instanceof CareApiError && failure.status === 404) setActionError("This item is no longer current.");
+      }
+      else setActionError(careErrorMessage(failure));
     } finally { setAckBusy(null); }
   }
   if (!data && !error) return <Loading />;
@@ -203,9 +224,9 @@ function PersonView({ api, identity, personId, fallback }: { api: Api; identity:
       <h2 id="care-checkins" className={H2}>Recent check-ins</h2>
       <p>{person.checkInSchedule ? `Check-in schedule: every ${person.checkInSchedule.everyDays} ${person.checkInSchedule.everyDays === 1 ? "day" : "days"}.` : "No check-in schedule set."}</p>
       {data.latestCheckIns.length === 0 ? <p>No check-ins yet</p> : <ul className="space-y-4">{data.latestCheckIns.map((item) => <li key={item.checkInId} className="space-y-1"><p className="font-semibold">{checkInText(item.kind)} · {item.reporterRole === "self" ? "Self" : "Caregiver"}</p><DateText at={item.at} timezone={person.timezone} /><Note item={item} /></li>)}</ul>}
-      {canCheckIn ? <CheckInForm api={api} personId={personId} self={self} onSaved={reload} /> : <p className="text-muted-foreground">View-only access. Ask a manager for permission to record check-ins.</p>}
+      {canCheckIn ? <CheckInForm api={api} personId={personId} self={self} onSaved={reload} onAccessError={revalidateAccess} /> : <p className="text-muted-foreground">View-only access. Ask a manager for permission to record check-ins.</p>}
     </section>
-    <HistoryView key={`${personId}:${version}`} api={api} personId={personId} timezone={person.timezone} />
+    <HistoryView key={`${personId}:${version}`} api={api} personId={personId} timezone={person.timezone} onAccessError={revalidateAccess} />
     <StorageLabels labels={data.labels} />
   </div>;
 }
@@ -214,7 +235,7 @@ function Note({ item }: { item: { note?: string; hasNote?: true } }) {
   return item.note ? <p className="whitespace-pre-wrap break-words">{item.note}</p> : item.hasNote ? <p className="text-muted-foreground">Note (visible to the reporter and managers)</p> : null;
 }
 
-export function CheckInForm({ api, personId, self, onSaved }: { api: Api; personId: string; self: boolean; onSaved: () => void }) {
+export function CheckInForm({ api, personId, self, onSaved, onAccessError }: { api: Api; personId: string; self: boolean; onSaved: () => void; onAccessError?: AccessErrorHandler }) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -229,20 +250,21 @@ export function CheckInForm({ api, personId, self, onSaved }: { api: Api; person
       setNotice(saved.duplicate ? "Already saved." : "Check-in saved."); setNote(""); draft.current.saved(); onSaved();
     } catch (failure) {
       setError(failure instanceof CareApiError && failure.status === 409 ? "That check-in was already sent with different details. Reload and try again." : careErrorMessage(failure));
+      if (isAccessError(failure)) onAccessError?.(failure);
     } finally { sending.current = false; setBusy(false); }
   }
   return <div className="space-y-3 border-t border-border pt-5" aria-busy={busy}>
     <h3 className="text-lg font-semibold">Record a check-in</h3>
     <label htmlFor="care-checkin-note" className="block">Optional note</label>
     <Textarea id="care-checkin-note" value={note} disabled={busy} maxLength={280} aria-describedby="care-note-count care-checkin-help" className="min-h-24 text-base md:text-base" onChange={(event) => setNote(event.target.value)} />
-    <p id="care-note-count">{note.length}/280 characters</p>
+    <p id="care-note-count">{note.length}/280 characters. Notes are visible to you and people with manage access.</p>
     <div className="flex flex-wrap gap-3">{([{ kind: "ok", label: self ? "I'm OK" : "They're OK" }, { kind: "call", label: "Please call" }, { kind: "help", label: "Need help" }] as const).map((item) => <Button key={item.kind} size="xl" variant={item.kind === "ok" ? "default" : "outline"} disabled={busy} onClick={() => void send(item.kind)}>{busy ? "Saving…" : item.label}</Button>)}</div>
     <p id="care-checkin-help" className="text-muted-foreground">This records a check-in. It doesn&apos;t contact anyone or change any plan. For urgent help, contact someone directly.</p>
     <p role="status" aria-live="polite">{notice}</p>{error && <p role="alert">{error}</p>}
   </div>;
 }
 
-function HistoryView({ api, personId, timezone }: { api: Api; personId: string; timezone: string }) {
+function HistoryView({ api, personId, timezone, onAccessError }: { api: Api; personId: string; timezone: string; onAccessError: AccessErrorHandler }) {
   const [data, setData] = useState<History | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(true);
@@ -252,9 +274,9 @@ function HistoryView({ api, personId, timezone }: { api: Api; personId: string; 
   const [loadedMessage, setLoadedMessage] = useState("");
   useEffect(() => {
     const controller = new AbortController();
-    api.history(personId, undefined, controller.signal).then((value) => { if (!controller.signal.aborted) { setData(value); setError(""); } }).catch((failure) => { if (!controller.signal.aborted) { setError(careErrorMessage(failure)); if (isAccessError(failure)) setData(null); } }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
+    api.history(personId, undefined, controller.signal).then((value) => { if (!controller.signal.aborted) { setData(value); setError(""); } }).catch((failure) => { if (!controller.signal.aborted) { setError(careErrorMessage(failure)); if (isAccessError(failure)) { setData(null); onAccessError(failure, true); } } }).finally(() => { if (!controller.signal.aborted) setBusy(false); });
     return () => controller.abort();
-  }, [api, personId, version]);
+  }, [api, personId, version, onAccessError]);
   useEffect(() => { firstAdded.current?.focus(); }, [focusIndex]);
   async function more() {
     if (!data?.nextCursor || busy) return;
@@ -263,7 +285,7 @@ function HistoryView({ api, personId, timezone }: { api: Api; personId: string; 
       const page = await api.history(personId, data.nextCursor);
       setFocusIndex(data.items.length); setData({ ...page, items: [...data.items, ...page.items] });
       setLoadedMessage(`${page.items.length} more history ${page.items.length === 1 ? "item" : "items"} loaded.`);
-    } catch (failure) { setError(careErrorMessage(failure)); if (isAccessError(failure)) setData(null); }
+    } catch (failure) { setError(careErrorMessage(failure)); if (isAccessError(failure)) { setData(null); onAccessError(failure, true); } }
     finally { setBusy(false); }
   }
   return <section aria-labelledby="care-history" className={PANEL} aria-busy={busy}>
