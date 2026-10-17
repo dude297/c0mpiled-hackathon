@@ -1,75 +1,58 @@
-# DayBridge — Reach / Unlock
+# DayBridge — Hackathon guide
 
-**DayBridge Reach** is an adaptive participation agent that helps older adults attend activities they actually want to join. **DayBridge Unlock** is the focused hackathon MVP: identify the binding barrier, compute the minimum feasible intervention, coordinate only with permission, recover from disruptions, and learn from confirmed feedback. **DayBridge Collective** (group marketplace / negotiation) is deferred.
+**DayBridge helps older adults move from “that looks interesting” to a realistic, permission-based plan to participate.**
 
-## Pitch
+Event calendars surface possibilities. DayBridge also considers whether the outing fits the person's schedule, mobility, transport, budget and social preferences—and what support is still needed.
 
-> Event apps suggest what you could do. DayBridge finds what's stopping you from actually going — and coordinates the smallest safe change that makes it possible.
+## Three-minute demo
 
-## What we are building (P0)
+1. **Build a week:** Start at `/`, complete onboarding or select a demo person. Explore suggested matches and explanations.
+2. **Coordinate:** Choose an outing and select **Get me there**. Review proposed actions and approve each one explicitly.
+3. **Show proof:** Simulate a friend RSVP and transport confirmation. The plan becomes **READY** only after its required dependencies are confirmed.
+4. **Recover:** Simulate a ride cancellation. The plan leaves READY, explains what changed and offers a new approved path.
+5. **Show the broader experience:** Open Home, Calendar or the same-device Caregiver view as time permits.
 
-1. Profile of interests, hard constraints, soft preferences, contacts, and permissions.
-2. Barrier diagnosis for a proposed activity.
-3. Deterministic feasibility checker and minimum-intervention ranker.
-4. Explicit consent gate for invitations and transport actions.
-5. Mock invitation, RSVP, and ride confirmation adapters with event log.
-6. Disruption-driven replanning when an RSVP or ride changes.
-7. Feedback → reviewable preference suggestion → confirmation → revised ranking.
-8. Accessible demo UI showing state and evidence, plus local inference for structured extraction/explanation.
+**Everything involving invitations, RSVPs, ride providers and cancellations in the golden demo is simulated.** The app does not send real messages or book transport. Demo users and some activity details are illustrative.
 
-**Not in MVP:** payments, group negotiation, groceries, medication, voice concierge, broad marketplace or unaudited autonomous messaging.
+## Current capabilities
 
-## Golden demo
+| Capability | Scope |
+| --- | --- |
+| Matching and barrier analysis | Deterministic constraints and explanations |
+| Consent-based coordination | Simulated provider actions, state tracking and recovery |
+| Public opportunity discovery | Optional live UC Berkeley listings; source details may be incomplete |
+| Onboarding and accessibility | Explicit preference questions, easier view and opt-in hands-free input |
+| Web app | Home, Matches, Calendar, Profile and Caregiver screens |
+| Mobile | Separate Expo app sharing domain logic |
+| Feedback | Reviewable updates rather than silent changes |
 
-Fictional fixture: Maya wants to attend an art workshop, but needs a confirmed ride and prefers a small group. DayBridge diagnoses the blocker, proposes a minimal change, gets approval to invite a friend, registers the RSVP and ride confirmation, and marks the plan READY. When the ride is cancelled, READY is revoked and the agent proposes a new plan. Maya later confirms that she'd prefer smaller groups, updating future ranking.
+## Local setup
 
-**Important:** Simulated providers must be visibly labeled. Requested ≠ confirmed, RSVP ≠ verified attendance.
+From the repository root:
 
-## Proposed stack
-
-Next.js / TypeScript; pure domain and orchestration functions; JSON demo fixtures; Vitest; model adapter for local inference (Ollama or llama.cpp subject to hardware); Zod-style structured outputs; mock provider adapters first. A small durable store such as SQLite is optional. These are suggested implementation choices; validate hardware and environment before committing.
-
-## Architecture
-
-```mermaid
-flowchart TD
-    UI[User / demo interface] --> API[App API]
-    API --> AI[Local LLM adapter: extraction, explanation]
-    API --> Domain[Deterministic constraints and ranking]
-    API --> Policy[Explicit consent policy]
-    Domain --> Mission[Mission orchestrator / state machine]
-    Policy --> Mission
-    Mission --> Store[Event log and plan state]
-    Mission --> Adapters[Invitation / RSVP / transport mock adapters]
-    Adapters --> Mission
-    AI --> API
+```bash
+npm install
+npm run dev
 ```
 
-## Required behavior
+Open http://localhost:3000. No keys are required for the mock demo. For optional integrations, copy `.env.example` to `.env.local` and follow [environment setup](../integrations/ENV_SETUP.md).
 
-Plan states: `DRAFT`, `BLOCKED`, `PROPOSED`, `APPROVED`, `COORDINATING`, `READY`, `NEEDS_REPLAN`, `COMPLETED`, `CANCELLED`.
+For checks, run `npm run check`, `npm run build -- --webpack` and `npm run demo:check` with the app running for the HTTP smoke test.
 
-**Rule:** A plan cannot become READY until required dependencies (including transport and required attendees, as applicable) are confirmed; no external message or booking request may be sent without a specific approval.
+## Trust boundaries
 
-## Implementation order
+- **Requested ≠ confirmed.** A ride request alone cannot make a plan READY.
+- **Listed ≠ suitable.** A live public event is not assumed free, accessible or eligible.
+- **Consent first.** Invitations, rides, sharing and other side effects require scoped approval.
+- **No real purchases or bookings.** Payments, live messaging and production caregiver account linking are out of scope.
+- **Local demo first.** In-memory state is not durable cloud storage; experimental Supabase work is separate from the approved demo.
 
-1. Scaffold and fixtures; run locally.
-2. Implement typed constraints and minimum-intervention ranking, with tests.
-3. Implement event log, state machine and approval policy, with tests.
-4. Add mock invitation/RSVP/ride adapters and golden end-to-end flow.
-5. Add cancellation/replanning and confirmed feedback learning.
-6. Add local LLM extraction/explanation behind a replaceable adapter.
-7. Build clear demo UI, then rehearse; deploy only on milestone builds.
+## Architecture and references
 
-## Demo quality bar
+The Next.js interface calls a typed API and deterministic TypeScript planning/coordination domain. Optional AI generates explanations or candidate structured facts; it does not authorize actions or decide readiness. Public integrations supply candidate information; simulated provider adapters supply deterministic demo responses.
 
-- Zero hard-constraint violations in fixtures.
-- Zero unauthorized external actions.
-- `READY` invalidates correctly upon disruption.
-- Before/after state and proof are visible to judges.
-- Local demo works without live provider services.
-- The model may fail without making the deterministic workflow unsafe.
-
-## Where to read next
-
-See **`DayBridge_Product_Engineering_Spec.md`** for the full product requirements, personas, workflows, architecture, API/data contracts, test plan, guardrails, risks, demo script, and coding-agent handoff brief.
+- [Main README](../../README.md)
+- [Engineering specification](PRODUCT_ENGINEERING_SPEC.md) — design rationale and contracts, including proposed/deferred ideas
+- [Product goals](../product/GOALS.md)
+- [Coordination contract](COORDINATION_CONTRACT.md)
+- [Mobile setup](../../mobile/README.md)
