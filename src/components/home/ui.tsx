@@ -13,7 +13,7 @@ export const SECONDARY = `inline-flex min-h-11 items-center justify-center gap-2
 /** Heads-up row: white, 4px amber left rule, icon + word (never color alone). */
 export function HeadsUpRow({ children, word = "Heads up" }: { children: ReactNode; word?: string }) {
   return (
-    <li className="border-l-4 border-amber-500 py-2 pl-4 dark:border-amber-400">
+    <li className="border-l-4 border-amber-600 py-2 pl-4 dark:border-amber-400">
       <p className="flex items-center gap-1.5 font-semibold">
         <TriangleAlert className="size-5 shrink-0 text-amber-700 dark:text-amber-400" aria-hidden="true" />
         {word}

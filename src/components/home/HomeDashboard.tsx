@@ -114,9 +114,12 @@ function HomeContent() {
                 {rows.map((r) => (
                   <HeadsUpRow key={r.key}>
                     <p className="text-lg break-words">{r.text}</p>
-                    <GoLink href={r.link.href} coordinate={r.link.coordinate} onGo={handoff} className={QUIET_LINK}>
-                      {r.link.label}
-                    </GoLink>
+                    {/* The primary button already opens this one; don't repeat it (same rule as Care). */}
+                    {r.link.href !== primary.href && (
+                      <GoLink href={r.link.href} coordinate={r.link.coordinate} onGo={handoff} className={QUIET_LINK}>
+                        {r.link.label}
+                      </GoLink>
+                    )}
                   </HeadsUpRow>
                 ))}
               </ul>

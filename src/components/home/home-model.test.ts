@@ -3,7 +3,7 @@ import { NOT_STARTED, planStatusView, type PlanStatus } from "@/components/shell
 import type { AnalysisResult, PlanItem, PlanState } from "@/lib/schema";
 import {
   activityPrimaryLabel, attentionRows, backLink, checksFor, costWords, didntFitReason, greeting, homePrimary, nextOuting, noMatchReason,
-  otherWays, todayIndex, travelLine, weekItems, weekLine, weekStrip,
+  otherWays, softBarrierText, todayIndex, travelLine, weekItems, weekLine, weekStrip,
 } from "./home-model";
 
 const item = (activityId: string, when: string, extra: Partial<PlanItem> = {}): PlanItem => ({
@@ -56,6 +56,11 @@ describe("week order and next outing", () => {
     expect(nextOuting(items, 2)?.activityId).toBe("cards"); // Wednesday counts today
     expect(nextOuting(items, 6)?.activityId).toBe("choir"); // Sunday wraps
     expect(nextOuting([], 3)).toBeNull();
+  });
+  it("wraps to Monday instead of picking a time-TBD outing", () => {
+    const tbd = item("tbd", "time TBD");
+    expect(nextOuting([choir, tbd], 6)?.activityId).toBe("choir");
+    expect(nextOuting([tbd], 3)?.activityId).toBe("tbd");
   });
   it("Monday is day 0", () => {
     expect(todayIndex(new Date(2026, 9, 19))).toBe(0); // Mon 19 Oct 2026
@@ -127,6 +132,12 @@ describe("attentionRows", () => {
     expect(rows[0].text).toBe("Choir: noisy room, no hearing loop. Sit near the leader.");
     expect(rows[0].link.href).toBe("/activity/choir?from=home");
   });
+  it("words a travel barrier the same way Matches does", () => {
+    const ride = { rule: "transport", severity: "soft" as const, detail: "paratransit, 30 min." };
+    const rows = attentionRows({ items: [{ ...choir, barriers: [ride] }], statusFor: statuses({}), viewFor: views({}), dropped: [], unavailable: false });
+    expect(rows[0].text).toBe("Choir: senior shuttle, about 30 min.");
+    expect(softBarrierText({ rule: "social", detail: "large group; prefers small groups" })).toEqual({ detail: "Large group", tip: null });
+  });
   it("hides status rows when live status is unavailable", () => {
     const map = { choir: "NEEDS_REPLAN" } as const;
     expect(attentionRows({ items: [choir], statusFor: statuses(map), viewFor: views(map), dropped: [], unavailable: true })).toEqual([]);
@@ -159,6 +170,7 @@ describe("U5 helpers", () => {
     expect(backLink("calendar", "user")).toEqual({ label: "Back to calendar", href: "/calendar" });
     expect(backLink(null, "user").href).toBe("/matches");
     expect(backLink("nonsense", "caregiver").href).toBe("/care");
+    for (const key of ["toString", "__proto__", "constructor", "hasOwnProperty"]) expect(backLink(key, "user")).toEqual({ label: "Back to matches", href: "/matches" });
   });
   it("words the primary by mode", () => {
     expect(activityPrimaryLabel(planStatusView(null), "user", "Margaret")).toBe("Get me there");

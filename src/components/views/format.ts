@@ -1,17 +1,13 @@
 // Plain-words formatting for U3 Matches, U4 Calendar and U6 Profile. Pure: unit-tested in format.test.ts.
 import { DAYS, placeOnWeek, type Day, type Slot } from "@/components/calendar/WeekCalendar";
-import { money } from "@/components/feed/MatchFeed";
+import { DAY_NAMES, MODE_WORDS, costWords, money, softBarrierText, weekItems } from "@/components/home/home-model";
 import { INTEREST_META, TRANSPORT_OPTIONS, TRAVEL_BUCKETS, WALKING_AID_OPTIONS } from "@/components/onboarding/CardDeck";
-import type { AnalysisResult, Barrier, PlanItem, Profile } from "@/lib/schema";
+import type { Barrier, PlanItem, Profile } from "@/lib/schema";
 
-export const DAY_NAMES: Record<Day, string> = {
-  Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday",
-};
+// Day names, mode words, cost and the week list are shared with Home / Activity (home-model) so every screen says the same thing.
+export { DAY_NAMES, weekItems };
 export const SLOT_WORDS: Record<Slot, string> = { morning: "Morning", afternoon: "Afternoon", evening: "Evening" };
 
-const MODE_WORDS: Record<string, string> = {
-  drive: "Drive", bus: "Bus", paratransit: "Senior shuttle", family: "Family ride", walk: "Walk",
-};
 const MODE_PHRASE: Record<string, string> = {
   drive: "driving", bus: "bus", paratransit: "senior shuttle", family: "family ride", walk: "walking",
 };
@@ -19,27 +15,21 @@ const MODE_PHRASE: Record<string, string> = {
 const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 
 /** "Free" or "$5 a week". */
-export const costPlain = (n: number) => (n === 0 ? "Free" : `${money(n)} a week`);
+export const costPlain = costWords;
 
 /** Engine travel "bus, 25 min" → { mode: "Bus", text: "Bus, about 25 min" }. Unknown shapes are shown as given. */
 export function travelPlain(travel: string): { mode: string; text: string } {
   const m = /^\s*([a-z]+)\s*,\s*(\d+)\s*min/i.exec(travel ?? "");
   if (!m) return { mode: cap(travel ?? ""), text: cap(travel ?? "") };
-  const mode = MODE_WORDS[m[1].toLowerCase()] ?? cap(m[1]);
+  const mode = MODE_WORDS[m[1].toLowerCase() as keyof typeof MODE_WORDS] ?? cap(m[1]);
   return { mode, text: `${mode}, about ${m[2]} min` };
 }
 
 /** One meta line for a match card: "Wed afternoon · Bus, about 15 min · Free". */
 export const metaLine = (item: PlanItem) => [item.when, travelPlain(item.travel).text, costPlain(item.costPerWeek)].join(" · ");
 
-/** A soft barrier in plain words: what to expect + what helps. */
-export function headsUpText(b: Barrier): { detail: string; tip: string | null } {
-  let detail = b.detail;
-  const shuttle = /^paratransit,\s*(\d+)\s*min/i.exec(b.detail);
-  if (shuttle) detail = `Senior shuttle, about ${shuttle[1]} min`;
-  else if (b.rule === "social") detail = "Large group";
-  return { detail, tip: b.mitigation ?? null };
-}
+/** A soft barrier in plain words: what to expect + what helps (same words as Home and Activity). */
+export const headsUpText = softBarrierText;
 
 /** First soft barrier as the card's single heads-up row, and how many more there are (shown on the details page). */
 export function cardHeadsUp(item: PlanItem): { first: Barrier | null; more: number } {
@@ -73,13 +63,6 @@ export function sortMatches(plan: PlanItem[], week: readonly string[]): PlanItem
 }
 
 export const didntFitLabel = (n: number) => `${n} ${n === 1 ? "activity" : "activities"} didn't fit — see why`;
-
-/** Outings in the week, in plan order. Ids missing from the result are ignored (never invented). */
-export function weekItems(result: AnalysisResult | null, week: readonly string[]): PlanItem[] {
-  if (!result) return [];
-  const inWeek = new Set(week);
-  return result.plan.filter((i) => inWeek.has(i.activityId));
-}
 
 /** JS getDay() (0 = Sunday) → "Mon".."Sun". */
 export const dayOf = (date: Date): Day => DAYS[(date.getDay() + 6) % 7];

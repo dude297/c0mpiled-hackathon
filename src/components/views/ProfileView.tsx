@@ -33,6 +33,8 @@ function Answers({ onStartOver }: { onStartOver: (s: Snapshot) => void }) {
   const store = useDeviceStore();
   const profile = store.profile!;
   const [open, setOpen] = useState<ProfileField | null>(null);
+  // Optional section stays open once opened (Save / Cancel on a row inside must not collapse it).
+  const [optionalOpen, setOptionalOpen] = useState(false);
   const [saved, setSaved] = useState(false);
   const rows = profileRows(profile);
 
@@ -68,7 +70,7 @@ function Answers({ onStartOver }: { onStartOver: (s: Snapshot) => void }) {
 
       {rowList(rows.filter((r) => !r.optional))}
 
-      <details className="group" open={open === "hearingImpaired" || open === "prefersSmallGroups" ? true : undefined}>
+      <details className="group" open={optionalOpen} onToggle={(e) => setOptionalOpen(e.currentTarget.open)}>
         <summary className={`inline-flex min-h-11 cursor-pointer items-center rounded-lg text-lg font-medium ${FOCUS}`}>
           Optional: hearing and group size
         </summary>

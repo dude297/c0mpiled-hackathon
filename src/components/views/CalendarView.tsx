@@ -108,10 +108,10 @@ function Outing({ item, ps, compact }: { item: PlanItem; ps: PlanStatusApi; comp
   return (
     <Link
       href={`/activity/${encodeURIComponent(item.activityId)}?from=calendar`}
-      className={`block rounded-xl border p-3 hover:bg-muted/60 ${FOCUS} break-inside-avoid`}
+      className={`block rounded-xl border ${compact ? "p-2 xl:p-3" : "p-3"} hover:bg-muted/60 ${FOCUS} break-inside-avoid`}
     >
       {/* Wrap only between words: names never break mid-word. */}
-      <span className={`block font-semibold leading-snug [overflow-wrap:normal] [word-break:normal] ${compact ? "text-lg" : "text-xl"}`}>{item.name}</span>
+      <span className={`block font-semibold leading-snug [overflow-wrap:normal] [word-break:normal] ${compact ? "text-base xl:text-lg" : "text-xl"}`}>{item.name}</span>
       {!ps.unavailable && <PlanStatusLabel view={ps.viewFor(item.activityId)} className="mt-1 text-base" />}
       <span className="mt-0.5 block text-base text-foreground/75">{compact ? travelPlain(item.travel).mode : travelPlain(item.travel).text}</span>
     </Link>
@@ -126,7 +126,7 @@ function WeekGrid({ items, today, ps }: { items: PlanItem[]; today: Day; ps: Pla
         <caption className="sr-only">Your week: outings by day and time of day</caption>
         <thead>
           <tr>
-            <td className="w-28" />
+            <td className="w-24 xl:w-28" />
             {days.map((d) => (
               <th key={d.day} scope="col" className="px-1 pb-2 text-left align-bottom text-base font-semibold">
                 <abbr title={DAY_NAMES[d.day]} className="no-underline">{d.day}</abbr>

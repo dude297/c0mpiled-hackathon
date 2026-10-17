@@ -2,7 +2,10 @@
 import { DAYS, SLOTS, parseWhen, type Day } from "@/components/calendar/WeekCalendar";
 import { coordinateHref, type DroppedOuting, type Mode, type PlanStatus, type StatusView } from "@/components/shell/helpers";
 import type { Activity } from "@/domain/activities";
-import type { AnalysisResult, PlanItem, Profile } from "@/lib/schema";
+import { money } from "@/components/feed/MatchFeed";
+import type { AnalysisResult, Barrier, PlanItem, Profile } from "@/lib/schema";
+
+export { money };
 
 export const DAY_NAMES: Record<Day, string> = {
   Mon: "Monday", Tue: "Tuesday", Wed: "Wednesday", Thu: "Thursday", Fri: "Friday", Sat: "Saturday", Sun: "Sunday",
@@ -20,8 +23,6 @@ export const MODE_WORDS: Record<Transport, string> = {
 const lowerFirst = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s);
 const trimDot = (s: string) => s.trim().replace(/\.+$/, "");
 
-export const money = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
-
 /** "Free" or "$5 a week" (U5 header). */
 export const costWords = (n: number) => (n === 0 ? "Free" : `${money(n)} a week`);
 
@@ -38,6 +39,13 @@ export function travelLine(travel: string): string {
   if (!m) return travel;
   const mode = m[1].toLowerCase() as Transport;
   return `${MODE_WORDS[mode] ?? m[1]}, about ${m[2]} min`;
+}
+
+/** A soft barrier in plain words (same on every screen): what to expect + what helps. */
+export function softBarrierText(b: Pick<Barrier, "rule" | "detail" | "mitigation">): { detail: string; tip: string | null } {
+  const raw = trimDot(b.detail);
+  const detail = /^\s*[a-z]+,\s*\d+\s*min\s*$/i.test(raw) ? travelLine(raw) : b.rule === "social" ? "Large group" : raw;
+  return { detail, tip: b.mitigation ? trimDot(b.mitigation) : null };
 }
 
 export const travelMode = (travel: string): Transport | null => {
@@ -64,16 +72,16 @@ function order(item: PlanItem): number {
 }
 
 /** The person's week: plan items whose id is in `week`, Monday → Sunday, morning → evening. */
-export function weekItems(result: AnalysisResult | null, week: string[]): PlanItem[] {
+export function weekItems(result: AnalysisResult | null, week: readonly string[]): PlanItem[] {
   if (!result) return [];
   const ids = new Set(week);
   return result.plan.filter((i) => ids.has(i.activityId)).sort((a, b) => order(a) - order(b));
 }
 
-/** Next outing from today on (the week repeats); wraps to the first one. */
+/** Next outing from today on (the week repeats); wraps to the first one. A "time TBD" outing is only picked when nothing is scheduled. */
 export function nextOuting(items: PlanItem[], today: number): PlanItem | null {
   const sorted = [...items].sort((a, b) => order(a) - order(b));
-  return sorted.find((i) => Math.floor(order(i) / 10) >= today) ?? sorted[0] ?? null;
+  return sorted.find((i) => order(i) < 999 && Math.floor(order(i) / 10) >= today) ?? sorted[0] ?? null;
 }
 
 /** "Wednesday" from "Wed afternoon"; falls back to the raw text. */
@@ -157,9 +165,10 @@ export function attentionRows(opts: {
   for (const i of items) {
     const b = i.barriers.find((x) => x.severity === "soft");
     if (!b) continue;
+    const { detail, tip } = softBarrierText(b);
     rows.push({
       key: `soft-${i.activityId}`,
-      text: `${i.name}: ${lowerFirst(trimDot(b.detail))}.${b.mitigation ? ` ${trimDot(b.mitigation)}.` : ""}`,
+      text: `${i.name}: ${lowerFirst(detail)}.${tip ? ` ${tip}.` : ""}`,
       link: { label: "See details", href: activityHref(i.activityId, "home"), coordinate: false },
     });
     break;
@@ -193,7 +202,7 @@ export function backLink(from: string | null, mode: Mode): { label: string; href
     calendar: { label: "Back to calendar", href: "/calendar" },
     care: { label: "Back to care", href: "/care" },
   };
-  if (from && from in targets) return targets[from as BackTarget];
+  if (from && Object.hasOwn(targets, from)) return targets[from as BackTarget];
   return mode === "caregiver" ? targets.care : targets.matches;
 }
 

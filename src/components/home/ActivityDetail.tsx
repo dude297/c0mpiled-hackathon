@@ -11,7 +11,7 @@ import { coordinateHref, personLabel, useDeviceStore, usePlanStatus } from "@/co
 import { ACTIVITIES } from "@/domain/activities";
 import { writeProfileHandoff } from "./handoff";
 import {
-  accessFacts, activityPrimaryLabel, backLink, checksFor, costWords, didntFitReason, otherWays, travelLine, travelMode,
+  accessFacts, activityPrimaryLabel, backLink, checksFor, costWords, didntFitReason, otherWays, softBarrierText, travelLine, travelMode,
 } from "./home-model";
 import { Disclosure, GoLink, HeadsUpRow, PRIMARY, QUIET_LINK, SECONDARY } from "./ui";
 
@@ -102,12 +102,15 @@ function Detail({ id, from }: { id: string; from: string | null }) {
           <h2 id="way-heading" className={H2}>What could get in the way</h2>
           {soft.length ? (
             <ul className="space-y-4">
-              {soft.map((b) => (
-                <HeadsUpRow key={b.rule}>
-                  <p className="text-lg">{b.detail}</p>
-                  {b.mitigation && <p className="text-lg text-foreground/80">What helps: {b.mitigation}</p>}
-                </HeadsUpRow>
-              ))}
+              {soft.map((b) => {
+                const { detail, tip } = softBarrierText(b);
+                return (
+                  <HeadsUpRow key={b.rule}>
+                    <p className="text-lg">{detail}</p>
+                    {tip && <p className="text-lg text-foreground/80">What helps: {tip}</p>}
+                  </HeadsUpRow>
+                );
+              })}
             </ul>
           ) : (
             <p className="text-lg">Nothing we know of.</p>
