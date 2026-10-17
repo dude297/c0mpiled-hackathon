@@ -1,10 +1,79 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ANSWER_LOCKOUT_MS, answersToProfile, INTEREST_COUNT, isLockedOut, likedInterests, pickedToHistory, swipeDirection, toggleKey, undoAnswer, type Answer } from "@/components/onboarding/CardDeck";
+import { ANSWER_LOCKOUT_MS, answersToProfile, INTEREST_COUNT, isLockedOut, likedInterests, pickedToHistory, replaceAnswer, replaceInterests, reviewRows, swipeDirection, toggleKey, TRANSPORT_OPTIONS, undoAnswer, WALKING_AID_OPTIONS, type Answer } from "@/components/onboarding/CardDeck";
 import { Profile, type Profile as ProfileType } from "@/lib/schema";
+
+// The two required answers; tests about other fields add them so a full Profile comes back.
+const WALK: Answer = { kind: "mobility", key: "full" };
+const BUS: Answer = { kind: "transport", modes: ["bus"] };
+
+function profileOf(answers: (Answer | null)[], name: string): ProfileType {
+  const result = answersToProfile([...answers.filter((a): a is Answer => a !== null), WALK, BUS], name);
+  if (!result.ok) throw new Error(`incomplete: ${result.missing.join(",")}`);
+  return result.profile;
+}
+
+describe("answersToProfile — PR #12 review: never infer mobility or transport", () => {
+  it("lead repro: an old stairs 'fine' answer and no transport answer is incomplete, never drive", () => {
+    const result = answersToProfile([{ kind: "mobility", key: "fine" } as unknown as Answer], "QA no car");
+    expect(result).toEqual({ ok: false, missing: ["mobility", "transport"] });
+    expect(JSON.stringify(result)).not.toContain("drive");
+  });
+
+  it("lead repro (avoid case): no walker and no paratransit/family invented", () => {
+    const result = answersToProfile([{ kind: "mobility", key: "avoid" } as unknown as Answer], "QA");
+    expect(result).toEqual({ ok: false, missing: ["mobility", "transport"] });
+  });
+
+  it("walking aid without transport is incomplete; transport without walking aid is incomplete", () => {
+    expect(answersToProfile([{ kind: "mobility", key: "walker" }], "A")).toEqual({ ok: false, missing: ["transport"] });
+    expect(answersToProfile([{ kind: "transport", modes: ["drive"] }], "A")).toEqual({ ok: false, missing: ["mobility"] });
+    expect(answersToProfile([{ kind: "mobility", key: "full" }, { kind: "transport", modes: [] }], "A")).toEqual({ ok: false, missing: ["transport"] });
+  });
+
+  it("walker + bus only yields mobility walker and transport ['bus'] exactly", () => {
+    const result = answersToProfile([{ kind: "mobility", key: "walker" }, { kind: "transport", modes: ["bus"] }], "Ruth");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.profile.mobility).toBe("walker");
+    expect(result.profile.transport).toEqual(["bus"]);
+  });
+
+  it("transport is exactly what was picked for every walking aid (no mobility→transport path)", () => {
+    for (const aid of WALKING_AID_OPTIONS) {
+      for (const mode of TRANSPORT_OPTIONS) {
+        const result = answersToProfile([{ kind: "mobility", key: aid.key }, { kind: "transport", modes: [mode.key] }], "A");
+        expect(result.ok && result.profile.mobility).toBe(aid.key);
+        expect(result.ok && result.profile.transport).toEqual([mode.key]);
+      }
+    }
+  });
+
+  it("walking aid maps 1:1 and multi-select transport keeps every pick", () => {
+    expect(WALKING_AID_OPTIONS.map((o) => o.key)).toEqual(["full", "cane", "walker", "wheelchair"]);
+    const result = answersToProfile([{ kind: "mobility", key: "wheelchair" }, { kind: "transport", modes: ["family", "paratransit"] }], "A");
+    expect(result.ok && result.profile.mobility).toBe("wheelchair");
+    expect(result.ok && [...result.profile.transport].sort()).toEqual(["family", "paratransit"]);
+  });
+
+  it("no stairs card or stairs mapping remains in the onboarding source", () => {
+    const src = readFileSync(new URL("./CardDeck.tsx", import.meta.url), "utf8");
+    expect(src).not.toMatch(/stair/i);
+    expect(src).not.toMatch(/\["drive", "walk", "bus"\]|\["bus", "paratransit", "family"\]/);
+  });
+
+  it("walking-aid and transport picks honor the double-tap lockout (no pre-selected answer from a second tap)", () => {
+    const src = readFileSync(new URL("./CardDeck.tsx", import.meta.url), "utf8");
+    const choiceCard = src.slice(src.indexOf("function ChoiceCard"), src.indexOf("function TimeChoices"));
+    expect(choiceCard).toMatch(/onChange=\{\(\) => \{\s*if \(locked\(\)\) return;/);
+    expect(src.match(/locked=\{locked\}/g)).toHaveLength(2);
+    expect(src).toMatch(/const locked = \(\) => inLockout\(lastRecordAt\)/);
+  });
+});
 
 describe("answersToProfile", () => {
   it("maps liked interests only", () => {
-    const profile = answersToProfile(
+    const profile = profileOf(
       [
         { kind: "interest", key: "music", liked: true },
         { kind: "interest", key: "gardening", liked: false },
@@ -17,36 +86,16 @@ describe("answersToProfile", () => {
   });
 
   it("falls back to a safe default when no interests liked", () => {
-    const profile = answersToProfile(
-      [{ kind: "interest", key: "tech", liked: false }],
-      "Harold",
-    );
+    const profile = profileOf([{ kind: "interest", key: "tech", liked: false }], "Harold");
     expect(profile.interests).toEqual(["learning"]);
   });
 
-  it("maps stairs: avoid → walker, hassle → cane, fine → full", () => {
-    const avoid = answersToProfile([{ kind: "mobility", key: "avoid" }], "A");
-    const hassle = answersToProfile([{ kind: "mobility", key: "hassle" }], "B");
-    const fine = answersToProfile([{ kind: "mobility", key: "fine" }], "C");
-    expect(avoid.mobility).toBe("walker");
-    expect(hassle.mobility).toBe("cane");
-    expect(fine.mobility).toBe("full");
-  });
-
-  it("derives transport from mobility answer", () => {
-    const walker = answersToProfile([{ kind: "mobility", key: "avoid" }], "A");
-    expect(walker.transport).toEqual(["bus", "paratransit", "family"]);
-    const full = answersToProfile([{ kind: "mobility", key: "fine" }], "C");
-    expect(full.transport).toEqual(["drive", "walk", "bus"]);
-  });
-
   it("maps travel bucket into maxTravelMin", () => {
-    const profile = answersToProfile([{ kind: "travel", min: 15 }], "A");
-    expect(profile.maxTravelMin).toBe(15);
+    expect(profileOf([{ kind: "travel", min: 15 }], "A").maxTravelMin).toBe(15);
   });
 
   it("collects all picked time slots", () => {
-    const profile = answersToProfile(
+    const profile = profileOf(
       [
         { kind: "times", keys: ["morning", "afternoon"] },
         { kind: "times", keys: ["evening"] },
@@ -56,34 +105,88 @@ describe("answersToProfile", () => {
     expect(profile.times).toEqual(["morning", "afternoon", "evening"]);
   });
 
-  it("falls back to defaults for missing answers", () => {
-    const profile = answersToProfile([], "");
-    expect(profile.maxTravelMin).toBe(30);
-    expect(profile.times).toEqual(["morning", "afternoon"]);
-    expect(profile.budgetPerWeek).toBe(10);
-    expect(profile.name).toBe("Friend");
-    expect(profile.interests).toEqual(["learning"]);
+  it("falls back to defaults for missing optional answers and reports which were defaulted", () => {
+    const result = answersToProfile([WALK, BUS], "");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.defaults).toEqual(["interests", "times", "travel", "budget"]);
+    expect(result.profile.maxTravelMin).toBe(30);
+    expect(result.profile.times).toEqual(["morning", "afternoon"]);
+    expect(result.profile.budgetPerWeek).toBe(10);
+    expect(result.profile.name).toBe("Friend");
+    expect(result.profile.interests).toEqual(["learning"]);
   });
 
   it("always produces a schema-valid Profile", () => {
-    const profile = answersToProfile(
+    const result = answersToProfile(
       [
         { kind: "interest", key: "cooking", liked: true },
         { kind: "times", keys: ["evening"] },
         { kind: "travel", min: 45 },
-        { kind: "mobility", key: "hassle" },
+        { kind: "mobility", key: "cane" },
+        { kind: "transport", modes: ["family", "walk"] },
         { kind: "budget", amount: 25 },
       ],
       "Yihong",
     );
-    expect(Profile.safeParse(profile).success).toBe(true);
-    expect(profile.name).toBe("Yihong" satisfies string);
-    expect(profile.interests.length).toBeGreaterThan(0);
-    expect(profile.transport.length).toBeGreaterThan(0);
-    expect((profile as ProfileType).mobility).toBe("cane");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.defaults).toEqual([]);
+    expect(Profile.safeParse(result.profile).success).toBe(true);
+    expect(result.profile.name).toBe("Yihong");
+    expect(result.profile.mobility).toBe("cane");
+    expect(result.profile.transport).toEqual(["family", "walk"]);
   });
 });
 
+describe("review step", () => {
+  const full: (Answer | null)[] = [
+    ...pickedToHistory(["music"], INTEREST_COUNT),
+    null, // times skipped → default
+    { kind: "travel", min: 15 },
+    { kind: "mobility", key: "walker" },
+    { kind: "transport", modes: ["bus", "family"] },
+    { kind: "budget", amount: 0 },
+  ];
+  const answered = (h: (Answer | null)[]) => h.filter((a): a is Answer => a !== null);
+
+  it("lists every answer in plain words and labels defaults", () => {
+    const rows = reviewRows(answered(full));
+    expect(rows.map((r) => r.field)).toEqual(["interests", "times", "travel", "mobility", "transport", "budget"]);
+    const by = Object.fromEntries(rows.map((r) => [r.field, r]));
+    expect(by.interests).toMatchObject({ value: "Music & singing", isDefault: false });
+    expect(by.times).toMatchObject({ value: "Mornings, Afternoons", isDefault: true });
+    expect(by.travel).toMatchObject({ value: "A short drive (about 15 minutes)", isDefault: false });
+    expect(by.mobility).toMatchObject({ value: "A walker", isDefault: false });
+    expect(by.transport).toMatchObject({ value: "Bus or train, Family or friends drive me", isDefault: false });
+    expect(by.budget).toMatchObject({ value: "Free only ($0 a week)", isDefault: false });
+  });
+
+  it("labels the interests default when nothing was liked", () => {
+    const rows = reviewRows(answered([...pickedToHistory([], INTEREST_COUNT), WALK, BUS]));
+    expect(rows[0]).toMatchObject({ field: "interests", value: "Learning new things", isDefault: true });
+  });
+
+  it("Change on how you get places swaps only that answer", () => {
+    const transportIndex = full.findIndex((a) => a?.kind === "transport");
+    const changed = replaceAnswer(full, transportIndex, { kind: "transport", modes: ["drive"] });
+    expect(changed).toHaveLength(full.length);
+    changed.forEach((a, i) => { if (i !== transportIndex) expect(a).toBe(full[i]); });
+    const result = answersToProfile(answered(changed), "A");
+    expect(result.ok && result.profile.transport).toEqual(["drive"]);
+    expect(result.ok && result.profile.mobility).toBe("walker");
+    expect(result.ok && result.profile.maxTravelMin).toBe(15);
+    expect(result.ok && result.profile.budgetPerWeek).toBe(0);
+  });
+
+  it("Change on interests keeps every later answer", () => {
+    const changed = replaceInterests(full, ["gardening", "faith"]);
+    expect(changed.slice(INTEREST_COUNT)).toEqual(full.slice(INTEREST_COUNT));
+    const result = answersToProfile(answered(changed), "A");
+    expect(result.ok && [...result.profile.interests].sort()).toEqual(["faith", "gardening"]);
+    expect(result.ok && result.profile.transport).toEqual(["bus", "family"]);
+  });
+});
 
 describe("swipeDirection", () => {
   it("commits at 48px in either direction", () => {
@@ -107,7 +210,7 @@ describe("undoAnswer", () => {
     const result = undoAnswer(history);
     expect(result).toEqual([history[0]]);
     expect(history).toHaveLength(2);
-    expect(answersToProfile(result.filter((a): a is Answer => a !== null), "A").budgetPerWeek).toBe(10);
+    expect(profileOf(result, "A").budgetPerWeek).toBe(10);
   });
   it("undoes a skipped card without removing the preceding answer", () => {
     const answer: Answer = { kind: "interest", key: "music", liked: true };
@@ -116,7 +219,7 @@ describe("undoAnswer", () => {
   it("allows an undone answer to be replaced without retaining the old value", () => {
     const history: Answer[] = [{ kind: "travel", min: 90 }];
     const revised = [...undoAnswer(history), { kind: "travel", min: 15 } as Answer];
-    expect(answersToProfile(revised.filter((a): a is Answer => a !== null), "A").maxTravelMin).toBe(15);
+    expect(profileOf(revised, "A").maxTravelMin).toBe(15);
   });
 });
 
@@ -130,7 +233,7 @@ describe("easier view interest grid", () => {
     const history = pickedToHistory(["tech", "gardening", "faith"], INTEREST_COUNT);
     expect(history).toHaveLength(INTEREST_COUNT);
     expect(history.every((a) => a.kind === "interest")).toBe(true);
-    const profile = answersToProfile([...history, { kind: "times", keys: ["evening"] }], "Rosa");
+    const profile = profileOf([...history, { kind: "times", keys: ["evening"] }], "Rosa");
     expect([...profile.interests].sort()).toEqual(["faith", "gardening", "tech"]);
     expect(Profile.safeParse(profile).success).toBe(true);
   });
@@ -138,7 +241,7 @@ describe("easier view interest grid", () => {
   it("allows zero picks and falls back to the learning default", () => {
     const history = pickedToHistory([], INTEREST_COUNT);
     expect(history).toHaveLength(INTEREST_COUNT);
-    expect(answersToProfile(history, "A").interests).toEqual(["learning"]);
+    expect(profileOf(history, "A").interests).toEqual(["learning"]);
   });
 
   it("round-trips picks so Back to the grid keeps selections", () => {
@@ -156,7 +259,7 @@ describe("easier view interest grid", () => {
     const back = pickedToHistory(toggleKey(seeded, "crafts"), swiped.length);
     // crafts is card 5, so the swipe deck resumes after it with nothing lost
     expect(back).toHaveLength(5);
-    expect(answersToProfile(back, "A").interests).toEqual(["music", "crafts"]);
+    expect(profileOf(back, "A").interests).toEqual(["music", "crafts"]);
   });
 });
 
