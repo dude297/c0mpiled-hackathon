@@ -1,5 +1,12 @@
 @AGENTS.md
 
+<!-- P0: CLAUDE/OPUS PARALLEL EXECUTION PRIORITY -->
+## DayBridge Opus: Launch independent subagents aggressively
+
+**Before implementation, read `docs/daybridge/OPUS_SUBAGENT_ADDENDUM.md`.** When the environment supports subagents, delegate independent coordination workstreams **early and concurrently**: state machine, approval policy, event/idempotency, API boundary, adversarial unit tests, and a read-only critical review. Freeze a minimal typed contract and assign **one owner per file** first. The primary Opus agent retains contract ownership, integration, tests, and PR responsibility. Do not let subagents edit UI, real-data/provider integrations, local AI, Supabase, GLM simulation, or GPT Work docs. If subagents are unavailable, report this rather than pretending to spawn them. Optimize for a verified offline P0 loop; no deployments or main pushes.
+
+<!-- END:OPUS PARALLEL EXECUTION PRIORITY -->
+
 # Project rules (c0mpiled-14)
 
 ## Deployment — CRITICAL
