@@ -1,5 +1,8 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
 import { CalendarHeart, MapPin, TriangleAlert } from "lucide-react";
-import { costLabel } from "@/components/feed/MatchFeed";
+import { costLabel, pendingCalendarReveal } from "@/components/feed/MatchFeed";
 import type { PlanItem } from "@/lib/schema";
 
 export const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -51,11 +54,18 @@ export function weekSummary(items: PlanItem[]): string {
   return `${items.length} ${items.length === 1 ? "outing" : "outings"} · ${costLabel(total)}`;
 }
 
-function Activity({ item, compact }: { item: PlanItem; compact?: boolean }) {
+/** Ids in `now` that weren't in `before` — the blocks that should pop in. */
+export function newlyAdded(before: ReadonlySet<string>, now: readonly string[]): Set<string> {
+  return new Set(now.filter((id) => !before.has(id)));
+}
+
+function Activity({ item, compact, fresh }: { item: PlanItem; compact?: boolean; fresh?: boolean }) {
   const soft = item.barriers.filter((b) => b.severity === "soft");
   const small = compact ? "text-sm" : "text-base";
+  // Pop (outer) and flash (inner) sit on separate elements so the two animations don't override each other.
   return (
-    <div className="min-w-0 break-inside-avoid rounded-xl border bg-card p-2.5 shadow-sm md:p-2">
+    <div className={`min-w-0 break-inside-avoid rounded-xl ${fresh ? "db-pop" : ""}`}>
+    <div className={`min-w-0 break-inside-avoid rounded-xl border bg-card p-2.5 shadow-sm md:p-2 ${fresh ? "db-flash-ok" : ""}`}>
       <p className={`min-w-0 font-semibold leading-snug break-words ${compact ? "text-sm md:text-base" : "text-lg"}`}>{item.name}</p>
       <p className={`mt-1 flex items-start gap-1 text-muted-foreground ${small}`}>
         <MapPin className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
@@ -74,10 +84,30 @@ function Activity({ item, compact }: { item: PlanItem; compact?: boolean }) {
         </p>
       ))}
     </div>
+    </div>
   );
 }
 
 export function WeekCalendar({ items }: { items: PlanItem[] }) {
+  const ids = items.map((i) => i.activityId);
+  const idsKey = ids.join("|");
+  // First mount: pop anything just added from the feed (the Week tab mounts after the tap).
+  // Later renders: pop whatever is new since the last render. Adjust-state-during-render, no timers.
+  const [tracked, setTracked] = useState(() => ({
+    key: idsKey,
+    seen: new Set(ids),
+    fresh: new Set(ids.filter((id) => pendingCalendarReveal.has(id))),
+  }));
+  if (tracked.key !== idsKey) {
+    setTracked({ key: idsKey, seen: new Set(ids), fresh: newlyAdded(tracked.seen, ids) });
+  }
+  const fresh = tracked.fresh;
+  const rootRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    // Only the visible copy (not the print-only one) marks the reveal as shown.
+    if (rootRef.current?.offsetParent) for (const id of fresh) pendingCalendarReveal.delete(id);
+  }, [fresh]);
+
   if (items.length === 0) {
     return (
       <div className="rounded-xl border-2 border-dashed p-8 text-center text-base md:text-lg" role="status">
@@ -91,7 +121,7 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
   const { days, unscheduled } = placeOnWeek(items);
 
   return (
-    <section aria-label="My week" className="text-base md:text-lg">
+    <section ref={rootRef} aria-label="My week" className="text-base md:text-lg">
       {/* Desktop + print: Mon–Sun grid */}
       <table className="hidden w-full table-fixed border-separate border-spacing-1 md:table print:table">
         <caption className="sr-only">My week: activities by day and time of day</caption>
@@ -118,7 +148,7 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
                   <td key={d.day} className={`h-20 rounded-lg align-top ${here.length ? "" : "bg-muted/30"}`}>
                     {here.length ? (
                       <div className="flex flex-col gap-1">
-                        {here.map((i) => <Activity key={i.activityId} item={i} compact />)}
+                        {here.map((i) => <Activity key={i.activityId} item={i} compact fresh={fresh.has(i.activityId)} />)}
                       </div>
                     ) : (
                       <span className="sr-only">Nothing planned</span>
@@ -150,7 +180,7 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
                         <span aria-hidden="true">{SLOT_LABELS[s.slot].emoji} </span>
                         {SLOT_LABELS[s.slot].label}
                       </p>
-                      <Activity item={i} />
+                      <Activity item={i} fresh={fresh.has(i.activityId)} />
                     </li>
                   )),
                 )}
@@ -166,7 +196,7 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
           <ul className="mt-2 grid gap-2 sm:grid-cols-2">
             {unscheduled.map((i) => (
               <li key={i.activityId}>
-                <Activity item={i} />
+                <Activity item={i} fresh={fresh.has(i.activityId)} />
               </li>
             ))}
           </ul>
@@ -174,7 +204,8 @@ export function WeekCalendar({ items }: { items: PlanItem[] }) {
       )}
 
       <p className="mt-3 border-t pt-3 text-center font-medium">
-        {weekSummary(items)}
+        {/* Re-keyed on change so the total pops when an outing is added or removed. */}
+        <span key={weekSummary(items)} className="db-pop inline-block">{weekSummary(items)}</span>
       </p>
     </section>
   );
