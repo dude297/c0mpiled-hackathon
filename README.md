@@ -66,6 +66,15 @@ npm run build
 npm run demo:check
 ```
 
+### Live demo checklist
+
+- Start the production server with demo events and sharing on: `SHARE_STORE=memory DAYBRIDGE_DEMO_EVENTS=1 npx next start -p 3000` (PowerShell: `$env:SHARE_STORE='memory'; $env:DAYBRIDGE_DEMO_EVENTS='1'; npx next start -p 3000`). In production, `/events` returns 403 without the events flag and **Share** returns 503 without `SHARE_STORE=memory`. `npm run dev` has both on.
+- Run `npm run demo:check` against it once before presenting.
+- **Uber/Lyft buttons: tap them on a phone with the app installed.** They open the app with the destination filled in and the pickup set to the phone's location. On desktop, Uber redirects to a generic web page and drops the destination; say "opens the Uber app" rather than expecting a prefilled page. Nothing is booked either way.
+- Uber/Lyft/calendar buttons only appear when venue enrichment finds the venue (`DAYBRIDGE_ENRICH=1` plus `DAYBRIDGE_VENUE_PLACE_IDS` and a Places key). With no place ids set, plan cards show no handoff links, so don't promise them.
+- Sign the demo browser into Google so calendar links skip the sign-in screen.
+- **Analyze** calls live providers when keys are set (about 2 s); on unreliable venue Wi-Fi, use the demo profiles.
+
 The demo smoke check expects the application to be running with simulated coordination enabled; see `scripts/demo-smoke.mjs` for its behavior. Use the default build command, which includes the configured Turbopack stylesheet loader.
 
 ## How it works

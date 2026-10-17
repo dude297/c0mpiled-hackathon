@@ -32,7 +32,8 @@ Invariants that the schema enforces (`.parse` rejects any violation):
 - When there is no data, omit the key. Map values are never `null`.
 
 Rules the schema cannot check (reviewers check these):
-- `pickupLabel` must contain `(demo)` when the pickup is the default demo point. Today that is `"Berkeley Civic Center (demo)"`.
+- Deep links never carry a fixed or personal pickup. Uber links use `pickup=my_location` (the provider app resolves it on-device); Lyft links carry only the destination. Both are built by `rideLinks()` in `src/lib/integrations/ride-links.ts`, with spaces encoded as `%20` (Uber's redirect passes `+` into the app verbatim). `pickupLabel` must therefore say the pickup is chosen in the app, e.g. `"Your location (set in app)"`.
+- The fixed point `Berkeley Civic Center` is used only server-side as the start point for the key-gated Uber fare estimate; any fare shown must be labelled as estimated from that demo point.
 - A fare's provenance is `{ source: "estimate", provider: "uber" }`. A link that has no fare carries the provenance of the coordinates it was built from, which is the venue's (`live`, `google-places`).
 - `source: "live"` only for data actually fetched during this request. Use `"mock"` for canned or seeded values.
 
@@ -90,4 +91,4 @@ Rules the schema cannot check (reviewers check these):
 6. Test: with `DAYBRIDGE_ENRICH=1` and a stubbed `fetch`, `AnalysisResult.parse(await res.json())` passes. Add a timeout case where `timedOut` is `true`.
 7. Delete `docs/integrations/SCHEMA_PROPOSAL.md`, or mark it superseded by this file. Its `EnrichmentSource` enum is replaced by `Provenance`.
 
-Note: `/api/plans` (share) stores a parsed `AnalysisResult`, so once #11 adopts this contract, shared snapshots will include the enrichment fields. They contain no personal data: the pickup is the fixed demo point.
+Note: `/api/plans` (share) stores a parsed `AnalysisResult`, so once #11 adopts this contract, shared snapshots will include the enrichment fields. They contain no personal data: links carry no pickup at all (`pickup=my_location` is resolved by the provider app).
