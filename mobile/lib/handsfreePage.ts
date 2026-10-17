@@ -1,9 +1,9 @@
 // The tiny web page that runs inside the hands-free WebView: front camera → MediaPipe Face
-// Landmarker (loaded at runtime from a pinned CDN, not an npm dependency) → gaze + yaw / tilt →
+// Landmarker (loaded at runtime from a pinned CDN, not an npm dependency) → eye gaze / head roll →
 // the shared dwell logic (HANDSFREE_CORE_JS) → postMessage to React Native:
 //   {type:'status', state, face?, progress?, error?, detail?}
 //   {type:'ready', swapSides:boolean} (native replays the latest selected mode)
-//   {type:'progress', side:'left'|'right'|null, value:0..1, signal:-1..1, zone, mode}
+//   {type:'progress', side:'left'|'right'|null, value:0..1, signal:-1..1, reading, zone, mode}
 //   {type:'answer', liked:boolean, mode}
 // React Native talks back with injectJavaScript: window.__hf.setMode('look'|'tilt'), .recalibrate(), .stop().
 // Nothing leaves the device: frames go from the camera to the on-device model and are never sent or saved.
@@ -20,7 +20,7 @@ export type PageMessage =
   | { type: 'ready'; swapSides: boolean }
   | { type: 'status'; state: 'starting' | 'loading' | 'calibrating' | 'tracking' | 'stopped'; face?: boolean; progress?: number; detail?: string }
   | { type: 'status'; state: 'error'; error: PageError; detail?: string }
-  | { type: 'progress'; side: 'left' | 'right' | null; value: number; signal: number; zone: Zone; mode: Mode }
+  | { type: 'progress'; side: 'left' | 'right' | null; value: number; signal: number; reading: number; zone: Zone; mode: Mode }
   | { type: 'answer'; liked: boolean; mode: Mode };
 
 // Narrow an untrusted postMessage string to a PageMessage (or null).
@@ -39,9 +39,10 @@ export function parsePageMessage(data: string): PageMessage | null {
   if (o.type === 'progress' && (o.side === 'left' || o.side === 'right' || o.side === null)
       && typeof o.value === 'number' && Number.isFinite(o.value)
       && typeof o.signal === 'number' && Number.isFinite(o.signal)
+      && typeof o.reading === 'number' && Number.isFinite(o.reading)
       && (o.zone === 'left' || o.zone === 'center' || o.zone === 'right') && (o.mode === 'look' || o.mode === 'tilt'))
     return { type: 'progress', side: o.side, value: Math.min(1, Math.max(0, o.value)),
-      signal: Math.min(1, Math.max(-1, o.signal)), zone: o.zone, mode: o.mode };
+      signal: Math.min(1, Math.max(-1, o.signal)), reading: o.reading, zone: o.zone, mode: o.mode };
   if (o.type === 'status') {
     if (o.state === 'error') {
       const error = o.error === 'denied' || o.error === 'nocamera' ? o.error : 'load';
@@ -76,10 +77,10 @@ export function buildHandsFreeHtml(mode: Mode): string {
   var running = true, stream = null, landmarker = null, lastVideoTime = -1, errors = 0;
   var vision = null, files = null, delegate = null, switching = false;
   var phase = 'starting', lastFace = null;
-  var baseline = { gaze: 0, yaw: 0, tilt: 0 };
+  var baseline = 0, smoothedLook = 0;
   var calib = null;
   var zone = 'center', dwell = initialDwell();
-  var signal = 0;
+  var signal = 0, reading = 0;
   var sent = {};
   var video = document.getElementById('v');
 
@@ -101,26 +102,29 @@ export function buildHandsFreeHtml(mode: Mode): string {
   }
   function sendProgress(side, value, force) {
     if (!force && side === sent.side && mode === sent.mode && zone === sent.zone
-        && Math.abs(value - sent.value) < 0.03 && Math.abs(signal - sent.signal) < 0.03) return;
-    sent = { type: 'progress', side: side, value: value, signal: signal, zone: zone, mode: mode };
+        && Math.abs(value - sent.value) < 0.03 && Math.abs(signal - sent.signal) < 0.03
+        && Math.abs(reading - sent.reading) < (mode === 'look' ? 0.001 : 0.1)) return;
+    sent = { type: 'progress', side: side, value: value, signal: signal, reading: reading, zone: zone, mode: mode };
     post(sent);
   }
-  function resetDwell() { zone = 'center'; signal = 0; dwell = initialDwell(); sendProgress(null, 0, true); }
+  function resetDwell() { zone = 'center'; signal = 0; reading = 0; smoothedLook = 0; dwell = rearmDwell(); sendProgress(null, 0, true); }
   function rearm() {
-    zone = 'center'; signal = 0;
+    zone = 'center'; signal = 0; reading = 0; smoothedLook = 0;
     dwell = phase === 'tracking' ? rearmDwell() : initialDwell();
     sendProgress(null, 0, true);
   }
   function startCalib() {
     window.__hfLive = true;
-    calib = { gaze: [], yaw: [], tilt: [], ms: 0, last: null, sentAt: 0 };
+    baseline = 0;
+    calib = { values: [], ms: 0, last: null, sentAt: 0 };
     phase = 'calibrating';
     resetDwell();
     post({ type: 'status', state: 'calibrating', face: !!lastFace, progress: 0 });
   }
   function median(a) {
     var s = a.slice().sort(function (x, y) { return x - y; });
-    return s.length ? s[Math.floor(s.length / 2)] : 0;
+    var mid = Math.floor(s.length / 2);
+    return !s.length ? 0 : s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
   }
   function withTimeout(p, ms) {
     return Promise.race([p, new Promise(function (_, rej) { setTimeout(function () { rej(new Error('timed out')); }, ms); })]);
@@ -130,8 +134,9 @@ export function buildHandsFreeHtml(mode: Mode): string {
     setMode: function (m) {
       if ((m !== 'look' && m !== 'tilt') || m === mode) return;
       mode = m;
-      // Wait for the middle before the next answer (don't let a held side fire under the new mode).
-      rearm();
+      // Switch sources immediately; never reuse the other mode's baseline or EMA history.
+      if (running && (phase === 'tracking' || phase === 'calibrating')) startCalib();
+      else rearm();
     },
     setSwapSides: function (swap) {
       if (typeof swap !== 'boolean' || swap === swapSides) return;
@@ -154,7 +159,7 @@ export function buildHandsFreeHtml(mode: Mode): string {
       if (calib) calib.last = null;
       if (phase === 'tracking') {
         var r0 = stepDwell(dwell, null, now, TUNING[mode].dwellMs, TUNING.rearmMs);
-        dwell = r0.state; zone = 'center'; signal = 0;
+        dwell = r0.state; zone = 'center'; signal = 0; reading = 0; smoothedLook = 0;
         sendProgress(null, 0);
       }
       return;
@@ -165,15 +170,14 @@ export function buildHandsFreeHtml(mode: Mode): string {
     for (var i = 0; i < cats.length; i++) bs[cats[i].categoryName] = cats[i].score;
     var gaze = gazeFromBlendshapes(bs);
     var aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 1;
-    var yaw = yawFromLandmarks(lm[1], lm[33], lm[263], aspect);
-    var tilt = tiltFromLandmarks(lm[33], lm[263], aspect);
+    var raw = mode === 'look' ? gaze : tiltFromLandmarks(lm[33], lm[263], aspect);
 
     if (phase === 'calibrating') {
-      calib.gaze.push(gaze); calib.yaw.push(yaw); calib.tilt.push(tilt);
+      calib.values.push(raw);
       if (calib.last !== null) calib.ms += Math.min(now - calib.last, 100);
       calib.last = now;
       if (calib.ms >= TUNING.calibrateMs) {
-        baseline = { gaze: median(calib.gaze), yaw: median(calib.yaw), tilt: median(calib.tilt) };
+        baseline = median(calib.values);
         calib = null;
         phase = 'tracking';
         resetDwell();
@@ -186,11 +190,22 @@ export function buildHandsFreeHtml(mode: Mode): string {
     }
     if (phase !== 'tracking') return;
     var cfg = TUNING[mode];
-    var v = mode === 'look' ? lookFromSignals(gaze, yaw, baseline) : tilt - baseline.tilt;
+    var v = raw - baseline;
+    if (mode === 'look') {
+      smoothedLook = smoothLook(lookFromSignals(gaze, baseline), smoothedLook);
+      v = smoothedLook;
+    }
     if (swapSides) v = -v;
+    reading = v;
     signal = clamp(v / cfg.threshold, -1, 1);
     zone = classify(v, zone, cfg.threshold, cfg.hysteresis);
-    var r = stepDwell(dwell, zone, now, cfg.dwellMs, TUNING.rearmMs);
+    var dwellZone = zone;
+    // EMA can linger in the middle after the eyes have already left it. Do not count that
+    // filter lag toward the center gate: both current eyes and the smoothed zone must center.
+    if (mode === 'look' && dwell.needsCenter && Math.abs(raw - baseline) > cfg.threshold - cfg.hysteresis) {
+      dwellZone = (swapSides ? baseline - raw : raw - baseline) > 0 ? 'right' : 'left';
+    }
+    var r = stepDwell(dwell, dwellZone, now, cfg.dwellMs, TUNING.rearmMs);
     dwell = r.state;
     if (r.fired) {
       sendProgress(r.fired, 1, true);
