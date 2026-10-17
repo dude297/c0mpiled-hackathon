@@ -13,16 +13,17 @@ export type RideshareInfo = {
   estimate?: { fareLow: number; fareHigh: number; currency: string; source: "uber" } | null;
 } | null;
 
-// Berkeley Civic Center as the default pickup; a real deployment would use the
-// rider's address from the profile/lead's intake step.
+// Berkeley Civic Center as the demo pickup. Honest labeling: the pickup is a fixed demo
+// point, not the user's home, and a deep link is a handoff to tap — not a booking.
 const DEFAULT_ORIGIN = { lat: 37.8715, lon: -122.273 };
+const ORIGIN_LABEL = "Berkeley Civic Center (demo)";
 
 function uberDeepLink(name: string, lat: number, lon: number): string {
   const params = new URLSearchParams({
     action: "setPickup",
     "pickup[latitude]": String(DEFAULT_ORIGIN.lat),
     "pickup[longitude]": String(DEFAULT_ORIGIN.lon),
-    "pickup[nickname]": "Home",
+    "pickup[nickname]": ORIGIN_LABEL,
     "dropoff[latitude]": String(lat),
     "dropoff[longitude]": String(lon),
     "dropoff[nickname]": name,
@@ -85,13 +86,13 @@ async function uberEstimate(lat: number, lon: number): Promise<FareEstimate> {
   }
 }
 
-// Builds rideshare info for one plan item using the venue's coordinates
-// (from the Places enrichment) or falling back to the venue name only.
+// Builds rideshare info for one plan item. Without verified venue coordinates we skip
+// the links entirely rather than aiming a real venue name at a made-up location.
 export async function rideshareFor(item: PlanItem, coords: VenueCoords, venueName: string): Promise<RideshareInfo> {
-  const lat = coords?.lat ?? DEFAULT_ORIGIN.lat + 0.01;
-  const lon = coords?.lon ?? DEFAULT_ORIGIN.lon + 0.01;
+  if (!coords) return null;
+  const { lat, lon } = coords;
   const label = venueName || item.name;
-  const estimate = coords ? await uberEstimate(lat, lon) : null;
+  const estimate = await uberEstimate(lat, lon);
   return {
     uberLink: uberDeepLink(label, lat, lon),
     lyftLink: lyftDeepLink(label, lat, lon),

@@ -20,12 +20,15 @@ export async function POST(req: Request) {
   });
 
   const base: AnalysisResult = { ...output, explanation, dataSource: ai.name };
-  // Additive enrichment: venue data, weather, rideshare, extra evidence. All fail soft.
-  // Integrations can be disabled wholesale for tests/offline demos via DAYBRIDGE_DISABLE_ENRICHMENT=1.
-  if (process.env.DAYBRIDGE_DISABLE_ENRICHMENT === "1") {
+  // Enrichment is opt-in per DECISIONS.md: DAYBRIDGE_ENRICH=1 enables it with a total
+  // time budget of 2.5 s. Tests/offline demos simply leave it unset.
+  if (process.env.DAYBRIDGE_ENRICH !== "1") {
     return Response.json(base);
   }
-  const { venueByItem, weather, evidence, rideshareByItem } = await enrichResult(base);
+  const { venueByItem, weather, evidence, rideshareByItem } = await Promise.race([
+    enrichResult(base),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), 2500)),
+  ]).then((r) => r ?? { venueByItem: {}, weather: null, evidence: base.evidence, rideshareByItem: {} });
   const result: AnalysisResult = { ...base, evidence };
   return Response.json({ ...result, venueByItem, weather, rideshareByItem });
 }

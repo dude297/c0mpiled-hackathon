@@ -114,16 +114,19 @@ export async function enrichResult(result: {
   ]);
   const venueByItem = new Map<string, VenueInfo | null>();
   result.plan.forEach((i, idx) => venueByItem.set(i.activityId, venues[idx] ?? null));
+  // Estimates run in parallel — sequential awaits would cost up to 4 s per item against the 2.5 s budget.
   const rideshareByItem: Record<string, Awaited<ReturnType<typeof rideshareFor>>> = {};
-  for (let idx = 0; idx < result.plan.length; idx++) {
-    const item = result.plan[idx];
-    const venue = venues[idx];
-    rideshareByItem[item.activityId] = await rideshareFor(
-      item,
-      venue?.lat != null && venue?.lon != null ? { lat: venue.lat, lon: venue.lon } : null,
-      venue?.name ?? item.name,
-    );
-  }
+  const rides = await Promise.all(
+    result.plan.map((item, idx) => {
+      const venue = venues[idx];
+      return rideshareFor(
+        item,
+        venue?.lat != null && venue?.lon != null ? { lat: venue.lat, lon: venue.lon } : null,
+        venue?.name ?? item.name,
+      );
+    }),
+  );
+  result.plan.forEach((item, idx) => { rideshareByItem[item.activityId] = rides[idx] ?? null; });
   // Google's accessibilityOptions are crowd-sourced: report as unconfirmed, never as verified.
   const evidence = [...result.evidence];
   for (const v of venueByItem.values()) {
