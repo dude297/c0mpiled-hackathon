@@ -101,5 +101,5 @@ describe("#28: coordination agrees with analyze (generic family ride)", () => {
               }
     expect(checked).toBeGreaterThan(10_000);
     expect(failures.slice(0, 5)).toEqual([]);
-  });
+  }, 60_000); // >10k synthetic cases; ~3-6 s, slower under load
 });
