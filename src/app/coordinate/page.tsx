@@ -102,9 +102,8 @@ function CoordinateInner() {
   const apply = useCallback((r: CommandResult) => {
     setPlan(r.plan);
     setNotice(r.outcome === "applied" ? null : `${r.outcome}${r.reason ? `: ${r.reason}` : ""}`);
-    if (r.outcome === "applied" || r.outcome === "duplicate") {
-      for (const e of r.events) setEvents((prev) => [...prev, e]);
-    }
+    // append every event the server emitted — ignored/rejected entries belong on the timeline too
+    for (const e of r.events) setEvents((prev) => [...prev, e]);
   }, []);
 
   const command = useCallback(async (body: unknown) => {
@@ -334,7 +333,7 @@ function CoordinateInner() {
         </Card>
       )}
 
-      {(plan.state === "AWAITING_APPROVAL" || plan.state === "NEEDS_REPLAN" || plan.state === "BLOCKED") && awaiting.length > 0 && (
+      {plan.state === "AWAITING_APPROVAL" && awaiting.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-xl">Your approval, action by action</CardTitle>
@@ -444,6 +443,11 @@ function CoordinateInner() {
                 </div>
               </div>
             ))}
+            {plan.preferencePatches.length === 0 && (
+              <p className="text-sm text-muted-foreground md:text-base">
+                No change needed — their preferences already cover this.
+              </p>
+            )}
             {plan.preferencePatches.some((p) => p.status === "applied") && (
               <p className="text-sm text-muted-foreground md:text-base">Preference updated (profile v{plan.profileVersion}).</p>
             )}
@@ -461,13 +465,14 @@ function CoordinateInner() {
             {(() => {
               const invite = canSimulate("invite");
               const ride = canSimulate("ride");
+              const inviteName = invite ? contactName(plan, invite.scope.recipientId) : "";
               return (
                 <>
                   <Button variant="outline" size="lg" disabled={busy || !invite} onClick={() => simulate("invite.accepted", invite!.providerRequestId!)}>
-                    Elaine accepts
+                    {inviteName} accepts
                   </Button>
                   <Button variant="outline" size="lg" disabled={busy || !invite} onClick={() => simulate("invite.declined", invite!.providerRequestId!)}>
-                    Elaine declines
+                    {inviteName} declines
                   </Button>
                   <Button variant="outline" size="lg" disabled={busy || !ride} onClick={() => simulate("ride.confirmed", ride!.providerRequestId!)}>
                     Ride confirmed
