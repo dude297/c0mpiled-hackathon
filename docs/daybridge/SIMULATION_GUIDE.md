@@ -33,6 +33,7 @@ activity catalog, the AI adapter, or the coordination engine internals.
 src/simulation/
   engine-baseline.test.ts     Phase 1: regression + edge-case tests for runScenario/checkActivity
   coordination-sim.test.ts    Phase 2: adversarial provider-event simulation against the coordinator
+  final-regression.test.ts    Final sprint: invariant sweep on the merged coordinator (PR #31)
 ```
 
 ## Phase 1 — engine baseline (done)
@@ -98,3 +99,32 @@ Run everything:
 npx vitest run src/simulation/   # all simulation tests
 npm run check                    # full gate (typecheck + lint + all tests)
 ```
+
+## Final regression sweep (PR #31, merged)
+
+11 tests in `src/simulation/final-regression.test.ts` against the merged coordinator
+on main. All eight release-candidate invariants verified:
+
+| Invariant | Result |
+|---|---|
+| No request before valid consent | ✅ forged events can't authorize dispatch; execute without approvals refused |
+| Expired/revoked consent prevents dispatch | ✅ atomic — one lapsed approval blocks all dispatch |
+| Duplicates never double-send | ✅ 3× execute → 2 provider calls; duplicate callback leaves dep unchanged |
+| Out-of-order/forged events cannot fake READY | ✅ rejected/ignored; invariant holds |
+| Cancellation revokes READY | ✅ closed plan ignores events, rejects commands |
+| Replanning preserves confirmed deps | ✅ invite carried over, never re-sent |
+| Revised actions need fresh approval | ✅ old approval insufficient |
+| Rejected preferences never mutate profile | ✅ reject/unknown/stale/re-confirm paths |
+
+Plus: dispatch-error stays AWAITING_APPROVAL; chaotic replay is deterministic.
+
+## Open items watched by this workstream
+
+- **Issue #28 (P1, owner Opus):** analyze vs coordination feasibility disagreement for
+  no-driver contacts; invite fallback may target the ride driver. A regression test
+  will be added in `src/simulation/` once the planner fix lands.
+- **Cloud persistence (owner Claude 2):** `experiment/daybridge-cloud` has its own
+  store/CAS tests; simulation-side race/replay tests remain blocked on a merged
+  persistent store.
+- **PR #11 integrations (owner Teammate B):** Places/weather adversarial tests with
+  stubbed network will be added when the branch reaches the RC.

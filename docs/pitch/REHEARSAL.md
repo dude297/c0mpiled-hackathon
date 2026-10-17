@@ -16,7 +16,7 @@ Do this 3 times from a fresh browser tab (Cmd+Shift+N). Note every slow/confusin
 6. Click **Get me there →** on a plan card
 7. On `/coordinate`: Accept → approve both cards → Send → simulate "Elaine accepts" + "Ride confirmed" → READY
 8. Simulate "Ride cancelled" → NEEDS_REPLAN → accept → re-approve → re-send → confirm → READY again
-9. Mark attended → "Too crowded" → Confirm patch
+9. Mark attended → "Too far" → Confirm patch (Maya already prefers small groups, so "Too crowded" proposes nothing — use "Too far", 30 → 20 min)
 10. Back on `/`: **Load demo: Harold** — plan differs and makes sense?
 11. Cmd+P print preview — does the plan print cleanly?
 
