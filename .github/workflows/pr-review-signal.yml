@@ -1,0 +1,15 @@
+name: DayBridge review signal
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+# No checkout, token, secrets, artifacts or PR-controlled shell text.
+# A trusted default-branch workflow_run consumer reads current PR state.
+permissions: {}
+jobs:
+  signal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo 'Review activity changed; trusted PR monitor will reconcile GitHub state.'
