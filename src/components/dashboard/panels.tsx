@@ -10,19 +10,19 @@ import { Interest, Mobility, TimeSlot, Transport, type AnalysisResult, type Prof
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto w-full max-w-6xl p-6 text-base md:text-lg">
-      <header className="mb-6">
-        <h1 className="flex items-center gap-2 text-4xl font-semibold">
-          <Sparkles className="size-8 text-primary" aria-hidden="true" />
+    <div className="mx-auto w-full max-w-3xl p-4 text-base md:p-6 md:text-lg">
+      <header className="mb-5">
+        <h1 className="flex items-center gap-2 text-3xl font-semibold">
+          <Sparkles className="size-7 text-primary" aria-hidden="true" />
           DayBridge
         </h1>
-        <p className="mt-1 max-w-3xl text-lg text-muted-foreground md:text-xl">
-          Tell us about them. We build a weekly social plan that fits their interests and works around real-life barriers — stairs, buses, budgets, hearing.
+        <p className="mt-1 text-lg text-muted-foreground md:text-xl">
+          A weekly social plan that fits their life — in one click.
         </p>
       </header>
-      <div className="grid gap-4 md:grid-cols-2">{children}</div>
+      <div className="flex flex-col gap-4">{children}</div>
       <footer className="mt-8 text-center text-sm text-muted-foreground print:hidden">
-        DayBridge — weekly social plans for older adults. Explanations marked “mock AI” are canned; live AI comes from a real model.
+        Explanations marked “mock AI” are canned; live AI comes from a real model.
       </footer>
     </div>
   );
@@ -68,15 +68,15 @@ export function ProfilePanel(props: {
 }) {
   const p = props.value;
   const set = <K extends keyof Profile>(k: K, v: Profile[K]) => props.onChange({ ...p, [k]: v });
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const hasResult = props.hasResult;
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-xl">Who are we planning for?</CardTitle>
+      <CardHeader className="flex flex-row items-center justify-between gap-2">
+        <CardTitle className="text-xl">{hasResult ? "Change who we're planning for" : "Who are we planning for?"}</CardTitle>
         {hasResult && (
-          <Button variant="ghost" size="sm" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls="profile-fields">
-            {open ? "Hide" : "Edit"} profile
+          <Button variant="outline" size="sm" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls="profile-fields">
+            {open ? "Close" : "Edit"}
             <ChevronDown className={`transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true" />
           </Button>
         )}
@@ -119,7 +119,7 @@ export function ProfilePanel(props: {
             Prefers small groups
           </label>
         </div>
-        <Button className="w-full sm:w-auto" size="xl" onClick={props.onSubmit} disabled={props.loading}>
+        <Button className="w-full" size="xl" onClick={props.onSubmit} disabled={props.loading}>
           {props.loading ? (
             <>
               <LoaderCircle className="animate-spin" aria-hidden="true" />
@@ -155,7 +155,7 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
     }
   }
   return (
-    <Card className="md:col-span-2 ring-primary/30">
+    <Card className="ring-primary/30">
       <CardHeader>
         <CardTitle className="flex flex-wrap items-center gap-2 text-2xl">
           <Calendar className="size-6 text-primary" aria-hidden="true" />
@@ -166,11 +166,6 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
             </Badge>
           )}
         </CardTitle>
-        {!result && !loading && (
-          <CardDescription className="text-base md:text-lg">
-            Load a demo or fill the profile, then build a plan. It appears here.
-          </CardDescription>
-        )}
       </CardHeader>
       <CardContent className="space-y-4 text-base md:text-lg">
         {loading && !result ? (
@@ -179,15 +174,17 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
             Building the plan…
           </div>
         ) : !result ? (
-          <div className="rounded-lg border border-dashed p-6 text-center text-muted-foreground">
-            <p className="font-medium">No plan yet</p>
-            <p className="mt-1 text-sm md:text-base">Click “Load demo: Margaret” above to see an example in one click.</p>
+          <div className="rounded-xl border-2 border-dashed p-8 text-center">
+            <p className="text-lg font-semibold">No plan yet</p>
+            <p className="mt-1 text-base text-muted-foreground">
+              Pick a demo above and hit Build plan — it takes one click.
+            </p>
           </div>
         ) : result.plan.length === 0 ? (
-          <div className="rounded-lg border border-dashed p-6 text-center" role="status">
-            <p className="font-semibold">Nothing fit this week’s constraints.</p>
-            <p className="mt-1 text-sm text-muted-foreground md:text-base">
-              Try widening travel time, raising the budget, or adding a way to get there — see the reasons below.
+          <div className="rounded-xl border-2 border-dashed p-8 text-center" role="status">
+            <p className="text-lg font-semibold">Nothing fit this week.</p>
+            <p className="mt-1 text-base text-muted-foreground">
+              Try more travel time, a bigger budget, or another way to get there — reasons below.
             </p>
           </div>
         ) : (
@@ -200,7 +197,7 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
                 </span>
               ))}
             </div>
-            <ul className="grid gap-3 lg:grid-cols-2">
+            <ul className="grid gap-3">
               {result.plan.map((i) => (
                 <li key={i.activityId} className="rounded-xl border bg-card p-4 shadow-sm">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -224,10 +221,7 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
               ))}
             </ul>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="font-medium">Why this plan?</p>
-                <p className="text-sm text-muted-foreground md:text-base">{result.explanation}</p>
-              </div>
+              <p className="max-w-md text-base text-muted-foreground md:text-lg">{result.explanation}</p>
               <div className="flex items-center gap-2 print:hidden">
                 <Button variant="outline" size="lg" onClick={() => window.print()}>
                   <Printer aria-hidden="true" />
@@ -250,20 +244,15 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
 
 export function BlockedPanel({ result }: { result: AnalysisResult | null }) {
   return (
-    <Card className="md:col-span-2">
+    <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-xl">
           <Ban className="size-5 text-destructive" aria-hidden="true" />
           Why not these?
         </CardTitle>
-        {result && result.blocked.length > 0 && (
-          <CardDescription className="text-sm md:text-base">
-            These didn’t make the plan. Each red reason is the hard barrier — what would need to change for it to work.
-          </CardDescription>
-        )}
       </CardHeader>
       <CardContent className="space-y-3 text-base md:text-lg">
-        {!result ? <p className="text-muted-foreground">Blocked activities appear here after a plan is built.</p> :
+        {!result ? <p className="text-muted-foreground">Reasons appear here after a plan is built.</p> :
           !result.blocked.length ? (
             <p className="flex items-center gap-2 text-muted-foreground">
               <ShieldCheck className="size-5 text-green-700 dark:text-green-400" aria-hidden="true" />
@@ -291,7 +280,7 @@ export function BlockedPanel({ result }: { result: AnalysisResult | null }) {
 
 export function EvidencePanel({ result }: { result: AnalysisResult | null }) {
   return (
-    <Card className="md:col-span-2">
+    <Card>
       <CardContent>
         <details>
           <summary className="flex min-h-11 cursor-pointer items-center gap-2 font-medium">
@@ -338,7 +327,7 @@ export function IntakeSlot({ onIntake }: { onIntake: (text: string) => Promise<v
     }
   }
   return (
-    <Card className="md:col-span-2">
+    <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-xl">
           <Users className="size-5 text-primary" aria-hidden="true" />

@@ -64,10 +64,10 @@ export default function Home() {
 
   return (
     <DashboardShell>
-      <IntakeSlot onIntake={intake} />
-      <ProfilePanel value={profile} onChange={setProfile} onSubmit={() => run()} onDemo={demo} loading={loading} error={error} hasResult={result !== null} />
       <PlanPanel result={result} loading={loading} onSave={savePlan} />
       <BlockedPanel result={result} />
+      <IntakeSlot onIntake={intake} />
+      <ProfilePanel value={profile} onChange={setProfile} onSubmit={() => run()} onDemo={demo} loading={loading} error={error} hasResult={result !== null} />
       <EvidencePanel result={result} />
     </DashboardShell>
   );
