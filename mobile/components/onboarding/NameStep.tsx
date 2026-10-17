@@ -1,39 +1,76 @@
-// First screen: name + the prominent "how do you want to answer" choice (swipe vs easier view).
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+// First screen: sample-person demos, name, and all three ways to answer (swipe / easier view / hands-free).
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { colors, radius, space, tap, type } from '@/lib/theme';
 
-import { OptionRow, PillButton, s as ui } from './ui';
+import { PillButton, s as ui } from './ui';
+
+export type AnswerMode = 'swipe' | 'easy' | 'hands';
+export type DemoKey = 'margaret' | 'harold';
+
+type IconName = keyof typeof Ionicons.glyphMap;
+
+const MODES: { key: AnswerMode; icon: IconName; label: string; detail: string }[] = [
+  { key: 'swipe', icon: 'albums-outline', label: 'Swipe cards', detail: 'One idea at a time. Swipe or tap No / Yes.' },
+  { key: 'easy', icon: 'grid-outline', label: 'Easier view (big tiles)', detail: 'See every idea at once. Tap the ones you like.' },
+  { key: 'hands', icon: 'eye-outline', label: 'Hands-free (eye tracker)', detail: 'Look or tilt your head toward No or Yes.' },
+];
+
+const DEMOS: { key: DemoKey; label: string }[] = [
+  { key: 'margaret', label: 'Demo: Margaret' },
+  { key: 'harold', label: 'Demo: Harold' },
+];
 
 export function NameStep({
   name,
   onName,
-  easy,
-  onEasy,
+  mode,
+  onMode,
   onStart,
+  onDemo,
+  busy,
   bottomInset,
 }: {
   name: string;
   onName: (v: string) => void;
-  easy: boolean;
-  onEasy: (v: boolean) => void;
+  mode: AnswerMode;
+  onMode: (m: AnswerMode) => void;
   onStart: () => void;
+  onDemo: (key: DemoKey) => void;
+  busy?: boolean;
   bottomInset: number;
 }) {
   return (
     <View style={{ flex: 1 }}>
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={st.content}>
-        <Text accessibilityRole="header" style={[type.display, { color: colors.text }]}>
+        <Text accessibilityRole="header" style={[type.title, { color: colors.text }]}>
           Let&apos;s find things you&apos;ll love
         </Text>
-        <Text style={[type.body, { color: colors.textMuted }]}>A few quick questions. About two minutes.</Text>
 
-        <View style={{ gap: space.sm }}>
-          <Text style={[type.label, { color: colors.text }]}>What should we call you?</Text>
+        <View style={st.demos}>
+          {DEMOS.map((d) => (
+            <Pressable
+              key={d.key}
+              accessibilityRole="button"
+              accessibilityLabel={`${d.label}, sample person`}
+              accessibilityHint="Skips the questions and shows matches for this sample person"
+              aria-disabled={!!busy}
+              disabled={busy}
+              onPress={() => onDemo(d.key)}
+              style={({ pressed }) => [st.demo, busy && ui.disabled, pressed && ui.pressed]}>
+              <Text style={[type.button, { color: colors.onPrimary }]}>{d.label}</Text>
+              <Text style={st.demoSub}>Sample person</Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <View style={{ gap: space.xs }}>
+          <Text style={[type.label, { color: colors.text }]}>Or answer yourself. What should we call you?</Text>
           <TextInput
             value={name}
             onChangeText={onName}
-            placeholder="Margaret"
+            placeholder="Your first name"
             placeholderTextColor={colors.textMuted}
             maxLength={60}
             autoCapitalize="words"
@@ -45,37 +82,55 @@ export function NameStep({
           />
         </View>
 
-        <View style={{ gap: space.sm }}>
-          <Text accessibilityRole="header" style={[type.heading, { color: colors.text }]}>How would you like to answer?</Text>
-          <View accessibilityRole="radiogroup" style={{ gap: space.md }}>
-            <OptionRow
-              icon="albums-outline"
-              label="Swipe cards"
-              detail="One idea at a time. Swipe right for yes, left for no, or tap the buttons."
-              selected={!easy}
-              onPress={() => onEasy(false)}
-            />
-            <OptionRow
-              icon="grid-outline"
-              label="Easier view"
-              detail="See every idea at once and tap the ones you like. No swiping."
-              selected={easy}
-              onPress={() => onEasy(true)}
-            />
+        <View style={{ gap: space.xs }}>
+          <Text accessibilityRole="header" style={[type.label, { color: colors.text }]}>How would you like to answer?</Text>
+          <View accessibilityRole="radiogroup" style={{ gap: space.sm }}>
+            {MODES.map((m) => {
+              const on = m.key === mode;
+              const fg = on ? colors.onTileSelected : colors.text;
+              return (
+                <Pressable
+                  key={m.key}
+                  accessibilityRole="radio"
+                  aria-checked={on}
+                  accessibilityLabel={`${m.label}, ${m.detail}`}
+                  onPress={() => onMode(m.key)}
+                  style={({ pressed }) => [st.mode, on && st.modeOn, pressed && ui.pressed]}>
+                  <Ionicons name={m.icon} size={26} color={fg} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[st.modeLabel, { color: fg }]}>{m.label}</Text>
+                    <Text style={[st.modeHint, { color: on ? colors.onTileSelected : colors.textMuted }]}>{m.detail}</Text>
+                  </View>
+                  <Ionicons name={on ? 'checkmark-circle' : 'ellipse-outline'} size={26} color={fg} />
+                </Pressable>
+              );
+            })}
           </View>
         </View>
       </ScrollView>
       <View style={[ui.footer, { paddingBottom: bottomInset + space.md }]}>
-        <PillButton label="Start" icon="arrow-forward" onPress={onStart} style={{ flex: 1 }} />
+        <PillButton label="Start" icon="arrow-forward" onPress={onStart} disabled={busy} style={{ flex: 1 }} />
       </View>
     </View>
   );
 }
 
 const st = StyleSheet.create({
-  content: { padding: space.md, gap: space.lg },
-  input: {
+  content: { padding: space.md, gap: space.md },
+  demos: { flexDirection: 'row', gap: space.sm },
+  demo: {
+    flex: 1,
     minHeight: tap.min + 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: space.sm,
+    paddingHorizontal: space.xs,
+    borderRadius: radius.lg,
+    backgroundColor: colors.primary,
+  },
+  demoSub: { fontSize: 15, lineHeight: 18, fontWeight: '500', color: colors.onPrimary },
+  input: {
+    minHeight: tap.min,
     fontSize: 22,
     color: colors.text,
     backgroundColor: colors.surface,
@@ -84,4 +139,19 @@ const st = StyleSheet.create({
     borderRadius: radius.md,
     paddingHorizontal: space.md,
   },
+  mode: {
+    minHeight: tap.min,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderRadius: radius.lg,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.tile,
+  },
+  modeOn: { backgroundColor: colors.tileSelected, borderColor: colors.tileSelected },
+  modeLabel: { fontSize: 19, lineHeight: 24, fontWeight: '600' },
+  modeHint: { fontSize: 15, lineHeight: 20 },
 });

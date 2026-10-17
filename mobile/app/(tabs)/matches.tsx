@@ -2,19 +2,21 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Text, View } from 'react-native';
 
 import { ActivityCard } from '@/components/dashboard/ActivityCard';
-import { BigButton, Collapsible, ResultGate, Screen, styles, useChangeAnswers } from '@/components/dashboard/ui';
+import { BigButton, Collapsible, ResultGate, Screen, styles, useChangeAnswers, useReason } from '@/components/dashboard/ui';
+import { summaryText } from '@/lib/copy';
 import { useApp } from '@/lib/store';
 import { colors, space, type } from '@/lib/theme';
 
 export default function Matches() {
-  const { added, toggleAdded } = useApp();
+  const { added, toggleAdded, firstName } = useApp();
+  const reason = useReason();
   const changeAnswers = useChangeAnswers();
   return (
     <Screen title="Matches">
       <ResultGate>
         {(result) => (
           <>
-            <Text style={[type.bodyStrong, { color: colors.text, fontSize: 20, lineHeight: 28 }]}>{result.summary}</Text>
+            <Text style={[type.bodyStrong, { color: colors.text, fontSize: 20, lineHeight: 28 }]}>{summaryText(result.plan.length, firstName)}</Text>
 
             {result.plan.length === 0 ? (
               <View style={[styles.card, { alignItems: 'center' }]} accessibilityLiveRegion="polite">
@@ -47,12 +49,15 @@ export default function Matches() {
                     <Text style={[type.heading, { color: colors.text }]}>{b.name}</Text>
                     {b.barriers
                       .filter((x) => x.severity === 'hard')
-                      .map((x) => (
-                        <View key={x.rule} style={styles.metaRow} accessible accessibilityLabel={`Blocked: ${x.detail}`}>
-                          <Ionicons name="close-circle" size={24} color={colors.hard} style={{ marginTop: 1 }} />
-                          <Text style={[type.bodyStrong, { color: colors.hard, flex: 1 }]}>{x.detail}</Text>
-                        </View>
-                      ))}
+                      .map((x) => {
+                        const text = reason(x.rule, x.detail, false, { name: b.name });
+                        return (
+                          <View key={x.rule} style={styles.metaRow} accessible accessibilityLabel={`Blocked: ${text}`}>
+                            <Ionicons name="close-circle" size={24} color={colors.hard} style={{ marginTop: 1 }} />
+                            <Text style={[type.bodyStrong, { color: colors.hard, flex: 1 }]}>{text}</Text>
+                          </View>
+                        );
+                      })}
                   </View>
                 ))
               )}

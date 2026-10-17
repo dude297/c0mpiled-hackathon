@@ -7,6 +7,8 @@ import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, V
 import { useReducedMotion } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ACTIVITIES } from '@/domain/activities';
+import { provenanceCopy, reasonText } from '@/lib/copy';
 import type { AnalysisResult } from '@/lib/schema';
 import { useApp, type ResultSource } from '@/lib/store';
 import { colors, radius, space, tap, type } from '@/lib/theme';
@@ -27,33 +29,63 @@ export function useChangeAnswers() {
   };
 }
 
-/** Honest provenance: where the plan was computed + whether the words came from a real model. */
-export function ProvenancePill({ source, dataSource }: { source: ResultSource | null; dataSource: AnalysisResult['dataSource'] }) {
-  const onDevice = source !== 'server';
-  const ai = dataSource === 'live' ? 'live AI' : 'mock AI';
-  const text = onDevice ? `On-device · ${ai}` : `Server · ${ai}`;
+/** Plain-language reason for one engine check, using what we know about the activity and the person. */
+export function useReason() {
+  const { firstName, profile } = useApp();
+  return (rule: string, detail: string, ok: boolean, by: { id?: string; name?: string }) => {
+    const activity = ACTIVITIES.find((a) => (by.id ? a.id === by.id : a.name === by.name)) ?? null;
+    return reasonText(rule, detail, ok, { name: firstName, profile, activity });
+  };
+}
+
+/**
+ * Honest provenance, always visible: a short pill (icon = where it ran, words = what wrote the
+ * explanation). Tap for the full sentence. Short enough to never truncate at 375–430pt.
+ */
+export function ProvenancePill({
+  source,
+  dataSource,
+  open,
+  onToggle,
+}: {
+  source: ResultSource | null;
+  dataSource: AnalysisResult['dataSource'];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const { label, info } = provenanceCopy(source, dataSource);
   return (
-    <View
-      accessible
-      accessibilityRole="text"
-      accessibilityLabel={onDevice ? `Worked out on this phone. Explanation is ${ai}.` : `Worked out by the server. Explanation is ${ai}.`}
-      style={styles.pill}>
-      <Ionicons name={onDevice ? 'phone-portrait-outline' : dataSource === 'live' ? 'sparkles-outline' : 'cloud-outline'} size={20} color={colors.text} />
-      <Text style={[type.label, { color: colors.text }]}>{text}</Text>
-    </View>
+    <Pressable
+      onPress={onToggle}
+      accessibilityRole="button"
+      aria-expanded={open}
+      accessibilityLabel={`${label}. ${info}`}
+      accessibilityHint={open ? 'Hides the explanation' : 'Shows what this means'}
+      hitSlop={8}
+      style={({ pressed }) => [styles.pill, pressed && { opacity: 0.85 }]}>
+      <Ionicons name={source === 'server' ? 'cloud-outline' : 'phone-portrait-outline'} size={20} color={colors.text} />
+      <Text style={[type.label, { color: colors.text }]}>{label}</Text>
+      <Ionicons name="information-circle-outline" size={22} color={colors.text} />
+    </Pressable>
   );
 }
 
 /** Safe-area screen with a big title and the provenance pill pinned above the scroll area. */
 export function Screen({ title, children }: { title: string; children: ReactNode }) {
   const { result, source } = useApp();
+  const [info, setInfo] = useState(false);
   return (
     <SafeAreaView edges={['top']} style={styles.screen}>
       <View style={styles.header}>
         <Text accessibilityRole="header" style={[type.title, { color: colors.text, flexShrink: 1 }]}>
           {title}
         </Text>
-        {result && <ProvenancePill source={source} dataSource={result.dataSource} />}
+        {result && <ProvenancePill source={source} dataSource={result.dataSource} open={info} onToggle={() => setInfo((v) => !v)} />}
+        {result && info && (
+          <Text accessibilityLiveRegion="polite" style={[type.body, { color: colors.text, flexBasis: '100%' }]}>
+            {provenanceCopy(source, result.dataSource).info}
+          </Text>
+        )}
       </View>
       <ScrollView contentContainerStyle={styles.scroll}>{children}</ScrollView>
     </SafeAreaView>
@@ -168,6 +200,8 @@ export const styles = StyleSheet.create({
   },
   scroll: { padding: space.md, paddingBottom: space.xxl, gap: space.lg },
   pill: {
+    flexShrink: 0,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs,

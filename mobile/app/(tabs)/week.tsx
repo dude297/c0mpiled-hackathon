@@ -4,6 +4,7 @@ import { Text, View } from 'react-native';
 import { ActivityCard } from '@/components/dashboard/ActivityCard';
 import { ResultGate, Screen, styles } from '@/components/dashboard/ui';
 import { DAY_NAMES, money, placeOnWeek, SLOT_LABELS } from '@/components/dashboard/week';
+import { costText } from '@/lib/copy';
 import type { PlanItem } from '@/lib/schema';
 import { useApp } from '@/lib/store';
 import { colors, radius, space, type } from '@/lib/theme';
@@ -70,7 +71,7 @@ export default function Week() {
               )}
               <View style={[styles.card, { flexDirection: 'row', justifyContent: 'space-between' }]} accessible accessibilityLabel={`${items.length} ${items.length === 1 ? 'outing' : 'outings'} this week, ${total === 0 ? 'all free' : `${money(total)} a week in total`}`}>
                 <Text style={[type.heading, { color: colors.text }]}>{items.length} {items.length === 1 ? 'outing' : 'outings'}</Text>
-                <Text style={[type.heading, { color: colors.text }]}>{total === 0 ? 'Free' : `${money(total)}/week`}</Text>
+                <Text style={[type.heading, { color: colors.text }]}>{costText(total)}</Text>
               </View>
             </>
           );

@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChoiceStep } from '@/components/onboarding/ChoiceStep';
 import { HandsFreeDeck } from '@/components/onboarding/HandsFree';
 import { InterestGrid } from '@/components/onboarding/InterestGrid';
-import { NameStep } from '@/components/onboarding/NameStep';
+import { NameStep, type AnswerMode, type DemoKey } from '@/components/onboarding/NameStep';
 import { ReviewStep } from '@/components/onboarding/ReviewStep';
 import { SwipeDeck } from '@/components/onboarding/SwipeDeck';
 import { PillButton, s as ui } from '@/components/onboarding/ui';
@@ -33,6 +33,7 @@ import {
   type ComfortKey,
   type ReviewField,
 } from '@/lib/onboarding';
+import { DEMO_PROFILES } from '@/domain/activities';
 import { useApp } from '@/lib/store';
 import { colors, radius, space, tap, type } from '@/lib/theme';
 
@@ -118,6 +119,12 @@ export default function Onboarding() {
     if (!v && cursor > LAST) setCursor(LAST); // back to cards: show the last one, answers kept
   };
 
+  const mode: AnswerMode = easy ? 'easy' : handsFree ? 'hands' : 'swipe';
+  const setMode = (m: AnswerMode) => {
+    toggleEasy(m === 'easy');
+    setHandsFree(m === 'hands');
+  };
+
   const answers = (): Answer[] => [
     ...INTEREST_META.filter((i) => liked[i.key] !== undefined).map(
       (i): Answer => ({ kind: 'interest', key: i.key, liked: !!liked[i.key] }),
@@ -150,7 +157,21 @@ export default function Onboarding() {
     }
     submitting.current = true;
     try {
-      await analyze(result.profile);
+      await analyze(result.profile, name);
+      router.replace('/(tabs)/matches');
+    } finally {
+      submitting.current = false;
+    }
+  };
+
+  // Demo: skip the questions and match a sample person straight away.
+  const runDemo = async (key: DemoKey) => {
+    if (submitting.current || loading) return;
+    const p = DEMO_PROFILES[key];
+    if (!p) return;
+    submitting.current = true;
+    try {
+      await analyze(p, p.name);
       router.replace('/(tabs)/matches');
     } finally {
       submitting.current = false;
@@ -171,7 +192,7 @@ export default function Onboarding() {
         {current === 'interests' ? (
           <View style={st.views} accessibilityRole="radiogroup" accessibilityLabel="How to answer">
             {VIEWS.map((v) => {
-              const on = v.key === (easy ? 'easy' : handsFree ? 'hands' : 'swipe');
+              const on = v.key === mode;
               return (
                 <Pressable
                   key={v.key}
@@ -179,10 +200,7 @@ export default function Onboarding() {
                   accessibilityLabel={v.label}
                   accessibilityHint={v.hint}
                   aria-checked={on}
-                  onPress={() => {
-                    toggleEasy(v.key === 'easy');
-                    setHandsFree(v.key === 'hands');
-                  }}
+                  onPress={() => setMode(v.key)}
                   style={({ pressed }) => [st.toggle, on && st.toggleOn, pressed && ui.pressed]}>
                   <Text style={[st.viewText, { color: on ? colors.onTileSelected : colors.text }]}>{v.label}</Text>
                 </Pressable>
@@ -206,7 +224,16 @@ export default function Onboarding() {
       </View>
 
       {current === 'name' && (
-        <NameStep name={name} onName={setName} easy={easy} onEasy={toggleEasy} onStart={next} bottomInset={bottom} />
+        <NameStep
+          name={name}
+          onName={setName}
+          mode={mode}
+          onMode={setMode}
+          onStart={next}
+          onDemo={runDemo}
+          busy={loading}
+          bottomInset={bottom}
+        />
       )}
 
       {current === 'interests' &&
@@ -322,7 +349,18 @@ export default function Onboarding() {
       )}
 
       {current === 'review' && (
-        <ReviewStep rows={reviewRows(answers())} onChange={change} onConfirm={finish} busy={loading} bottomInset={bottom} />
+        <ReviewStep
+          name={name}
+          onChangeName={() => {
+            setEditing(true);
+            setStep(stepOf('name'));
+          }}
+          rows={reviewRows(answers())}
+          onChange={change}
+          onConfirm={finish}
+          busy={loading}
+          bottomInset={bottom}
+        />
       )}
     </KeyboardAvoidingView>
   );

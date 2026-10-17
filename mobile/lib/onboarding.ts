@@ -168,7 +168,7 @@ export function answersToProfile(answers: readonly Answer[], name: string): Prof
     ok: true,
     defaulted,
     profile: {
-      name: name.trim() || 'Friend',
+      name: name.trim() || 'Friend', // engine/schema placeholder only — screens use store.firstName, never this
       interests: r.interests ?? DEFAULTS.interests,
       mobility: r.mobility,
       transport: r.transport,
