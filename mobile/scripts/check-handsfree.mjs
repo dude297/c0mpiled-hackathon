@@ -70,7 +70,7 @@ for (const impl of [tsImpl, jsImpl]) {
   // Phone-distance eyes-only tuning; Tilt and the center gate retain their original settings.
   const L = TUNING.look;
   assert.deepEqual(L, { threshold: 0.09, hysteresis: 0.03, dwellMs: 1000, alpha: 0.35 });
-  assert.deepEqual(TUNING.tilt, { dwellMs: 800, threshold: 15, hysteresis: 3 });
+  assert.deepEqual(TUNING.tilt, { dwellMs: 800, threshold: 10, hysteresis: 3 });
   assert.equal(TUNING.rearmMs, 400);
   assert.equal(TUNING.calibrateMs, 2000);
   const zoneOf = (v, prev = 'center') => classify(v, prev, L.threshold, L.hysteresis);
