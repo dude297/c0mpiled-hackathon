@@ -14,7 +14,7 @@ import type { z } from "zod";
 
 const IDENTITY_KEY = "daybridge:care:demo-identity";
 const IDENTITIES = [{ id: "cg-dana", label: "Dana — caregiver demo" }, { id: "cg-lee", label: "Lee — view-only demo" }, { id: "self-maya", label: "Maya — self demo" }];
-const H1 = "text-[2.25rem] font-semibold leading-tight";
+const H1 = "text-[2.25rem] font-semibold leading-tight break-words";
 const H2 = "text-[1.375rem] font-semibold leading-tight";
 const LINK = `inline-flex min-h-11 items-center rounded-md underline underline-offset-4 ${FOCUS}`;
 const PANEL = "space-y-4 rounded-2xl border border-border p-4 sm:p-6";
@@ -235,7 +235,7 @@ export function CheckInForm({ api, personId, self, onSaved }: { api: Api; person
     <h3 className="text-lg font-semibold">Record a check-in</h3>
     <label htmlFor="care-checkin-note" className="block">Optional note</label>
     <Textarea id="care-checkin-note" value={note} disabled={busy} maxLength={280} aria-describedby="care-note-count care-checkin-help" className="min-h-24 text-base md:text-base" onChange={(event) => setNote(event.target.value)} />
-    <p id="care-note-count">{note.length}/280 characters</p>
+    <p id="care-note-count">{note.length}/280 characters. Notes are visible to you and people with manage access.</p>
     <div className="flex flex-wrap gap-3">{([{ kind: "ok", label: self ? "I'm OK" : "They're OK" }, { kind: "call", label: "Please call" }, { kind: "help", label: "Need help" }] as const).map((item) => <Button key={item.kind} size="xl" variant={item.kind === "ok" ? "default" : "outline"} disabled={busy} onClick={() => void send(item.kind)}>{busy ? "Saving…" : item.label}</Button>)}</div>
     <p id="care-checkin-help" className="text-muted-foreground">This records a check-in. It doesn&apos;t contact anyone or change any plan. For urgent help, contact someone directly.</p>
     <p role="status" aria-live="polite">{notice}</p>{error && <p role="alert">{error}</p>}
