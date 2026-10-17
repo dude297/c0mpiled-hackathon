@@ -13,6 +13,7 @@ import type {
   ActionRequest, CommandResult, CoordinationEvent, CoordinationPlan, Dependency,
 } from "@/lib/schema";
 import { describePlan } from "@/domain/coordination/narrative";
+import { Profile } from "@/lib/schema";
 
 // Coordination screen: DayBridge gets the person there, with consent at every step.
 // Everything here consumes the Coordination contract v1.0.0 (see docs/daybridge/COORDINATION_CONTRACT.md).
@@ -239,7 +240,8 @@ function StepTracker({ state }: { state: CoordinationPlan["state"] }) {
 function storedProfile(): unknown {
   try {
     const raw = sessionStorage.getItem("daybridge:profile");
-    return raw ? JSON.parse(raw) : null;
+    const parsed = Profile.safeParse(raw ? JSON.parse(raw) : null);
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }
@@ -289,6 +291,7 @@ function CoordinateInner() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [handoffMissing, setHandoffMissing] = useState(false);
   const seqCounter = useRef(new Map<string, number>());
 
   const apply = useCallback((r: CommandResult) => {
@@ -346,6 +349,16 @@ function CoordinateInner() {
   }, [plan, apply]);
 
   const loadDemo = useCallback(async () => {
+    const fromMatches = params.has("activityId");
+    const activityId = params.get("activityId");
+    const profile = fromMatches ? storedProfile() : null;
+    if (fromMatches && (!activityId || !profile)) {
+      setHandoffMissing(true);
+      setError("Your saved answers are unavailable. Return to your matches and open the outing again.");
+      setBusy(false);
+      return;
+    }
+    setHandoffMissing(false);
     setBusy(true);
     setError(null);
     setEvents([]);
@@ -355,9 +368,9 @@ function CoordinateInner() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          activityId: params.get("activityId") ?? "fellowship",
+          activityId: activityId ?? "fellowship",
           // integration: opened from the planner's "Get me there" → same person; otherwise the Maya demo.
-          profile: (params.get("activityId") && storedProfile()) || {
+          profile: profile ?? {
             name: "Maya",
             interests: ["faith"],
             mobility: "walker",
@@ -376,10 +389,7 @@ function CoordinateInner() {
       });
       const data = await res.json();
       if (!res.ok) {
-        // integration: a stale/invalid stored profile must not wedge the page; the retry falls back to the Maya demo.
-        try {
-          sessionStorage.removeItem("daybridge:profile");
-        } catch {}
+        // Keep the same person's answers on failure; retry must never substitute the Maya fixture.
         throw new Error(data.error ?? "Request failed");
       }
       setPlan(data.plan);
@@ -404,11 +414,13 @@ function CoordinateInner() {
     return (
       <main className="mx-auto w-full max-w-3xl p-6 text-base md:text-lg">
         <BackToMatches />
-        <div className="flex items-center gap-3 py-16 text-muted-foreground" role="status">
-          <LoaderCircle className="size-6 animate-spin" aria-hidden="true" />
-          {error ? "That didn’t go through — try again or go back to your matches." : "Setting up the coordination demo…"}
+        <div className="flex items-center gap-3 py-16 text-muted-foreground" role={handoffMissing ? "alert" : "status"}>
+          {!error && <LoaderCircle className="size-6 animate-spin" aria-hidden="true" />}
+          {handoffMissing ? error : error ? "That didn’t go through — try again or go back to your matches." : "Setting up the coordination demo…"}
         </div>
-        <Button size="lg" onClick={loadDemo} disabled={busy}>Try again</Button>
+        {handoffMissing ? (
+          <Link href="/matches" className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 font-medium text-primary underline underline-offset-4">Return to my matches</Link>
+        ) : <Button size="lg" onClick={loadDemo} disabled={busy}>Try again</Button>}
       </main>
     );
   }
