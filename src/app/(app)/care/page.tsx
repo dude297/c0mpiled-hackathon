@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { CareDashboard } from "@/components/care/CareDashboard";
 
 export const metadata: Metadata = { title: "Caregiver view · DayBridge" };
 
-// Placeholder: the C1 screen builder replaces this (docs/product/SCREENS.md C1).
+// C1 Caregiver dashboard (docs/product/SCREENS.md "C1"). Client-only data: the device store in this browser.
 export default function CarePage() {
-  return <h1 className="text-[2.25rem] font-semibold leading-tight">Caregiver view</h1>;
+  return <CareDashboard />;
 }

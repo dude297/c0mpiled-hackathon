@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { CalendarView } from "@/components/views/CalendarView";
 
 export const metadata: Metadata = { title: "Calendar · DayBridge" };
 
-// Placeholder: the U4 screen builder replaces this (docs/product/SCREENS.md U4).
+// U4 Calendar (docs/product/SCREENS.md), opened from the header calendar icon.
 export default function CalendarPage() {
-  return <h1 className="text-[2.25rem] font-semibold leading-tight">Calendar</h1>;
+  return <CalendarView />;
 }

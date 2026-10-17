@@ -1,9 +1,14 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
+import { ActivityDetail } from "@/components/home/ActivityDetail";
 
 export const metadata: Metadata = { title: "Activity · DayBridge" };
 
-// Placeholder: the U5 screen builder replaces this (docs/product/SCREENS.md U5).
-// Read the id with PageProps<"/activity/[id]"> (await params inside <Suspense>: cacheComponents is on) or useParams().
+// U5 (docs/product/SCREENS.md). The id is only known at request time: the client reads it inside Suspense (cacheComponents).
 export default function ActivityPage() {
-  return <h1 className="text-[2.25rem] font-semibold leading-tight">Activity</h1>;
+  return (
+    <Suspense fallback={null}>
+      <ActivityDetail />
+    </Suspense>
+  );
 }

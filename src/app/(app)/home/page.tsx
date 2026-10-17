@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { HomeDashboard } from "@/components/home/HomeDashboard";
 
 export const metadata: Metadata = { title: "Home · DayBridge" };
 
-// Placeholder: the U2 screen builder replaces this (docs/product/SCREENS.md U2).
+// U2 Home dashboard (docs/product/SCREENS.md).
 export default function HomePage() {
-  return <h1 className="text-[2.25rem] font-semibold leading-tight">Home</h1>;
+  return <HomeDashboard />;
 }

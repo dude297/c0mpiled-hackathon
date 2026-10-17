@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
+import { ProfileView } from "@/components/views/ProfileView";
 
-export const metadata: Metadata = { title: "Profile · DayBridge" };
+export const metadata: Metadata = { title: "Your answers · DayBridge" };
 
-// Placeholder: the U6 screen builder replaces this (docs/product/SCREENS.md U6).
+// U6 Profile (docs/product/SCREENS.md).
 export default function ProfilePage() {
-  return <h1 className="text-[2.25rem] font-semibold leading-tight">Profile</h1>;
+  return <ProfileView />;
 }
