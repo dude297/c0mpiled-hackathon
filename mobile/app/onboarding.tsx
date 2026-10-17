@@ -1,4 +1,4 @@
-// Native onboarding. Same questions, order and mapping as web CardDeck:
+// Native onboarding. Order:
 // name → 10 interests → times → travel → walking aid → how you get places → budget → review
 // ("Here's what we heard", each answer with Change) → answersToProfile → analyze → Matches.
 // Walking aid and transport are always asked, never inferred; analyze can't run until both are answered.
@@ -86,8 +86,8 @@ export default function Onboarding() {
     setCursor(to);
   };
 
+  // Back keeps `editing`: after a Change, stepping back (or undoing a swipe card) still returns to the review.
   const back = () => {
-    setEditing(false);
     if (current === 'interests' && !easy && cursor > 0) return undoCard(cursor - 1);
     if (current === 'times' && !easy) {
       undoCard(LAST);

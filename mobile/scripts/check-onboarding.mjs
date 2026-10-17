@@ -87,11 +87,19 @@ check('card wording + 1:1 keys', () => {
 });
 check('no stairs code path remains in the lib or screen', () => {
   const screen = readFileSync(join(here, '../app/onboarding.tsx'), 'utf8');
-  for (const [name, text] of [['lib/onboarding.ts', src], ['app/onboarding.tsx', screen]]) {
+  const details = readFileSync(join(here, '../app/(tabs)/details.tsx'), 'utf8');
+  for (const [name, text] of [['lib/onboarding.ts', src], ['app/onboarding.tsx', screen], ['app/(tabs)/details.tsx', details]]) {
     assert.ok(!/stair/i.test(text), `${name} still mentions stairs`);
     assert.ok(!/'fine'|'hassle'|'avoid'/.test(text), `${name} still has stairs keys`);
   }
   assert.ok(!/mobilityValue|=== 'full' \?/.test(src), 'transport derived from mobility');
+});
+check('Back during a Change keeps returning to the review (back() never clears editing)', () => {
+  const screen = readFileSync(join(here, '../app/onboarding.tsx'), 'utf8');
+  const body = screen.match(/const back = \(\) => \{([\s\S]*?)\n  \};/);
+  assert.ok(body, 'back() not found');
+  assert.ok(!/setEditing\(false\)/.test(body[1]), 'back() clears editing');
+  assert.ok(!/Same questions, order and mapping as web CardDeck/.test(screen), 'stale web-parity header');
 });
 
 // 4. Defaults are explicit and shown as "(default)" on the review.

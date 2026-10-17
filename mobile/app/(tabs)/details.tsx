@@ -8,10 +8,11 @@ import { useApp } from '@/lib/store';
 import { colors, space, type } from '@/lib/theme';
 
 const MOBILITY: Record<Profile['mobility'], string> = {
-  full: 'Gets around easily',
-  cane: 'Uses a cane — stairs are a hassle',
-  walker: 'Uses a walker — avoids stairs',
-  wheelchair: 'Uses a wheelchair — needs step-free access',
+  // Exactly what they told us ("Do you use anything to help you walk?"); never add claims they didn't make.
+  full: 'Walks on their own',
+  cane: 'Uses a cane',
+  walker: 'Uses a walker',
+  wheelchair: 'Uses a wheelchair',
 };
 const TRANSPORT: Record<Profile['transport'][number], string> = {
   drive: 'drives', bus: 'bus', paratransit: 'paratransit', family: 'rides from family', walk: 'walks',
