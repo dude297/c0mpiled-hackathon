@@ -382,7 +382,16 @@ export function createCoordinator(deps: CoordinatorDeps) {
         case "cancel": {
           p.state = "CANCELLED";
           const open = p.actions.filter((a) => isLive(p, a)).map((a) => a.id);
-          return done(e, [{ type: "plan.cancelled", actor: "user", outcome: "applied", payload: { dispatchedActionsToNotify: open } }]);
+          // No stale consent survives cancellation: approved-but-unsent actions lose their approval.
+          const revokedActionIds: string[] = [];
+          for (const a of p.actions) if (a.status === "approved") {
+            const appr = p.approvals.find((x) => x.id === a.approvalId);
+            if (appr) appr.revoked = true;
+            a.status = "revoked";
+            a.approvalId = undefined;
+            revokedActionIds.push(a.id);
+          }
+          return done(e, [{ type: "plan.cancelled", actor: "user", outcome: "applied", payload: { dispatchedActionsToNotify: open, revokedActionIds } }]);
         }
 
         case "feedback": {

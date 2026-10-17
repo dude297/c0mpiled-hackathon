@@ -59,8 +59,12 @@ stateDiagram-v2
 - **Versions:** each replan bumps `plan.version`. Actions that aren't carried over become `superseded`; they no longer count, and their events are ignored.
 - **Carry-over:** on replan, a current action with an identical scope carries over (keeping its original `id` and `idempotencyKey`) if its dependency is `confirmed` or `requested` (in flight), or if it is `approved` with `dispatchError: true` (unknown outcome). Nobody already asked is asked again: e.g. a friend's accepted invite survives a ride cancellation and is not re-sent. Everything else needs fresh approval.
 - **Settle** runs after `execute`, `accept_proposal` and every applied provider event, in any non-closed state: any failed current dependency (declined/cancelled/failed) → NEEDS_REPLAN; otherwise READY exactly when `readyViolations` is empty.
-- **Recovery** and `choose_alternative` keep exclusions: recipients that declined, cancelled or failed are never proposed again in this plan. Ride options are tried in this order: contacts with `canDrive`, then paratransit. If none is left, the transport blocker becomes hard and `alternatives` are listed.
+- **Recovery** and `choose_alternative` keep exclusions: recipients that declined, cancelled or failed are never proposed again in this plan. Ride options are tried in this order: contacts with `canDrive`, then the generic family ride (`recipientId: "family"`), then paratransit. If none is left, the transport blocker becomes hard and `alternatives` are listed.
+- **Generic family ride (#28):** when the route needs a family ride (profile `transport` includes `family`, family time ≤ `maxTravelMin`) and no listed contact can drive, the ride action goes to the reserved recipient `"family"` ("Ride from family (you'll arrange it)"). It is still a normal external dependency: scoped approval, mock dispatch, and a `ride.confirmed` event before READY. It is skipped once any `canDrive` contact has declined/cancelled/failed in this plan (that contact *is* the family), so e.g. Dan cancelling still recovers to paratransit. This keeps coordination in agreement with `/api/analyze`: no activity analyze marks feasible comes back BLOCKED at creation. UIs should label `recipientId: "family"` as "Family" (cosmetic only).
+- **Companion invite (#28):** the "invite a friend" action never targets the contact who is the ride recipient in the same proposal (nor excluded recipients). If no other contact is left, the social intervention is the `user_step` "Bring a friend for the first visit" (no dependency).
 - **Preferences** change only through `confirm_preference`. `feedback` only adds `proposed` patches. A patch whose `from` no longer matches the profile is rejected as stale. Applying a patch bumps `profileVersion`.
+- **Repeat feedback (F1, intended):** patches are computed from the current profile, so feedback for a preference that is already applied yields no new patch (e.g. `too_crowded` when `prefersSmallGroups` is already `true`). The `feedback.preference_proposed` event is still logged, with empty `patchIds`.
+- **Cancel revokes unsent consent (F3):** `cancel` marks every approved-but-not-dispatched action `revoked` and its approval `revoked: true` (and clears `approvalId`), so no stale approval survives cancellation. Their ids are in the `plan.cancelled` event's `payload.revokedActionIds`. Dispatched actions keep `status: "dispatched"` and, while still live, are listed in `payload.dispatchedActionsToNotify`.
 
 ## 3. HTTP API
 
@@ -70,7 +74,7 @@ Status codes:
 - **200** with `outcome: "rejected"`: the request was valid but the plan refused it (logged with its reason). Show `reason` to the user.
 - **400**: the body failed schema validation (`{ error: "path: message" }`, including duplicate or reserved contact ids) or the activity is unknown.
 - **404**: unknown plan id.
-- **403**: the events endpoint is disabled in production.
+- **403**: the events and demo endpoints are disabled in production (unless `DAYBRIDGE_DEMO_EVENTS=1`).
 
 ### Create a plan: `POST /api/coordination/plans`
 ```json
@@ -81,7 +85,7 @@ Status codes:
   "contacts": [ { "id": "elaine", "name": "Elaine", "relation": "friend", "canDrive": false },
                 { "id": "dan", "name": "Dan", "relation": "son", "canDrive": true } ] }
 ```
-Contacts (max 10): ids must be unique, and `"paratransit"` is reserved; either violation → 400.
+Contacts (max 10): ids must be unique, and `"paratransit"` and `"family"` are reserved; either violation → 400.
 
 → `plan.state` is `PROPOSED` or `BLOCKED`. Key plan fields:
 - `id`, `version`, `profile`, `profileVersion`, `contacts`, `activityId`, `activityName`, `when`
@@ -94,7 +98,22 @@ Contacts (max 10): ids must be unique, and `"paratransit"` is reserved; either v
 - `dataSource: "mock"`, `createdAt`, `updatedAt`
 
 ### Read a plan: `GET /api/coordination/plans/:id`
-Returns `{ plan, events }`. Each event is `{seq, at, type, actor: user|agent|provider|demo, outcome, reason?, idempotencyKey?, payload}`.
+Returns `{ plan, events, narrative }`. Each event is `{seq, at, type, actor: user|agent|provider|demo, outcome, reason?, idempotencyKey?, payload}`.
+
+**`narrative`** (additive, from `describePlan(plan)` in `src/domain/coordination/narrative.ts`) is a deterministic, plain-language summary for caregivers. No AI is involved.
+```ts
+{ headline: string;                       // "Maya is all set for Sunday Fellowship Lunch (Sun afternoon)"
+  status: "blocked" | "needs_you" | "waiting" | "ready" | "replanning" | "done" | "cancelled";
+  lines: string[];                         // "✓ Ride from Dan confirmed", "⏳ Invite to Elaine sent, waiting for a reply",
+                                           // "✗ Ride from Dan cancelled — new option: Paratransit ride (needs your OK)"
+  nextStep: string | null }                // e.g. "Approve Paratransit ride (shares name, pickup window and mobility), …"
+```
+State → status: BLOCKED→`blocked`, PROPOSED/AWAITING_APPROVAL→`needs_you`, PENDING_CONFIRMATION→`waiting`, READY→`ready`, NEEDS_REPLAN→`replanning`, COMPLETED→`done`, CANCELLED→`cancelled`. Contact ids are shown as contact names, and `"paratransit"` as "Paratransit service". A `requested` dependency is never described as confirmed, booked or all set (tested). AWAITING_APPROVAL names the actions that still need approval and the fields each one shares; NEEDS_REPLAN says what failed and what replaces it; BLOCKED lists blockers and alternatives; COMPLETED lists preference patches awaiting confirmation. Command responses (`CommandResult`) are unchanged and carry no narrative.
+
+### Create the demo plan: `POST /api/coordination/demo` (demo-only)
+Body is optional: `{ "scenario"?: "maya" }` (default `"maya"`; any other value → 400). Creates the plan from `DEMO_SCENARIOS.maya` (`src/domain/coordination/demo.ts`: Maya + contacts Elaine and Dan, preferred activity `fellowship`) through the same coordinator as `POST /plans`, and returns `CommandResult` plus `narrative`.
+
+Because the activity catalog may change, `resolveDemoActivity` keeps `fellowship` only while it still yields a ride **and** an invite; otherwise it picks the first catalog activity (sorted by id) that does, else the first with at least a ride. If nothing qualifies → 500. Same production gate as the events endpoint: 403 in production unless `DAYBRIDGE_DEMO_EVENTS=1`.
 
 ### Send a command: `POST /api/coordination/plans/:id/commands`
 ```jsonc
@@ -135,7 +154,7 @@ Allowed `type` values: `invite.accepted|invite.declined|invite.cancelled|ride.co
 - **Dispatch keys:** `action.idempotencyKey === action.id` (`<planId>:v<version>:<kind>:<recipientId>`) and is passed to the provider. Carried-over actions keep their original key. `execute` skips actions already dispatched or failed. Commands for the same plan run one at a time behind a lock.
 - **Provider errors:** if any provider call throws or times out (`PROVIDER_TIMEOUT_MS` = 10 s), that action stays `approved` with `dispatchError: true` and a `<kind>.dispatch_error` event is logged. The plan **stays AWAITING_APPROVAL** and does **not** replan, even if another action failed in the same run. The result is `outcome: "rejected"` with the reason "Some actions could not reach the provider; retry execute". Retrying `execute` reuses the same idempotency keys; failed actions are not retried.
 - **Provider failures:** `status: "failed"` marks the action and its dependency `failed`, which triggers a replan (once an `execute` completes with no provider errors).
-- **Live actions to notify:** actions superseded while live (dispatched, dependency not final) are listed in the `actions.superseded` event's `payload.dispatchedActionsToNotify`. `cancel` lists every live action, including superseded ones, in the `plan.cancelled` event's `payload.dispatchedActionsToNotify`.
+- **Live actions to notify:** actions superseded while live (dispatched, dependency not final) are listed in the `actions.superseded` event's `payload.dispatchedActionsToNotify`. `cancel` lists every live action, including superseded ones, in the `plan.cancelled` event's `payload.dispatchedActionsToNotify`, and revokes approved-but-unsent actions (`payload.revokedActionIds`, see §2).
 
 ## 5. Provider port (for the GLM simulator)
 
