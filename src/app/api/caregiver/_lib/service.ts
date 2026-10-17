@@ -166,14 +166,14 @@ export async function revokeGrant(userId: string, personId: string, target: stri
   return new Response(null, { status: 204 });
 }
 
-/** The ONLY way a plan becomes associated with a person: it is created here for that person's profile. */
+/** The ONLY way a plan becomes associated with a person: it is created here from the person's CURRENT profile (version recorded on the link). */
 export async function createPlan(userId: string, personId: string, req: Request) {
   const { person } = await access(personId, userId, "manage");
   const input = await body(req, CreatePersonPlanInput);
   const res = await coordinator.create({ profile: person.profile, activityId: input.activityId, contacts: input.contacts });
-  const linked = await ports.store.linkPlan({ personId, planId: res.plan.id, linkedAt: new Date().toISOString(), linkedBy: userId });
+  const linked = await ports.store.linkPlan({ personId, planId: res.plan.id, linkedAt: new Date().toISOString(), linkedBy: userId, profileVersion: person.profileVersion ?? 1 });
   if (linked !== "ok") throw new CaregiverError(409, "Plan is already linked to a person");
-  return reply({ planId: res.plan.id, state: res.plan.state }, 201);
+  return reply({ planId: res.plan.id, state: res.plan.state, profileVersion: person.profileVersion ?? 1 }, 201);
 }
 
 export async function checkIn(userId: string, personId: string, req: Request) {
