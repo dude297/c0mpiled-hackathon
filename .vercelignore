@@ -1,0 +1,2 @@
+# Vercel deploys only the Next.js web app. The Expo app lives in mobile/ and is built separately.
+mobile/
