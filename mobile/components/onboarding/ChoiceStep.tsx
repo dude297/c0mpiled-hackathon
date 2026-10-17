@@ -49,6 +49,7 @@ export function ChoiceStep({
               detail={o.detail}
               emoji={o.emoji}
               multi={multi}
+              disabled={busy}
               selected={selected.includes(o.id)}
               onPress={() => onToggle(o.id)}
             />
