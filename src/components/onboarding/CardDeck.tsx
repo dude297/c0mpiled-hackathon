@@ -207,6 +207,11 @@ export function isLockedOut(lastAt: number, now: number): boolean {
   return now - lastAt < ANSWER_LOCKOUT_MS;
 }
 
+// Read-only: true inside the lockout window, without claiming a slot.
+function inLockout(lastAt: { current: number }): boolean {
+  return isLockedOut(lastAt.current, Date.now());
+}
+
 // Claims the next answer slot, or returns false inside the lockout window.
 function takeTurn(lastAt: { current: number }): boolean {
   const now = Date.now();
@@ -389,6 +394,9 @@ export function CardDeck({
   };
   // Double-tap lockout shared by every step-changing control.
   const guard = () => !loading && takeTurn(lastRecordAt);
+  // Read-only check for picks inside a card: a tap that lands right after a step change
+  // (the double-tap's second half) must not pre-select an answer on the new card.
+  const locked = () => inLockout(lastRecordAt);
   const record = (answer: Answer | null) => {
     if (!guard()) return;
     if (editing !== null) {
@@ -641,6 +649,7 @@ export function CardDeck({
           options={WALKING_AID_OPTIONS}
           initial={current?.kind === "mobility" ? [current.key] : []}
           disabled={loading}
+          locked={locked}
           bigButtons={bigButtons}
           onDone={([key]) => record({ kind: "mobility", key })}
         />
@@ -655,6 +664,7 @@ export function CardDeck({
           options={TRANSPORT_OPTIONS}
           initial={current?.kind === "transport" ? current.modes : []}
           disabled={loading}
+          locked={locked}
           bigButtons={bigButtons}
           onDone={(modes) => record({ kind: "transport", modes })}
         />
@@ -686,13 +696,15 @@ export function CardDeck({
 }
 
 // Required question: native radios (single) or checkboxes (multi); Continue stays disabled until something is picked.
-function ChoiceCard<K extends string>({ multi, heading, helper, options, initial, disabled, bigButtons, onDone }: {
+function ChoiceCard<K extends string>({ multi, heading, helper, options, initial, disabled, locked, bigButtons, onDone }: {
   multi: boolean;
   heading: string;
   helper: string;
   options: readonly { key: K; label: string; emoji?: string }[];
   initial: readonly K[];
   disabled: boolean;
+  // True inside the double-tap lockout window; picks are ignored (the controlled input stays as it was).
+  locked: () => boolean;
   bigButtons: boolean;
   onDone: (keys: [K, ...K[]]) => void;
 }) {
@@ -713,9 +725,10 @@ function ChoiceCard<K extends string>({ multi, heading, helper, options, initial
               value={o.key}
               checked={selected.includes(o.key)}
               disabled={disabled}
-              onChange={() =>
-                setSelected((prev) => (multi ? (prev.includes(o.key) ? prev.filter((k) => k !== o.key) : [...prev, o.key]) : [o.key]))
-              }
+              onChange={() => {
+                if (locked()) return;
+                setSelected((prev) => (multi ? (prev.includes(o.key) ? prev.filter((k) => k !== o.key) : [...prev, o.key]) : [o.key]));
+              }}
               className="size-6 shrink-0 accent-foreground outline-none"
             />
             {o.emoji && <span aria-hidden="true" className="text-2xl">{o.emoji}</span>}

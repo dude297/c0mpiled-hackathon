@@ -61,6 +61,14 @@ describe("answersToProfile — PR #12 review: never infer mobility or transport"
     expect(src).not.toMatch(/stair/i);
     expect(src).not.toMatch(/\["drive", "walk", "bus"\]|\["bus", "paratransit", "family"\]/);
   });
+
+  it("walking-aid and transport picks honor the double-tap lockout (no pre-selected answer from a second tap)", () => {
+    const src = readFileSync(new URL("./CardDeck.tsx", import.meta.url), "utf8");
+    const choiceCard = src.slice(src.indexOf("function ChoiceCard"), src.indexOf("function TimeChoices"));
+    expect(choiceCard).toMatch(/onChange=\{\(\) => \{\s*if \(locked\(\)\) return;/);
+    expect(src.match(/locked=\{locked\}/g)).toHaveLength(2);
+    expect(src).toMatch(/const locked = \(\) => inLockout\(lastRecordAt\)/);
+  });
 });
 
 describe("answersToProfile", () => {
