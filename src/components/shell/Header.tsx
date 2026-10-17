@@ -23,6 +23,10 @@ const CARE_NAV: NavItem[] = [
   { href: "/calendar", label: "Calendar", icon: true },
   { href: "/profile", label: "Profile" },
 ];
+const SHARED_CARE_NAV: NavItem[] = [
+  { href: "/care", label: "Care" },
+  { href: "/home", label: "Personal view" },
+];
 
 export const isActive = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
@@ -135,18 +139,19 @@ function HeaderWithPath() {
 
 function HeaderView({ pathname }: { pathname: string }) {
   const store = useDeviceStore();
+  const sharedCare = isActive(pathname, "/care");
   const caregiver = store.mode === "caregiver";
-  const nav = caregiver ? CARE_NAV : USER_NAV;
+  const nav = sharedCare ? SHARED_CARE_NAV : caregiver ? CARE_NAV : USER_NAV;
   const name = personLabel(store);
 
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 print:hidden">
       <div className="mx-auto flex w-full max-w-[75rem] items-center gap-2 px-4 py-2 md:gap-4 md:px-6">
-        <Link href={caregiver ? "/care" : "/home"} className={`inline-flex min-h-11 items-center rounded-lg px-1 text-xl font-semibold ${FOCUS}`}>
+        <Link href={sharedCare || caregiver ? "/care" : "/home"} className={`inline-flex min-h-11 items-center rounded-lg px-1 text-xl font-semibold ${FOCUS}`}>
           DayBridge
         </Link>
-        {caregiver && store.profile && <p className="hidden text-lg text-foreground/80 lg:block">Caring for {name}</p>}
+        {sharedCare ? <p className="hidden text-lg text-foreground/80 lg:block">Caregiver view</p> : caregiver && store.profile && <p className="hidden text-lg text-foreground/80 lg:block">Caring for {name}</p>}
         <nav aria-label="Main" className="ml-auto hidden md:block">
           <ul className="flex items-center gap-1">
             {nav.map((item) => (
@@ -156,13 +161,13 @@ function HeaderView({ pathname }: { pathname: string }) {
             ))}
           </ul>
         </nav>
-        <div className="ml-auto md:ml-0">
+        {!sharedCare && <div className="ml-auto md:ml-0">
           <PersonMenu />
-        </div>
+        </div>}
       </div>
-      {caregiver && store.profile && <p className="mx-auto w-full max-w-[75rem] px-4 pb-1 text-base text-foreground/80 md:px-6 lg:hidden">Caring for {name}</p>}
+      {sharedCare ? <p className="mx-auto w-full max-w-[75rem] px-4 pb-1 text-base text-foreground/80 md:px-6 lg:hidden">Caregiver view</p> : caregiver && store.profile && <p className="mx-auto w-full max-w-[75rem] px-4 pb-1 text-base text-foreground/80 md:px-6 lg:hidden">Caring for {name}</p>}
       <nav aria-label="Main" className="border-t md:hidden">
-        <ul className={`mx-auto grid max-w-[75rem] px-2 ${caregiver ? "grid-cols-3" : "grid-cols-4"}`}>
+        <ul className={`mx-auto grid max-w-[75rem] px-2 ${sharedCare ? "grid-cols-2" : caregiver ? "grid-cols-3" : "grid-cols-4"}`}>
           {nav.map((item) => (
             <li key={item.href} className="flex justify-center">
               <NavLink item={item} active={isActive(pathname, item.href)} />
