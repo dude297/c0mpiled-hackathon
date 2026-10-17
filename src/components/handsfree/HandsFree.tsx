@@ -79,7 +79,7 @@ function forgetLandmarker(load: Promise<Landmarker>) {
   if (landmarkerPromise === load) landmarkerPromise = null;
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("timeout")), ms);
     promise.then(
@@ -87,6 +87,22 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
       (e) => (clearTimeout(timer), reject(e)),
     );
   });
+}
+
+// Shared browser lifecycle boundary; injectable event targets let tests cover cleanup without a camera.
+export function watchTrackingInterruptions(
+  page: Pick<Document, "hidden" | "addEventListener" | "removeEventListener">,
+  tracks: Pick<MediaStreamTrack, "addEventListener" | "removeEventListener">[],
+  onHidden: () => void,
+  onEnded: () => void,
+): () => void {
+  const visibility = () => { if (page.hidden) onHidden(); };
+  page.addEventListener("visibilitychange", visibility);
+  tracks.forEach((track) => track.addEventListener("ended", onEnded));
+  return () => {
+    page.removeEventListener("visibilitychange", visibility);
+    tracks.forEach((track) => track.removeEventListener("ended", onEnded));
+  };
 }
 
 const STILL_WORKS = "The Yes and No buttons still work.";
@@ -164,6 +180,7 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef(0);
+  const cleanupTracksRef = useRef<() => void>(() => {});
   const runRef = useRef(0); // bumps on every Start/Stop so stale async work bails out
   const phaseRef = useRef<Phase>("idle");
   const modeRef = useRef<HandsFreeMode>("look");
@@ -193,6 +210,8 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
 
   const stopCamera = useCallback(() => {
     runRef.current += 1;
+    cleanupTracksRef.current();
+    cleanupTracksRef.current = () => {};
     cancelAnimationFrame(rafRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -230,6 +249,7 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
     stopCamera();
     setError(message);
     setFaceFound(false);
+    resetDwell();
     goto("error");
   };
 
@@ -239,6 +259,21 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
     resetDwell();
     goto("idle");
   };
+
+  useEffect(() => {
+    // Also cancels a pending permission/model request: returning to the tab requires a new tap.
+    return watchTrackingInterruptions(document, [], () => {
+      if (phaseRef.current === "idle" || phaseRef.current === "error") return;
+      stopCamera();
+      dwellRef.current = initialDwell();
+      zoneRef.current = "center";
+      setView({ side: null, progress: 0 });
+      setFaceFound(false);
+      phaseRef.current = "error";
+      setPhase("error");
+      setError(`Hands-free stopped because this page was hidden. Press Turn on camera to continue. ${STILL_WORKS}`);
+    }, () => {});
+  }, [stopCamera]);
 
   const start = async () => {
     stopCamera();
@@ -270,13 +305,17 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
       return;
     }
     streamRef.current = stream;
+    cleanupTracksRef.current = watchTrackingInterruptions(document, stream.getVideoTracks(), () => {}, () => {
+      if (run === runRef.current)
+        fail(`The camera disconnected or its permission changed. Press Turn on camera to try again. ${STILL_WORKS}`);
+    });
 
     let landmarker: Landmarker;
     try {
       const video = videoRef.current;
       if (!video) throw new Error("no video element");
       video.srcObject = stream;
-      await video.play();
+      await withTimeout(video.play(), 10000);
       landmarker = await withTimeout(modelLoad, LOAD_TIMEOUT_MS);
     } catch {
       forgetLandmarker(modelLoad); // a hung load must not be reused by "Try again"
@@ -290,25 +329,45 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
     let base = { gaze: 0, yaw: 0, tilt: 0 };
     let dwellLabel = labelRef.current;
     let lastVideoTime = -1;
+    let lastFrameAt = performance.now();
     let lastFace: boolean | null = null;
     let lastCalibLeft = -1;
     let lastView = { side: null as Side | null, progress: 0 };
     setCalibLeft(2);
     goto("calibrating");
 
+    const invalidateFrame = () => {
+      dwellRef.current = initialDwell();
+      zoneRef.current = "center";
+      if (lastFace !== false) { lastFace = false; setFaceFound(false); }
+      if (lastView.side !== null || lastView.progress !== 0) {
+        lastView = { side: null, progress: 0 };
+        setView(lastView);
+      }
+      // Do not count interrupted calibration time on recovery.
+      calib = { ...calib, lastT: null };
+    };
+
     const tick = () => {
       if (run !== runRef.current) return;
       rafRef.current = requestAnimationFrame(tick);
       const video = videoRef.current;
-      if (!video || video.readyState < 2 || video.currentTime === lastVideoTime) return;
-      lastVideoTime = video.currentTime;
       const now = performance.now();
+      if (!video || video.readyState < 2 || video.currentTime === lastVideoTime) {
+        if (now - lastFrameAt > 500) invalidateFrame();
+        if (now - lastFrameAt > 5000)
+          fail(`The camera stopped sending pictures. Press Turn on camera to try again. ${STILL_WORKS}`);
+        return;
+      }
+      lastVideoTime = video.currentTime;
+      lastFrameAt = now;
 
       let result: FaceResult;
       try {
         result = landmarker.detectForVideo(video, now);
       } catch {
-        return; // a single bad frame should never break the session
+        invalidateFrame(); // an unusable frame is never evidence of a continued answer
+        return;
       }
       const points = result.faceLandmarks?.[0];
       const shapes = result.faceBlendshapes?.[0]?.categories;
