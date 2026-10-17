@@ -145,6 +145,7 @@ export default function Home() {
     setAnnounce("");
     focusNext.current = null;
     setMode("onboarding");
+    window.scrollTo(0, 0); // otherwise the dashboard's scroll offset lands the user mid-way down the onboarding
   }
 
   // Errors are shown by the page's own error box / summary strip, so ProfilePanel doesn't announce them twice.
