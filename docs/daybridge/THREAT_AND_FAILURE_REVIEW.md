@@ -1,5 +1,7 @@
 # DayBridge Unlock — threat and failure review
 
+> **Current assessment update (2026-10-17):** This is a historical snapshot. Revised PR #3 is now merged on main `c76fa70`, implementing mock coordination, scoped approvals, confirmations, recovery and confirmed structured preference patches. Independently verified: current main + operations checks **140 tests pass** and production build passes; PR #7's real-coordinator simulation **18 tests pass** on that core. The historical cross-activity consent defect was verified fixed. UI, persistent/authenticated state, natural-language learning and genuine providers remain limitations. See the [current independent refresh in PR #8](https://github.com/dude297/c0mpiled-hackathon/blob/ops/pr-monitoring-20261017/docs/daybridge/INTEGRATION_QA_REFRESH.md). Do not use the missing-coordinator or old build-failure statements below as current findings.
+
 Independent source review, 2026-10-17. Baseline and branch pins are recorded in [EVALUATION_MATRIX.md](EVALUATION_MATRIX.md). **NO-GO for Unlock P0.** Distinguish current defects from risks in proposed capabilities. No live-provider penetration test, deployed-database inspection or genuine local-model run is claimed.
 
 ## Five highest-risk gaps
