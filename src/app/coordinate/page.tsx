@@ -269,6 +269,14 @@ function sampleContactText(plan: CoordinationPlan, text: string): string {
   }, text);
 }
 
+// Stable ref callback, so it runs once per mounted (failure-keyed) alert: the simulate buttons that caused the
+// failure sit far below it, and without this the viewport stays on the timeline while the recovery appears above.
+function revealOnMount(el: HTMLElement | null) {
+  if (!el) return;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+}
+
 export default function CoordinatePage() {
   return (
     <Suspense fallback={
@@ -512,6 +520,7 @@ function CoordinateInner() {
       {plan.state === "NEEDS_REPLAN" && failureHeadline && (
         <section
           key={`fail-${lastFailure!.seq}`}
+          ref={revealOnMount}
           role="alert"
           className="db-flash-warn flex items-start gap-3 rounded-xl bg-destructive/10 p-4 text-destructive ring-2 ring-destructive/40"
         >
