@@ -31,6 +31,8 @@ export const Person = z.object({
   checkInSchedule: CheckInSchedule.nullable(),
   createdAt: z.string(),
   createdBy: UserId,
+  /** Current profile version (see PERSON_PROFILES.md). Absent on legacy rows = 1. */
+  profileVersion: z.number().int().min(1).optional(),
 });
 export type Person = z.infer<typeof Person>;
 
@@ -44,7 +46,11 @@ export const Grant = z.object({
 });
 export type Grant = z.infer<typeof Grant>;
 
-export const PlanLink = z.object({ personId: z.uuid(), planId: z.string(), linkedAt: z.string(), linkedBy: UserId });
+export const PlanLink = z.object({
+  personId: z.uuid(), planId: z.string(), linkedAt: z.string(), linkedBy: UserId,
+  /** Person profile version the plan was created from. */
+  profileVersion: z.number().int().min(1).optional(),
+});
 export type PlanLink = z.infer<typeof PlanLink>;
 
 export const CheckInKind = z.enum(["ok", "call", "help"]);
@@ -150,3 +156,50 @@ export type HistoryItem = {
   // internal tiebreaker for the cursor; stripped before responding
   key: string;
 };
+
+// ─── Person profiles: versioned, confirmed updates (docs/daybridge/PERSON_PROFILES.md) ───
+export const ProfileSource = z.enum(["create", "caregiver", "self", "intake", "feedback", "revert"]);
+export type ProfileSource = z.infer<typeof ProfileSource>;
+
+/** Append-only. unique(personId, version). */
+export const ProfileVersion = z.object({
+  personId: z.uuid(),
+  version: z.number().int().min(1),
+  profile: Profile,
+  createdAt: z.string(),
+  createdBy: UserId,
+  source: ProfileSource,
+  proposalId: z.string().optional(),
+});
+export type ProfileVersion = z.infer<typeof ProfileVersion>;
+
+/** Per-field validation via Profile.shape; unknown fields rejected. */
+export const ProfileChanges = Profile.partial().strict().refine((c) => Object.keys(c).length > 0, "changes must not be empty");
+export type ProfileChanges = z.infer<typeof ProfileChanges>;
+
+export const ProposalStatus = z.enum(["proposed", "confirmed", "rejected", "stale"]);
+export const ProfileProposal = z.object({
+  proposalId: z.string(),
+  personId: z.uuid(),
+  baseVersion: z.number().int().min(1),
+  changes: ProfileChanges,
+  evidence: z.string().trim().min(1).max(280),
+  source: z.enum(["caregiver", "self", "intake", "feedback"]),
+  proposedBy: UserId,
+  /** Set when imported from a coordination plan's feedback patches. */
+  planId: z.string().optional(),
+  status: ProposalStatus,
+  createdAt: z.string(),
+  decidedAt: z.string().optional(),
+  decidedBy: UserId.optional(),
+});
+export type ProfileProposal = z.infer<typeof ProfileProposal>;
+
+export const ProposeInput = z.object({
+  changes: ProfileChanges,
+  evidence: z.string().trim().min(1).max(280),
+  source: z.enum(["caregiver", "self", "intake"]).optional(),
+  baseVersion: z.number().int().min(1),
+});
+export const DecideInput = z.object({ expectedVersion: z.number().int().min(1) });
+export const RevertInput = z.object({ toVersion: z.number().int().min(1), expectedVersion: z.number().int().min(1) });
