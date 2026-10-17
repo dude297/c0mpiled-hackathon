@@ -1,5 +1,9 @@
 import type { AnalysisResult } from "@/lib/schema";
 
+export function resultForWeek(result: AnalysisResult, added: ReadonlySet<string>): AnalysisResult {
+  return { ...result, plan: result.plan.filter((item) => added.has(item.activityId)) };
+}
+
 // Body for POST /api/plans. Never includes the profile (the API rejects it with 400).
 export function buildShareRequest(result: AnalysisResult, firstNameOnly: boolean) {
   return { result, consent: true as const, firstNameOnly };
