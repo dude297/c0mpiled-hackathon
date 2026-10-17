@@ -47,6 +47,10 @@ export default function Home() {
   async function run(p: Profile = profile) {
     const id = ++reqId.current;
     const rebuilding = result !== null;
+    // integration: /coordinate reads this so "Get me there" plans for the same person (session-only, no PII leaves the browser).
+    try {
+      sessionStorage.setItem("daybridge:profile", JSON.stringify(p));
+    } catch {}
     setLoading(true);
     setError(null);
     setSaveState("idle");
