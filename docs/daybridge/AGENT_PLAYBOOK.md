@@ -1,66 +1,96 @@
 # DayBridge — Agent Playbook
 
-**Status:** active hackathon work agreement (2026-10-17). This document supplements, but does not replace, root AGENTS.md, CLAUDE.md and docs/handoffs. The existing Next.js-generated instructions in root AGENTS.md must remain intact.
+**Status:** hackathon work agreement (updated 2026-10-17). This supplements root `AGENTS.md`, `CLAUDE.md`, and the active human assignments in `docs/handoffs/`. Never remove the auto-generated Next.js section in root `AGENTS.md`.
 
-## Source of truth and current state
+## Source of truth and implementation status
 
-- Product intent and P0 acceptance criteria: docs/daybridge/PRODUCT_ENGINEERING_SPEC.md. Quick navigation: docs/daybridge/README.md.
-- Existing working baseline: Next.js 16 / React 19 / TypeScript / Zod / Vitest; src/domain/engine.ts already filters and ranks activities, src/lib/ai/adapter.ts already supports mock vs OpenAI-compatible local endpoint, and src/app/api/analyze is operational.
-- **Do not misrepresent proposed features as shipped.** Approval-gated invitation/ride workflows, immutable event logging, cancellation recovery, and confirmed feedback are planned P0 extensions and require implementation and tests.
-- Preserve src/lib/schema.ts contracts with existing /api/analyze and the dashboard while adding new schemas and routes. Get contract alignment before the UI agent consumes new endpoints.
-- Older human workstream assignments in docs/handoffs may still be active. Never take a file that an active human teammate owns until the lead explicitly transfers that file to the AI agent.
+- Product intent and P0 requirements: `docs/daybridge/PRODUCT_ENGINEERING_SPEC.md`.
+- Working baseline: Next.js 16 / React 19 / TypeScript / Zod / Vitest. `src/domain/engine.ts` ranks activities and identifies barriers; `/api/analyze` works; `src/lib/ai/adapter.ts` provides local-model-compatible explanation with fallback.
+- **Proposed, not yet shipped:** approval-gated coordination, durable event states, provider confirmations, cancellation recovery, confirmed preference learning. No document or pitch should imply these exist before merged tests demonstrate them.
+- Keep the existing `ScenarioInput` / `AnalysisResult` contracts and baseline tests functional. All new endpoints must use additive schemas and clear fixture/mock labeling.
 
-## Non-negotiable rules
+## Human team owns these files and deliverables — AI agents must not duplicate them
 
-1. **One owner per file and one branch per agent.** Open a PR; never push directly to main, auto-merge or deploy. Lead reviews integration.
-2. **Protect deploy quota.** Never connect hosting or run vercel deploy without explicit human approval. Keep vercel.json auto-deployment disabled.
-3. **Proof before polish.** npm run check and npm run build must pass before a code PR is review-ready. Include reproduction steps and screenshots when relevant.
-4. **Pure deterministic correctness core.** Models may parse or explain; only domain logic decides hard-constraint feasibility, approvals, and READY.
-5. **Specific authorization for side effects.** Contacting anyone, sharing information, booking, or spending requires a consent record scoped to target, action, payload and expiration. Consent cannot be inferred from a conversational guess.
-6. **External responses are evidence, not wishes.** Requested is not confirmed. RSVP is not attendance. READY requires all currently required dependencies confirmed.
-7. **Reversible and observable.** Any ride/required-RSVP loss invalidates READY. Log the event, recalculate, and request approval for changed action scope. Feedback generates a proposed preference patch until user confirms.
-8. **Offline-first demo.** Keep deterministic fictional fixtures and labeled mock providers. No live third-party credentials, payment, personal data, or production transportation booking in the golden path.
-9. **Minimize scope.** No payments, broad marketplace, auth, Supabase migrations, additional packages or infrastructure unless explicitly approved. Preserve AskFirst/GhostProtocol pivot flexibility.
-10. **Security and accessibility.** Never commit secrets; preserve server-only env vars. Make the UI keyboard usable with clear statuses and distinguish simulation from live evidence.
+| Owner | Exclusive scope | Files / deliverables |
+|---|---|---|
+| Teammate A | UI/UX, accessibility, layout, frontend endpoint wiring | `src/app/page.tsx`, `src/app/layout.tsx`, `src/app/globals.css`, `src/components/**` |
+| Teammate B | Real program research, activity catalog, demo profiles, pitch/slides/video/rehearsal | `src/domain/activities.ts`, source evidence for activities, slides, pitch and demo materials |
+| Human lead | Supabase save/share, local AI model endpoint/intake, secrets, architectural decisions and merges | `src/lib/ai/**`, `src/app/api/intake/**`, `src/app/api/plans/**`, `src/app/plan/**`, `src/lib/supabase.ts`, `supabase/**`, `.env.example`, deployment decisions |
 
-## Workflow and ownership (three parallel agents)
+These are **reserved**, not available to an AI agent by default. If a change is needed, supply a small interface request to its owner rather than editing that owner's files.
 
-### Claude Opus 5.5 — systems architect / correctness-critical engineer
+## Non-negotiable engineering rules
 
-Own: new src/domain/coordination/**, new src/app/api/coordination/**, additive schema changes in src/lib/schema.ts, and their dedicated tests. Does not own page.tsx or components. Preserve existing runScenario output.
+1. One owner per file, isolated branch per agent, reviewable PRs. Never push to `main`, auto-merge or deploy without explicit human approval.
+2. Deployment quota is scarce. Preserve `vercel.json` auto-deploy restrictions; never connect, push to or deploy with a hosting provider without approval.
+3. Correctness-critical decisions belong to deterministic `src/domain/` logic; model text never creates unverified facts, confirms a ride, overrides a hard barrier or infers consent.
+4. Side effects require an explicit, unexpired approval scoped to actor, recipient, action, exact information shared, and intended time. Approval cannot be inferred by the LLM.
+5. `REQUESTED` is not `CONFIRMED`, `CONFIRMED` is not `ATTENDED`, and `READY` requires every dependency confirmed. On cancellation, `READY` must be revoked immediately.
+6. Provider callbacks need stable idempotency keys and event evidence. Never claim real confirmations from a simulated provider.
+7. Feedback generates a proposed preference patch; apply it only after the user confirms.
+8. Local-first, reproducible and privacy-safe: no external messages, payments, real bookings or sensitive personal information in mock workflow tests.
+9. No new npm packages, databases, auth, infra, or UI/pitch features without lead approval. Maintain future pivot flexibility.
+10. Tests prove behavior. Before a coding PR: `npm run check`, `npm run build`, plus precise repro instructions. Disclose failures and unverified assumptions.
 
-Deliver: (1) versioned typed plan, intervention, approval and event contracts; (2) finite deterministic plan state machine; (3) explicit approval policy and idempotent mocked invite/ride commands; (4) proof that READY is impossible without confirmations; (5) cancellation invalidation and reprioritized recovery options; (6) proposed preference updates requiring confirmation; (7) minimal API contract documented before GLM integration.
+## AI workstreams — non-overlapping ownership
 
-Acceptance: tests for impossible hard constraints; unauthorized outbound action; pending vs confirmed; duplicate adapter callbacks; ride cancellation READY -> NEEDS_REPLAN; stale approvals; preference confirmation and reranking; and preserved legacy API tests.
+### Claude Opus 5.5 — deterministic coordination engine and contracts
 
-### GLM-5.3 Flash — frontend and demo experience
+**Own:** `src/domain/coordination/**`, `src/app/api/coordination/**`, additive changes to `src/lib/schema.ts`, and unit tests colocated with the new coordinator. May write `docs/daybridge/COORDINATION_CONTRACT.md`.
 
-Own only if human UI workstream is inactive or reassigned: src/app/page.tsx, src/app/globals.css, src/components/daybridge/** (new), and UI-only tests. Do not modify coordination engine, schemas, or APIs. For existing src/components/dashboard/** obtain explicit ownership from lead first.
+**Do not touch:** human-owned UI/catalog/AI/Supabase files, `src/simulation/**` (GLM), GPT Work documents, or existing `src/domain/engine.ts` unless the lead approves a narrow patch.
 
-Deliver: an accessible 4–5 minute guided experience with a profile, selected activity, visible blocker explanation, minimum-change proposal, specific consent action, pending/confirmed statuses, intervention timeline, simulated ride cancellation, replan, and reviewed preference patch. Make state clearly traceable; label all provider responses MOCK. Retain current /api/analyze panel or provide an obvious way to access it.
+**Sequence:**
+1. Publish a small, versioned Zod contract: plan/intervention/approval/dependency/event/preference patch, and request/response examples. Notify all owners.
+2. Implement a pure state machine and constraints. Plan states must distinguish blocked, proposal, waiting for consent, pending provider confirmation, ready, needs replan, and completed.
+3. Define injectable `ProviderPort` interface. Keep in-memory test doubles within Opus's own coordinator test files; GLM independently develops the reusable simulation adapter under its own path.
+4. Add scoped consent validation, idempotent event handling, cancellation invalidation, recovery suggestions, and approved feedback patch application.
+5. Provide a minimal coordination API using mock-safe event submission. Never dispatch real external messages or bookings. Preserve existing analysis endpoints and tests.
 
-Acceptance: golden scenario can be rehearsed from reset to recovery without a live service; responsive, clear empty/loading/error states, no optimistic READY; UI uses the Opus-frozen typed API contract. If that contract is unavailable, work on storyboard and static presentational components only.
+**Acceptance:** `READY` is impossible without confirmations, missing/stale consent is rejected, duplicate callbacks do not double-act, cancellation invalidates READY, feedback cannot silently change preferences, and regression checks pass.
 
-### GPT Work — independent product QA, integration readiness and judging narrative
+### GLM-5.3 Flash — simulation harness, integration tests and failure injection
 
-Own: docs/daybridge/EVALUATION_MATRIX.md, docs/daybridge/DEMO_RUNBOOK.md, docs/daybridge/JUDGE_NARRATIVE.md, and issue/PR review notes. No source-code edits unless lead grants an explicitly non-overlapping path.
+**Own:** new `src/simulation/**` and `docs/daybridge/SIMULATION_GUIDE.md` only. Add tests inside `src/simulation/**`. This is backend QA tooling **not UI and not the real activity catalog**.
 
-Deliver: a requirements-to-tests matrix mapping P0-1..P0-8 to evidence; adversarial failure cases and how to reproduce them; reproducible offline 4–5 minute script with clear before/after, interruption/recovery and local-inference disclosure; acceptance checklist with mock/live boundaries; concise pitch, credible metrics and fallback demo plan.
+**Do not touch:** `src/domain/activities.ts`, `src/domain/coordination/**`, `src/lib/schema.ts`, `src/lib/ai/**`, human UI files, or deployment.
 
-Acceptance: call out unimplemented features instead of assuming the product is complete. Inspect merged changes and provide a PASS/BLOCKED table, commands to run, and concrete blockers. Do not assert tests or hardware work unless verified.
+**Sequence:**
+1. Before Opus's API is frozen, implement baseline regression tests around existing `runScenario` with inline synthetic profiles and activities (no modification to the human-owned catalog).
+2. After Opus publishes `COORDINATION_CONTRACT.md`, write deterministic provider fixtures for invitation and ride replies: accepted, declined, timed out, late reply, duplicate, cancelled, and conflicting/out-of-order callbacks.
+3. Build an event-replay simulator using `ProviderPort` with a fixed seed/clock as needed; keep fixtures isolated from real services.
+4. Write integration tests for blocked -> proposal -> approval -> pending -> READY -> cancellation -> NEEDS_REPLAN -> reapproval -> READY -> proposed feedback patch -> confirmed patch. Test unauthorized outbound action and false READY.
+5. Report tests with exact command outputs; create one narrow PR with simulation and tests.
 
-## Parallel sequence and integration
+**Acceptance:** repeatable offline runs, no live data or network side effects, robust failure injection, zero overlap with teammates' files or Opus's code.
 
-1. Lead confirms who owns UI/data files and freezes scope for the event.
-2. Opus publishes typed schema, events and endpoint examples first; GLM builds presentational pieces against that contract. GPT Work drafts test scenarios and rubric in parallel.
-3. Opus opens a focused PR with tests; lead merges only after npm run check and npm run build pass.
-4. GLM rebases on the merged contract, connects UI, and opens a separate PR. GPT Work reviews behavior and prepares the demo runbook.
-5. Lead integrates, runs full offline golden path twice, and authorizes any hosted deployment explicitly. Keep the local fallback ready.
+### GPT Work — independent systems QA, integration risk, acceptance gate
 
-## Universal agent handoff format
+**Own:** `docs/daybridge/EVALUATION_MATRIX.md`, `docs/daybridge/THREAT_AND_FAILURE_REVIEW.md`, `docs/daybridge/INTEGRATION_CHECKLIST.md`, and PR review notes. No source-code modifications by default.
 
-For every session/PR provide: goal, files changed, assumptions, what is implemented vs mocked, tests run with exact output, known risks, next owner and blockers. No claims of completion without executable proof.
+**Do not own:** slides, pitch, demo video or runbook, activity research/catalog, UI, Supabase implementation or AI adapter. Those belong to teammates/lead.
 
-## P0 stop condition
+**Sequence:**
+1. Audit actual repository implementation against P0-1 through P0-8, marking implemented/partial/missing with file paths.
+2. Identify state, consent, privacy, accessibility, integration, mock/live provenance, bad external data, and local-model availability risks; offer concrete verification steps.
+3. Review Opus's contract and GLM's tests independently for correctness gaps, file-ownership conflicts and untested boundary conditions.
+4. Create an integration gate: branch order, contract freeze, `npm run check`, `npm run build`, local inference/fallback honesty, provider mock evidence, deploy budget, and rollback plan.
+5. Provide the lead a short GO / NO-GO assessment with blockers and concrete requests for the responsible teammate. Do not make pitch materials for Teammate B.
 
-Stop adding features once the offline demo demonstrates: blocked -> proposed intervention -> scoped consent -> confirmed READY -> ride cancelled -> NEEDS_REPLAN -> revised consent/READY -> feedback patch proposed/confirmed, with every transition audit-visible and no hard-constraint/consent violation.
+**Acceptance:** traceable repo evidence, clear false-ready/consent threat cases, ownership-aware task requests, independently verifiable release checklist.
+
+## Parallel execution and dependencies
+
+1. **Immediately:** GPT Work audits the baseline; GLM runs independent baseline regression/failure test preparation; Opus freezes the coordination contracts.
+2. **After contract freeze:** GLM implements simulated provider adapter + coordinator integration tests; Teammate A can integrate endpoints in the UI only through their assigned branch; human lead retains local model and Supabase.
+3. **PR order:** Opus contract/core -> GLM simulator/tests -> human-owned UI/data integration -> Work acceptance report; order can change if dependencies demand it. No bot pushes to main.
+4. **Lead approves:** integration, full `npm run check` and `npm run build`, offline recovery trace, human demo/pitch rehearsal, and any deploy.
+5. If scope must shrink, prioritize an end-to-end feasible plan with auditable blocked/approved/confirmed states over P1 embellishments.
+
+## Handoff format
+
+Each PR or agent report must give: goal; exactly owned files changed; baseline/branch; completed vs mocked; tests and exact outputs; risky assumptions; open blockers; next owner; and whether deployment occurred (default: no).
+
+## P0 stopping point
+
+Stop new work once the app + offline simulator reliably proves: a hard barrier is not ignored; a proposed intervention is explicitly approved; providers can be pending and then confirmed; READY requires all dependencies; a simulated ride cancellation invalidates READY; recovery requires new approval if scope changes; and feedback modifies preferences only after confirmation.
