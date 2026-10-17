@@ -50,6 +50,20 @@ export function isAccessError(error: unknown) {
   return error instanceof CareApiError && [401, 403, 404].includes(error.status);
 }
 
+/** Invalidate pending reads and bound automatic permission retries after a child loses access. */
+export class CareAccessBoundary {
+  revision = 0;
+  private historyRevalidated = false;
+  isCurrent(revision: number) { return revision === this.revision; }
+  invalidate(fromHistory = false) {
+    this.revision += 1;
+    if (fromHistory && this.historyRevalidated) return false;
+    this.historyRevalidated = true;
+    return true;
+  }
+  reset() { this.revision += 1; this.historyRevalidated = false; }
+}
+
 /** Keep the same key after an ambiguous network failure; editing the form starts a new submission. */
 export class CheckInDraft {
   private previous: { payload: string; key: string } | null = null;

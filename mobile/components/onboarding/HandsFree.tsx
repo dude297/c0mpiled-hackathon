@@ -1,4 +1,4 @@
-// Hands-free interest cards: look or turn toward a screen half (1.2 s), or tilt (0.8 s).
+// Hands-free interest cards: move your eyes toward a screen half (1 s), or tilt your head (0.8 s).
 // Runs in Expo Go: the camera + MediaPipe Face Landmarker live in a small WebView tile
 // (lib/handsfreePage.ts) that posts progress / answer messages; everything you see here is native.
 // Answers go through SwipeDeck's own swipe(), the same path as the No / Yes buttons, which keep working.
@@ -8,8 +8,8 @@ import { AccessibilityInfo, Platform, Pressable, ScrollView, StyleSheet, Text, V
 import Animated, { useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from 'react-native-reanimated';
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } from 'react-native-webview';
 
-import type { Mode } from '@/lib/handsfree';
-import { buildHandsFreeHtml, HANDSFREE_BASE_URL, parsePageMessage, type PageError } from '@/lib/handsfreePage';
+import type { Mode, Zone } from '@/lib/handsfree';
+import { buildHandsFreeHtml, HANDSFREE_BASE_URL, handsFreeModeScript, parsePageMessage, type PageError } from '@/lib/handsfreePage';
 import { INTEREST_META } from '@/lib/onboarding';
 import { colors, radius, space, tap, type } from '@/lib/theme';
 
@@ -103,7 +103,7 @@ function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void })
             key={m}
             accessibilityRole="radio"
             aria-checked={on}
-            accessibilityLabel={m === 'look' ? 'Look to answer' : 'Tilt your head to answer'}
+            accessibilityLabel={m === 'look' ? 'Move your eyes to answer' : 'Tilt your head to answer'}
             onPress={() => onMode(m)}
             style={({ pressed }) => [st.segBtn, on && st.segOn, pressed && ui.pressed]}>
             <Ionicons name={icon} size={22} color={on ? colors.onTileSelected : colors.text} />
@@ -116,11 +116,13 @@ function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void })
 }
 
 export function HandsFreeDeck({
+  sampleInterests,
   cursor,
   enterFrom,
   onAnswer,
   onBack,
 }: {
+  sampleInterests?: readonly Interest['key'][];
   cursor: number;
   enterFrom: 1 | -1 | null;
   onAnswer: (key: Interest['key'], liked: boolean) => void;
@@ -130,6 +132,11 @@ export function HandsFreeDeck({
   const deckRef = useRef<SwipeDeckHandle>(null);
   const webRef = useRef<WebViewHandle>(null);
   const [mode, setMode] = useState<Mode>('look');
+  // Read by the ready handshake even if the selection changed while the WebView was loading.
+  const modeRef = useRef<Mode>('look');
+  const [swapSides, setSwapSides] = useState(false); // persisted in the camera page's localStorage
+  const [pageReady, setPageReady] = useState(false);
+  const [meter, setMeter] = useState<{ signal: number; reading: number; zone: Zone; mode: Mode }>({ signal: 0, reading: 0, zone: 'center', mode: 'look' });
   const [phase, setPhase] = useState<Phase>('idle');
   const [attempt, setAttempt] = useState(0); // bump to (re)mount the camera page
   const [html, setHtml] = useState(''); // built per start; later mode changes are sent to the running page
@@ -164,7 +171,9 @@ export function HandsFreeDeck({
     setDetail('Opening the camera page…');
     setFace(null);
     setCalib(0);
+    setPageReady(false);
     setProgress({ side: null, value: 0 });
+    setMeter({ signal: 0, reading: 0, zone: 'center', mode: modeRef.current });
     setHtml(buildHandsFreeHtml(mode));
     setAttempt((a) => a + 1);
     setPhase('starting');
@@ -175,12 +184,20 @@ export function HandsFreeDeck({
     setProgress({ side: null, value: 0 });
   };
   const pickMode = (m: Mode) => {
+    modeRef.current = m;
     setMode(m);
+    setMeter({ signal: 0, reading: 0, zone: 'center', mode: m });
     setProgress({ side: null, value: 0 });
-    webRef.current?.injectJavaScript(`window.__hf && window.__hf.setMode(${JSON.stringify(m)}); true;`);
+    webRef.current?.injectJavaScript(handsFreeModeScript(m));
+  };
+  const swap = () => {
+    const next = !swapSides;
+    setSwapSides(next);
+    setProgress({ side: null, value: 0 });
+    webRef.current?.injectJavaScript(`window.__hf && window.__hf.setSwapSides(${next}); true;`);
   };
 
-  // Every answer lands here — gaze/yaw/tilt, the No/Yes bar and a finger swipe —
+  // Every answer lands here — eyes/tilt, the No/Yes bar and a finger swipe —
   // so each one is announced ("Liked Gardening") before it's recorded.
   const recordAnswer = (key: Interest['key'], liked: boolean) => {
     const label = INTEREST_META.find((i) => i.key === key)?.label;
@@ -198,9 +215,18 @@ export function HandsFreeDeck({
     const m = parsePageMessage(e.nativeEvent.data);
     if (!m) return;
     lastMsg.current = Date.now();
-    if (m.type === 'progress') setProgress({ side: m.side, value: m.value });
-    else if (m.type === 'answer') answer(m.liked);
-    else if (m.state === 'error') {
+    if (m.type === 'ready') {
+      setPageReady(true);
+      setSwapSides(m.swapSides);
+      webRef.current?.injectJavaScript(handsFreeModeScript(modeRef.current));
+    } else if (m.type === 'progress') {
+      // Drop queued frames from the previous mode so old holds cannot repaint the panel.
+      if (m.mode !== modeRef.current) return;
+      setProgress({ side: m.side, value: m.value });
+      setMeter({ signal: m.signal, reading: m.reading, zone: m.zone, mode: m.mode });
+    } else if (m.type === 'answer') {
+      if (m.mode === modeRef.current) answer(m.liked);
+    } else if (m.state === 'error') {
       setError(m.error);
       setDetail(m.detail ?? '');
       setPhase('error');
@@ -232,13 +258,14 @@ export function HandsFreeDeck({
   else if (phase === 'loading') statusText = detail || 'Getting ready… (a few seconds)';
   else if (face === false) statusText = "Can't see your face. Hold the phone in front of you, in good light.";
   else if (phase === 'calibrating') {
-    statusText = 'Look at the middle of the screen…';
+    statusText = mode === 'look' ? 'Keep your head still and look at the middle…' : 'Hold your head upright and look at the middle…';
     percent = `${Math.round(calib * 100)}%`;
   } else if (tracking)
-    statusText = mode === 'look' ? 'Hold a look or turn for 1.2s, then return to the middle.' : 'Tilt your head toward No or Yes and hold.';
+    statusText = mode === 'look' ? 'Move only your eyes left or right. Hold for 1s, then look at the middle.' : 'Tilt your head toward No or Yes and hold.';
 
   return (
     <SwipeDeck
+      sampleInterests={sampleInterests}
       compact
       ref={deckRef}
       cursor={cursor}
@@ -299,12 +326,29 @@ export function HandsFreeDeck({
                   ) : null}
                 </View>
               </View>
+              <View style={st.meter}>
+                <View style={st.liveRow}>
+                  <Text style={st.privacy}>No</Text>
+                  <View style={st.meterTrack}>
+                    <View style={st.meterCenter} />
+                    <View style={[st.meterDot, { left: `${(meter.signal + 1) * 50}%` }]} />
+                  </View>
+                  <Text style={st.privacy}>Yes</Text>
+                </View>
+                <Text style={st.privacy}>Seeing: {meter.zone} · {meter.mode === 'look' ? 'Look (eyes)' : 'Tilt (head)'}</Text>
+                <Text style={st.privacy}>{meter.mode === 'look' ? 'Eyes' : 'Tilt'}: {meter.reading.toFixed(2)}{meter.mode === 'tilt' ? '°' : ''}</Text>
+              </View>
               <View style={st.liveRow}>
                 <View style={{ flex: 1 }}>
                   <ModeSwitch mode={mode} onMode={pickMode} />
                 </View>
                 <PillButton variant="outline" icon="stop-circle-outline" label="Stop" onPress={stop} hint="Turns the camera off" style={st.stop} />
               </View>
+              <Pressable accessibilityRole="switch" accessibilityState={{ checked: swapSides }} accessibilityLabel="Swap sides"
+                disabled={!pageReady} onPress={swap} style={({ pressed }) => [st.swap, pressed && ui.pressed]}>
+                <Text style={[type.label, { color: colors.text }]}>Swap sides</Text>
+                <Ionicons name={swapSides ? 'toggle' : 'toggle-outline'} size={28} color={swapSides ? colors.like : colors.textMuted} />
+              </Pressable>
             </>
           ) : (
             <>
@@ -322,7 +366,7 @@ export function HandsFreeDeck({
                 style={st.bigStart}
               />
               <Text numberOfLines={2} style={st.instruction}>
-                Look, turn or tilt left for No, right for Yes. You can also tap the buttons.
+                Look with your eyes or tilt your head: left for No, right for Yes. You can also tap the buttons.
               </Text>
               <ModeSwitch mode={mode} onMode={pickMode} />
             </>
@@ -344,7 +388,7 @@ const st = StyleSheet.create({
   panel: {
     marginHorizontal: space.md,
     marginTop: space.xs,
-    maxHeight: 212,
+    maxHeight: 292,
     flexGrow: 0,
     flexShrink: 0,
     borderRadius: radius.lg,
@@ -354,6 +398,11 @@ const st = StyleSheet.create({
   },
   panelContent: { padding: space.sm, gap: space.xs },
   liveRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  meter: { gap: 3, paddingHorizontal: space.xs },
+  meterTrack: { flex: 1, height: 6, borderRadius: 3, backgroundColor: colors.border, marginHorizontal: 6 },
+  meterCenter: { position: 'absolute', left: '50%', top: -3, height: 12, width: 1, backgroundColor: colors.textMuted },
+  meterDot: { position: 'absolute', top: -3, marginLeft: -6, width: 12, height: 12, borderRadius: 6, backgroundColor: colors.text },
+  swap: { minHeight: tap.min, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: space.xs },
   stop: { minHeight: tap.min, paddingHorizontal: space.md },
   instruction: { fontSize: 15, lineHeight: 19, color: colors.text },
   privacy: { fontSize: 13, lineHeight: 16, color: colors.textMuted },

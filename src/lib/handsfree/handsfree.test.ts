@@ -37,6 +37,13 @@ describe("gazeFromBlendshapes", () => {
     expect(gazeFromBlendshapes(shapes({ eyeLookInLeft: 0.4, eyeLookOutRight: 0.4 }), true)).toBeCloseTo(-0.4);
     expect(gazeFromBlendshapes(shapes({ eyeLookInLeft: 3, eyeLookOutRight: 3 }))).toBe(1);
   });
+  it("keeps a nonfinite blendshape unusable instead of turning it into a full-strength gaze", () => {
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const gaze = gazeFromBlendshapes(shapes({ eyeLookInLeft: value, eyeLookOutRight: 0.2 }));
+      expect(Number.isNaN(gaze)).toBe(true);
+      expect(classifyZone(combineLook({ gaze, yaw: 0 }, { gaze: 0, yaw: 0 }), "center", 0.14, 0.04)).toBeNull();
+    }
+  });
 });
 
 describe("yawFromLandmarks", () => {
@@ -70,6 +77,11 @@ describe("yawFromLandmarks", () => {
     expect(yawFromLandmarks(a, a, { x: Infinity, y: 0.5 })).toBeNull();
     for (const aspect of [0, -1, Infinity]) expect(yawFromLandmarks(a, a, b, aspect)).toBeNull();
   });
+
+  it("rejects overflow from finite coordinates instead of treating it as a face", () => {
+    expect(yawFromLandmarks({ x: 0, y: 0 }, { x: -1e308, y: 0 }, { x: 1e308, y: 0 })).toBeNull();
+    expect(yawFromLandmarks({ x: -1e308, y: 0 }, { x: 1e308, y: 0 }, { x: 1e308, y: 1 })).toBeNull();
+  });
 });
 
 describe("combineLook", () => {
@@ -89,6 +101,14 @@ describe("combineLook", () => {
     expect(combineLook({ gaze: -0.1, yaw: 0.3 }, { gaze: 0, yaw: 0 })).toBeCloseTo(0.2);
     expect(combineLook({ gaze: 0.1, yaw: -0.3 }, { gaze: 0, yaw: 0 })).toBeCloseTo(-0.2);
     expect(combineLook({ gaze: 0.2, yaw: -0.2 }, { gaze: 0, yaw: 0 })).toBe(0);
+  });
+
+  it("rejects nonfinite signals instead of clamping infinity into an intentional answer", () => {
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(Number.isNaN(combineLook({ gaze: value, yaw: 0 }, base))).toBe(true);
+      expect(Number.isNaN(combineLook({ gaze: 0, yaw: value }, base))).toBe(true);
+      expect(Number.isNaN(combineLook(base, { gaze: value, yaw: 0 }))).toBe(true);
+    }
   });
 });
 
@@ -117,6 +137,17 @@ describe("rollFromEyeCorners", () => {
 
 describe("classifyZone (hysteresis)", () => {
   const { threshold: T, hysteresis: H } = MODE_CONFIG.look;
+  it("treats invalid signals as lost tracking, which cannot rearm or finish a dwell", () => {
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      const zone = classifyZone(value, "right", T, H);
+      expect(zone).toBeNull();
+      const half = run([...frames("center", 0, 400), ...frames("right", 500, 1000)]);
+      const invalid = stepDwell(half.state, zone, 1100, MODE_CONFIG.look.dwellMs, REARM_MS);
+      expect(invalid.state.armed).toBe(false);
+      expect(invalid.progress).toBe(0);
+      expect(run(frames("right", 1200, 4000), MODE_CONFIG.look.dwellMs, invalid.state).fired).toEqual([]);
+    }
+  });
   it("enters a side only past the threshold", () => {
     expect(T).toBeGreaterThanOrEqual(0.12);
     expect(T).toBeLessThanOrEqual(0.15);
@@ -313,6 +344,38 @@ describe("stepCalibration", () => {
     const r = feed([[0, { ...normal, yaw: 0.9 }], ...ticks(100, 2100, normal, 100)]);
     expect(r.base).toEqual(normal);
     expect(combineLook(normal, r.base!)).toBe(0);
+  });
+
+  it("does not finish calibration using nonfinite gaze, yaw or tilt samples", () => {
+    for (const field of ["gaze", "yaw", "tilt"] as const) {
+      for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+        const r = feed(ticks(0, 3000, { gaze: 0, yaw: 0, tilt: 0, [field]: value }, 100));
+        expect(r.base).toBeNull();
+        expect(r.calib.faceMs).toBe(0);
+        expect(r.calib.gaze).toEqual([]);
+      }
+    }
+  });
+
+  it("recovers from an invalid clock without poisoning the finite baseline", () => {
+    const neutral = { gaze: 0.1, yaw: -0.04, tilt: 2 };
+    for (const t of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, -1]) {
+      const r = feed([[t, neutral], ...ticks(0, 2100, neutral, 100)]);
+      expect(r.base).toEqual(neutral);
+      expect(Number.isFinite(r.calib.faceMs)).toBe(true);
+    }
+  });
+
+  it("does not count backwards time or an invalid sample toward calibration", () => {
+    const neutral = { gaze: 0.1, yaw: -0.04, tilt: 2 };
+    const first = stepCalibration(initialCalibration(), 100, neutral).calib;
+    for (const [t, sample] of [[50, neutral], [200, { ...neutral, yaw: Number.NaN }]] as const) {
+      const invalid = stepCalibration(first, t, sample);
+      expect(invalid.calib).toEqual({ ...first, lastT: null });
+      expect(invalid.base).toBeNull();
+      const resumed = stepCalibration(invalid.calib, 300, neutral);
+      expect(resumed.calib.faceMs).toBe(first.faceMs);
+    }
   });
 });
 

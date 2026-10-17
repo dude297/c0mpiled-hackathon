@@ -1,11 +1,12 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Copy, Link2, LoaderCircle, Share2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { AnalysisResult } from "@/lib/schema";
 import { buildShareRequest, describeShareStatus, describeStopStatus, isMemoryStore, NETWORK_ERROR, type Outcome, type ShareCreated } from "./request";
+import { activeStoredShares, shareRecord, shareSessionKey, type StoredShare } from "./session";
 
 const checkCls = "flex min-h-11 cursor-pointer items-start gap-3 rounded-md py-2";
 const boxCls = "mt-1 size-5 shrink-0 accent-primary";
@@ -15,11 +16,41 @@ export function ShareControl({ result }: { result: AnalysisResult | null }): Rea
   const [consent, setConsent] = useState(false);
   const [firstNameOnly, setFirstNameOnly] = useState(false);
   const [busy, setBusy] = useState(false);
-  // revokeToken lives only in this state — never in storage or the URL.
+  // Creator capabilities stay in this tab's sessionStorage, never in a URL or localStorage.
   const [share, setShare] = useState<ShareCreated | null>(null);
+  const [activeShares, setActiveShares] = useState<StoredShare[]>([]);
   const [notice, setNotice] = useState<Outcome | null>(null);
   const [copied, setCopied] = useState(false);
   const linkRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        const entries = Array.from({ length: sessionStorage.length }, (_, index) => {
+          const key = sessionStorage.key(index)!;
+          return [key, sessionStorage.getItem(key)] as const;
+        });
+        setActiveShares(activeStoredShares(entries, Date.now()));
+      } catch { /* Storage may be disabled; new links remain manageable in this page. */ }
+    }, 0);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!activeShares.length) return;
+    const nextExpiry = Math.min(...activeShares.map((entry) => Date.parse(entry.expiresAt)));
+    const timer = setTimeout(() => {
+      const now = Date.now();
+      for (const entry of activeShares) {
+        if (Date.parse(entry.expiresAt) <= now) {
+          try { sessionStorage.removeItem(shareSessionKey(entry.id)); } catch {}
+        }
+      }
+      setActiveShares((entries) => entries.filter((entry) => Date.parse(entry.expiresAt) > now));
+      setShare((current) => current && Date.parse(current.expiresAt) > now ? current : null);
+    }, Math.min(Math.max(0, nextExpiry - Date.now()), 2_147_483_647));
+    return () => clearTimeout(timer);
+  }, [activeShares]);
 
   const link = share ? window.location.origin + share.url : "";
 
@@ -34,7 +65,15 @@ export function ShareControl({ result }: { result: AnalysisResult | null }): Rea
         body: JSON.stringify(buildShareRequest(result, firstNameOnly)),
       });
       if (res.status === 201) {
-        setShare((await res.json()) as ShareCreated);
+        const created = (await res.json()) as ShareCreated;
+        const record = shareRecord(created);
+        setShare(created);
+        setActiveShares((entries) => [...entries.filter((entry) => entry.id !== record.id), record]);
+        try {
+          sessionStorage.setItem(shareSessionKey(record.id), JSON.stringify(record));
+        } catch {
+          setNotice({ kind: "error", message: "This browser couldn't save the Stop sharing control. Keep this page open to manage this link." });
+        }
         setCopied(false);
       } else setNotice(describeShareStatus(res.status));
     } catch {
@@ -44,18 +83,19 @@ export function ShareControl({ result }: { result: AnalysisResult | null }): Rea
     }
   }
 
-  async function stop() {
-    if (!share) return;
+  async function stop(entry: StoredShare) {
     setBusy(true);
     try {
-      const res = await fetch(`/api/plans/${encodeURIComponent(share.id)}`, {
+      const res = await fetch(`/api/plans/${encodeURIComponent(entry.id)}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${share.revokeToken}` },
+        headers: { Authorization: `Bearer ${entry.revokeToken}` },
       });
       const outcome = describeStopStatus(res.status);
       setNotice(outcome);
       if (outcome.kind === "ok") {
-        setShare(null);
+        try { sessionStorage.removeItem(shareSessionKey(entry.id)); } catch {}
+        setActiveShares((entries) => entries.filter((current) => current.id !== entry.id));
+        setShare((current) => current?.id === entry.id ? null : current);
         setConsent(false);
       }
     } catch {
@@ -84,6 +124,8 @@ export function ShareControl({ result }: { result: AnalysisResult | null }): Rea
       {notice.message}
     </p>
   );
+
+  if (!result && !activeShares.length) return <></>;
 
   return (
     <Card className="print:hidden">
@@ -121,11 +163,6 @@ export function ShareControl({ result }: { result: AnalysisResult | null }): Rea
               <time dateTime={share.expiresAt}>{new Date(share.expiresAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</time>.
             </p>
             {isMemoryStore(share) && <p className="text-muted-foreground">Demo link: it only works while this demo server is running.</p>}
-            <Button variant="destructive" size="lg" className="min-h-11 self-start" onClick={stop} disabled={busy}>
-              {busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Link2 aria-hidden="true" />}
-              Stop sharing
-            </Button>
-            {noticeEl}
           </>
         ) : (
           <>
@@ -146,9 +183,28 @@ export function ShareControl({ result }: { result: AnalysisResult | null }): Rea
                 Tick the box above to enable sharing.
               </p>
             )}
-            {noticeEl}
           </>
         )}
+        {activeShares.length > 0 && (
+          <section aria-labelledby={`${id}-active`} className="space-y-3">
+            <h3 id={`${id}-active`} className="font-semibold">Active shared links</h3>
+            <p className="text-muted-foreground">Demo links work while this demo server is running.</p>
+            <ul className="space-y-3">
+              {activeShares.map((entry) => (
+                <li key={entry.id} className="flex flex-wrap items-center gap-3 rounded-md border p-3">
+                  <div className="min-w-0 flex-1 break-all">
+                    <a className="underline underline-offset-4" href={`/plan/${encodeURIComponent(entry.id)}`}>/plan/{entry.id}</a>
+                    <p className="text-sm">Expires <time dateTime={entry.expiresAt}>{new Date(entry.expiresAt).toLocaleString()}</time></p>
+                  </div>
+                  <Button variant="destructive" size="lg" className="min-h-11" onClick={() => void stop(entry)} disabled={busy}>
+                    <Link2 aria-hidden="true" />Stop sharing
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {noticeEl}
       </CardContent>
     </Card>
   );

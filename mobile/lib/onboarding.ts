@@ -60,6 +60,38 @@ export const COMFORT_OPTIONS = [
 ] as const;
 export type ComfortKey = (typeof COMFORT_OPTIONS)[number]['key'];
 
+export type AnswerMode = 'swipe' | 'easy' | 'hands';
+export type PersonChoice = 'margaret' | 'self';
+
+export function canStartIntake(person: PersonChoice | null, name: string, mode: AnswerMode | null): boolean {
+  return mode !== null && (person === 'margaret' || (person === 'self' && name.trim().length > 0));
+}
+
+// Existing matches restore every answer. A new demo leaves swipe/hands-free interests for the cards;
+// Easier view starts with editable sample selections. Later sample answers are explicit, not defaults.
+export function profileToDraft(p: Profile, name = p.name, includeInterests = true) {
+  const comfort: ComfortKey[] = [
+    ...(p.hearingImpaired ? ['hearing' as const] : []),
+    ...(p.prefersSmallGroups ? ['smallGroups' as const] : []),
+  ];
+  return {
+    name,
+    liked: (includeInterests
+      ? Object.fromEntries(INTEREST_META.map((i) => [i.key, p.interests.includes(i.key)]))
+      : {}) as Partial<Record<Interest, boolean>>,
+    times: [...p.times],
+    travel: p.maxTravelMin,
+    mobility: p.mobility,
+    transport: [...p.transport],
+    comfort: comfort.length ? comfort : (['neither'] as ComfortKey[]),
+    budget: p.budgetPerWeek,
+  };
+}
+
+export function prefillDemo(p: Profile, mode: AnswerMode | null) {
+  return profileToDraft(p, p.name, mode === 'easy');
+}
+
 // Tap on the comfort card: "Neither" clears the others; any other option clears "Neither".
 export function toggleComfort(prev: readonly ComfortKey[], key: ComfortKey): ComfortKey[] {
   if (prev.includes(key)) return prev.filter((k) => k !== key);

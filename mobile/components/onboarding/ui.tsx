@@ -19,8 +19,8 @@ export const haptic = {
 };
 
 // Moves screen-reader (and web keyboard) focus to a new card's heading when the card appears.
-export function useHeadingFocus() {
-  const ref = useRef<ComponentRef<typeof Text>>(null);
+export function useHeadingFocus<T extends ComponentRef<typeof Text> | ComponentRef<typeof View> = ComponentRef<typeof Text>>() {
+  const ref = useRef<T>(null);
   useEffect(() => {
     const node = ref.current;
     if (!node) return;
@@ -62,7 +62,7 @@ export function PillButton({
       accessibilityRole="button"
       accessibilityLabel={a11yLabel ?? label}
       accessibilityHint={hint}
-      aria-disabled={!!disabled}
+      accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
@@ -73,7 +73,7 @@ export function PillButton({
         style,
       ]}>
       {icon && <Ionicons name={icon} size={24} color={fg} />}
-      <Text style={[type.button, { color: fg }]}>{label}</Text>
+      <Text style={[type.button, { color: fg, flexShrink: 1, textAlign: 'center' }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -100,7 +100,7 @@ export function CircleButton({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={a11yLabel}
-      aria-disabled={!!disabled}
+      accessibilityState={{ disabled: !!disabled }}
       disabled={disabled}
       onPress={onPress}
       hitSlop={8}
@@ -121,6 +121,7 @@ export function OptionRow({
   icon,
   selected,
   multi,
+  disabled,
   onPress,
 }: {
   label: string;
@@ -129,6 +130,7 @@ export function OptionRow({
   icon?: IconName;
   selected: boolean;
   multi?: boolean;
+  disabled?: boolean;
   onPress: () => void;
 }) {
   const fg = selected ? colors.onTileSelected : colors.text;
@@ -138,10 +140,11 @@ export function OptionRow({
   return (
     <Pressable
       accessibilityRole={multi ? 'checkbox' : 'radio'}
-      aria-checked={selected}
+      accessibilityState={{ checked: selected, disabled: !!disabled }}
       accessibilityLabel={detail ? `${label}, ${detail}` : label}
+      disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [s.option, selected && s.optionOn, pressed && s.pressed]}>
+      style={({ pressed }) => [s.option, selected && s.optionOn, disabled && s.disabled, pressed && s.pressed]}>
       {emoji ? (
         <Text style={s.emoji} importantForAccessibility="no">{emoji}</Text>
       ) : icon ? (
@@ -160,6 +163,7 @@ export const s = StyleSheet.create({
   pill: {
     minHeight: tap.min + 8,
     paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
     borderRadius: radius.pill,
     flexDirection: 'row',
     alignItems: 'center',
