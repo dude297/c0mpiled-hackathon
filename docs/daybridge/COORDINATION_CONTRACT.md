@@ -59,7 +59,9 @@ stateDiagram-v2
 - **Versions:** each replan bumps `plan.version`. Actions that aren't carried over become `superseded`; they no longer count, and their events are ignored.
 - **Carry-over:** on replan, a current action with an identical scope carries over (keeping its original `id` and `idempotencyKey`) if its dependency is `confirmed` or `requested` (in flight), or if it is `approved` with `dispatchError: true` (unknown outcome). Nobody already asked is asked again: e.g. a friend's accepted invite survives a ride cancellation and is not re-sent. Everything else needs fresh approval.
 - **Settle** runs after `execute`, `accept_proposal` and every applied provider event, in any non-closed state: any failed current dependency (declined/cancelled/failed) → NEEDS_REPLAN; otherwise READY exactly when `readyViolations` is empty.
-- **Recovery** and `choose_alternative` keep exclusions: recipients that declined, cancelled or failed are never proposed again in this plan. Ride options are tried in this order: contacts with `canDrive`, then paratransit. If none is left, the transport blocker becomes hard and `alternatives` are listed.
+- **Recovery** and `choose_alternative` keep exclusions: recipients that declined, cancelled or failed are never proposed again in this plan. Ride options are tried in this order: contacts with `canDrive`, then the generic family ride (`recipientId: "family"`), then paratransit. If none is left, the transport blocker becomes hard and `alternatives` are listed.
+- **Generic family ride (#28):** when the route needs a family ride (profile `transport` includes `family`, family time ≤ `maxTravelMin`) and no listed contact can drive, the ride action goes to the reserved recipient `"family"` ("Ride from family (you'll arrange it)"). It is still a normal external dependency: scoped approval, mock dispatch, and a `ride.confirmed` event before READY. It is skipped once any `canDrive` contact has declined/cancelled/failed in this plan (that contact *is* the family), so e.g. Dan cancelling still recovers to paratransit. This keeps coordination in agreement with `/api/analyze`: no activity analyze marks feasible comes back BLOCKED at creation. UIs should label `recipientId: "family"` as "Family" (cosmetic only).
+- **Companion invite (#28):** the "invite a friend" action never targets the contact who is the ride recipient in the same proposal (nor excluded recipients). If no other contact is left, the social intervention is the `user_step` "Bring a friend for the first visit" (no dependency).
 - **Preferences** change only through `confirm_preference`. `feedback` only adds `proposed` patches. A patch whose `from` no longer matches the profile is rejected as stale. Applying a patch bumps `profileVersion`.
 
 ## 3. HTTP API
@@ -81,7 +83,7 @@ Status codes:
   "contacts": [ { "id": "elaine", "name": "Elaine", "relation": "friend", "canDrive": false },
                 { "id": "dan", "name": "Dan", "relation": "son", "canDrive": true } ] }
 ```
-Contacts (max 10): ids must be unique, and `"paratransit"` is reserved; either violation → 400.
+Contacts (max 10): ids must be unique, and `"paratransit"` and `"family"` are reserved; either violation → 400.
 
 → `plan.state` is `PROPOSED` or `BLOCKED`. Key plan fields:
 - `id`, `version`, `profile`, `profileVersion`, `contacts`, `activityId`, `activityName`, `when`
