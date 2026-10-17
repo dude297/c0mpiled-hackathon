@@ -10,7 +10,12 @@ export const coordinator = (g.__daybridgeCoordinator ??= createCoordinator({ pro
 // Demo-only provider callback endpoint; disabled in production unless explicitly enabled.
 export const demoEventsEnabled = () => process.env.NODE_ENV !== "production" || process.env.DAYBRIDGE_DEMO_EVENTS === "1";
 
+// Hosted production has no auth or durable store yet (see PERSISTENCE_AUTH_PROPOSAL.md): fail closed.
+// The local demo runs `next start` with DAYBRIDGE_DEMO_EVENTS=1, which keeps the full flow working there.
+export const HOSTED_DISABLED = "Coordination runs in the local demo for now. The hosted version needs sign-in and storage first.";
+
 export async function handle(fn: () => Promise<unknown>) {
+  if (!demoEventsEnabled()) return Response.json({ error: HOSTED_DISABLED }, { status: 503 });
   try {
     return Response.json(await fn());
   } catch (err) {
