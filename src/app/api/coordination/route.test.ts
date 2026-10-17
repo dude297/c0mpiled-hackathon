@@ -70,6 +70,17 @@ describe("coordination API", () => {
     expect((await demo(json({}))).status).toBe(200);
   });
 
+  it("fails closed in hosted production: every coordination route returns 503 without the local-demo flag", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const created = await create(json({ profile: DEMO_PROFILES.margaret, activityId: ACTIVITIES[0].id }));
+    expect(created.status).toBe(503);
+    expect(((await created.json()) as { error: string }).error).toMatch(/local demo/);
+    expect((await getPlan(new Request("http://test"), ctx("any"))).status).toBe(503);
+    expect((await command(json({ type: "cancel" }), ctx("any"))).status).toBe(503);
+    vi.stubEnv("DAYBRIDGE_DEMO_EVENTS", "1");
+    expect((await create(json({ profile: DEMO_PROFILES.margaret, activityId: ACTIVITIES[0].id }))).status).toBe(200);
+  });
+
   it("disables the demo provider-event endpoint in production unless explicitly enabled", async () => {
     vi.stubEnv("NODE_ENV", "production");
     expect((await events(json({}), ctx("any"))).status).toBe(403);

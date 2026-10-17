@@ -43,3 +43,6 @@ next-env.d.ts
 
 # supabase
 supabase/.temp/
+
+# Optional local PR watcher (contains no credentials)
+/.daybridge-monitor/
