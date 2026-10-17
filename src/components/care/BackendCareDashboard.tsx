@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { CircleAlert, CircleCheck, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,6 +25,8 @@ function Loading() { return <div className="space-y-4"><h1 className={H1}>Caregi
 
 export function BackendCareDashboard({ personId, fallback }: { personId?: string; fallback: ReactNode }) {
   const [identity, setIdentity] = useState<string | null>(null);
+  // Unique per instance: Next keeps the previous /care route mounted (hidden), so a fixed id would be duplicated.
+  const selectId = useId();
   useEffect(() => {
     let saved = "cg-dana";
     try { const value = localStorage.getItem(IDENTITY_KEY); if (IDENTITIES.some((i) => i.id === value)) saved = value!; } catch { /* Storage is optional. */ }
@@ -39,8 +41,8 @@ export function BackendCareDashboard({ personId, fallback }: { personId?: string
   return (
     <div className="max-w-[58rem] space-y-6 text-base">
       <div className={PANEL}>
-        <label htmlFor="care-demo-identity" className="block font-semibold">Demo identity (not sign-in)</label>
-        <select id="care-demo-identity" value={identity} onChange={(event) => choose(event.target.value)} className={`min-h-11 w-full rounded-lg border border-border bg-background px-3 sm:max-w-sm ${FOCUS}`}>
+        <label htmlFor={selectId} className="block font-semibold">Demo identity (not sign-in)</label>
+        <select id={selectId} value={identity} onChange={(event) => choose(event.target.value)} className={`min-h-11 w-full rounded-lg border border-border bg-background px-3 sm:max-w-sm ${FOCUS}`}>
           {IDENTITIES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
         </select>
         <p className="text-muted-foreground">Local demo caller only. This does not verify identity or link accounts. Access is limited by the server&apos;s sharing grants.</p>
@@ -135,7 +137,9 @@ function PeopleView({ api, fallback }: { api: Api; fallback: ReactNode }) {
     {data.people.length === 0 ? <section className={PANEL}><p>No one shared with you yet.</p><p>To explore the local demo, load fictional Maya and Margaret records. This resets only those demo records on this server.</p><Button size="lg" disabled={busy} onClick={() => void seed()}>Load fictional caregiver demo</Button></section> : <ul className="grid gap-4 sm:grid-cols-2">
       {data.people.map((person) => <li key={person.personId} className={PANEL}>
         <h2 className={H2}><Link className={LINK} href={`/care/${encodeURIComponent(person.personId)}`}>{person.displayName}</Link></h2>
-        <p className="flex items-center gap-2"><CircleAlert className="size-5 shrink-0" aria-hidden="true" />{person.attentionCount} {person.attentionCount === 1 ? "item needs" : "items need"} attention</p>
+        <p className="flex items-center gap-2">{person.attentionCount === 0
+          ? <><CircleCheck className="size-5 shrink-0" aria-hidden="true" />Nothing needs attention</>
+          : <><CircleAlert className="size-5 shrink-0" aria-hidden="true" />{person.attentionCount} {person.attentionCount === 1 ? "item needs" : "items need"} attention</>}</p>
         {person.nextActivity ? <div className="space-y-2"><p className="font-semibold">{person.nextActivity.activityName}</p><p>{person.nextActivity.slot}</p><DateText at={person.nextActivity.nextDate} timezone={person.timezone} dateOnly /><PlanStatusLabel view={planStatusView(person.nextActivity.state, "caregiver", person.displayName)} /></div> : <p>No upcoming activity</p>}
         {person.latestCheckIn ? <div><p>{checkInText(person.latestCheckIn.kind)} · {person.latestCheckIn.reporterRole === "self" ? "Self" : "Caregiver"}</p><DateText at={person.latestCheckIn.at} timezone={person.timezone} /></div> : <p>No check-ins yet</p>}
         <p className="text-muted-foreground">Access: {person.myScopes.map(scopeName).join(", ")}</p>
@@ -237,28 +241,30 @@ function Note({ item }: { item: { note?: string; hasNote?: true } }) {
 
 export function CheckInForm({ api, personId, self, onSaved, onAccessError }: { api: Api; personId: string; self: boolean; onSaved: () => void; onAccessError?: AccessErrorHandler }) {
   const [note, setNote] = useState("");
-  const [busy, setBusy] = useState(false);
+  // Which button is saving: only that one says "Saving…"; the others are just disabled.
+  const [sendingKind, setSendingKind] = useState<CheckInInput["kind"] | null>(null);
+  const busy = sendingKind !== null;
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const sending = useRef(false);
   const draft = useRef(new CheckInDraft());
   async function send(kind: CheckInInput["kind"]) {
     if (sending.current || note.trim().length > 280) return;
-    sending.current = true; setBusy(true); setError(""); setNotice("");
+    sending.current = true; setSendingKind(kind); setError(""); setNotice("");
     try {
       const saved = await api.checkIn(personId, draft.current.submission(kind, note));
       setNotice(saved.duplicate ? "Already saved." : "Check-in saved."); setNote(""); draft.current.saved(); onSaved();
     } catch (failure) {
       setError(failure instanceof CareApiError && failure.status === 409 ? "That check-in was already sent with different details. Reload and try again." : careErrorMessage(failure));
       if (isAccessError(failure)) onAccessError?.(failure);
-    } finally { sending.current = false; setBusy(false); }
+    } finally { sending.current = false; setSendingKind(null); }
   }
   return <div className="space-y-3 border-t border-border pt-5" aria-busy={busy}>
     <h3 className="text-lg font-semibold">Record a check-in</h3>
     <label htmlFor="care-checkin-note" className="block">Optional note</label>
     <Textarea id="care-checkin-note" value={note} disabled={busy} maxLength={280} aria-describedby="care-note-count care-checkin-help" className="min-h-24 text-base md:text-base" onChange={(event) => setNote(event.target.value)} />
     <p id="care-note-count">{note.length}/280 characters. Notes are visible to you and people with manage access.</p>
-    <div className="flex flex-wrap gap-3">{([{ kind: "ok", label: self ? "I'm OK" : "They're OK" }, { kind: "call", label: "Please call" }, { kind: "help", label: "Need help" }] as const).map((item) => <Button key={item.kind} size="xl" variant={item.kind === "ok" ? "default" : "outline"} disabled={busy} onClick={() => void send(item.kind)}>{busy ? "Saving…" : item.label}</Button>)}</div>
+    <div className="flex flex-wrap gap-3">{([{ kind: "ok", label: self ? "I'm OK" : "They're OK" }, { kind: "call", label: "Please call" }, { kind: "help", label: "Need help" }] as const).map((item) => <Button key={item.kind} size="xl" variant={item.kind === "ok" ? "default" : "outline"} disabled={busy} onClick={() => void send(item.kind)}>{sendingKind === item.kind ? "Saving…" : item.label}</Button>)}</div>
     <p id="care-checkin-help" className="text-muted-foreground">This records a check-in. It doesn&apos;t contact anyone or change any plan. For urgent help, contact someone directly.</p>
     <p role="status" aria-live="polite">{notice}</p>{error && <p role="alert">{error}</p>}
   </div>;
