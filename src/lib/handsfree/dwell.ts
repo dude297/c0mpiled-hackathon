@@ -10,11 +10,16 @@ export type DwellState = {
   centerSince: number | null;
   side: Side | null;
   sideSince: number;
+  lastT: number | null;
 };
 
 export type DwellStep = { state: DwellState; progress: number; side: Side | null; fired: Side | null };
 
-export const initialDwell = (): DwellState => ({ armed: false, centerSince: null, side: null, sideSince: 0 });
+// A delayed frame is not evidence that the person held the target while tracking was stalled.
+// Allow lower-frame-rate devices, but require center again after a longer interruption.
+export const MAX_DWELL_FRAME_GAP_MS = 500;
+
+export const initialDwell = (): DwellState => ({ armed: false, centerSince: null, side: null, sideSince: 0, lastT: null });
 
 export function stepDwell(
   state: DwellState,
@@ -23,10 +28,12 @@ export function stepDwell(
   dwellMs: number,
   rearmMs: number,
 ): DwellStep {
-  // Losing the face resets everything except the "must return to center" requirement.
-  if (zone === null) {
-    return { state: { ...state, centerSince: null, side: null }, progress: 0, side: null, fired: null };
+  // Lost/invalid tracking must never complete a partly held answer on the next usable frame.
+  if (zone === null || !Number.isFinite(t)) {
+    return { state: initialDwell(), progress: 0, side: null, fired: null };
   }
+  const interrupted = state.lastT !== null && (t < state.lastT || t - state.lastT > MAX_DWELL_FRAME_GAP_MS);
+  state = { ...(interrupted ? initialDwell() : state), lastT: t };
 
   if (!state.armed) {
     if (zone !== "center") {
@@ -34,7 +41,7 @@ export function stepDwell(
     }
     const centerSince = state.centerSince ?? t;
     const armed = t - centerSince >= rearmMs;
-    return { state: { armed, centerSince, side: null, sideSince: 0 }, progress: 0, side: null, fired: null };
+    return { state: { ...state, armed, centerSince, side: null, sideSince: 0 }, progress: 0, side: null, fired: null };
   }
 
   if (zone === "center") {
