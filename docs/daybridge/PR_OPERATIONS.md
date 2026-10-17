@@ -1,6 +1,6 @@
 # DayBridge PR operations
 
-Owner: Work (monitoring/independent QA). Primary integration orchestrator: Opus. Human lead retains merge, release and deployment authority. No monitoring action merges code, changes hosting, dispatches application providers or contacts agents directly.
+Owner: Work (monitoring/independent QA). Primary integration orchestrator: Opus. Human lead retains release/deployment authority and may delegate merges as recorded in `DECISIONS.md`. No monitoring action merges code, changes hosting, dispatches application providers or contacts agents directly.
 
 ## Responsibilities and review order
 
@@ -20,7 +20,7 @@ Main's `PR_ORCHESTRATION.md` remains the orchestration policy: status comments h
 1. Open a narrow PR from approved main; include exact base/head SHA, owned paths, implemented vs simulated behavior, checks, unresolved blockers and next owner. PR #1 defines scope; #2 is baseline tests; #3 is coordination core; #4 is the historical audit. See [the updated independent audit](INTEGRATION_QA_REFRESH.md) before relying on #4's old absence claims.
 2. Opus reviews dependencies and requests the responsible file owners. New shared contracts need explicit A/B/GLM/lead acknowledgment at a named version and SHA. `schema.ts`, ProviderPort, coordination endpoints and `COORDINATION_CONTRACT.md` trigger contract notifications.
 3. Require `app-check`, `app-build`, `monitor-tests`, no unresolved review threads, no `blocked`/`do-not-merge`/`needs-contract` label, a clean non-draft merge state and a current-head approval from a different trusted collaborator/member/owner. Missing checks, unknown merge state and truncated API history all withhold automatic readiness.
-4. Opus assembles and checks an integration candidate. Passing each feature branch separately does not prove their combination. Human lead authorizes merges/releases; monitor readiness is advisory and cannot override human review or application safety gates.
+4. Opus assembles and checks an integration candidate. Passing each feature branch separately does not prove their combination. Follow recorded lead authorization/standing delegation in `DECISIONS.md` for merges; big technical choices and release/deployment remain with the lead. Work does not merge under this task. Monitor readiness is advisory and cannot override review or application safety gates. A top-level blocking finding must also carry the `blocked` label until the reviewer verifies closure; the monitor does not interpret arbitrary prose as an executable command or resolved finding.
 
 The new `DayBridge CI` workflow runs checks on PRs and main pushes with read-only token permissions and no repository secrets. It uses Node 24 and the locked install with lifecycle scripts disabled. No dependencies are added. App-check runs `npm run check`; app-build runs `npm run build`; monitor-tests runs the independent Node test suite. The monitor never publishes success statuses itself. Existing application tests may use synthetic/local fallback requests; no provider/AI secrets are supplied by CI.
 

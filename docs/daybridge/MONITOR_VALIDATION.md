@@ -2,6 +2,8 @@
 
 2026-10-17, Windows / Node `v24.15.0`, npm `11.16.0`. Initial baseline `26b976233f53d3dede16a92416258e8a3c464cdb`; operations branch refreshed onto merged main `c76fa70d7380b356aad5a2aca170619215cafea1`. Only monitoring scripts, three Actions workflows, operations/audit docs and the local-state ignore rule differ from that approved main. No business logic, package/lockfile, Next config, hosting settings or deployment guard changed by Work. PR #1/#3 were merged by another actor during this task.
 
+Final base is main `22b4929`, after another actor merged #4 and orchestration follow-up docs. Compared with independently tested `c76fa70`, it adds documentation and changes only the existing fuzz-test timeout (5s default to explicit 30s), not application behavior. PR #8 also carries the three historical audit supersession notices because updating the already-merged #4 branch alone cannot update main. All other owners' docs/source are preserved.
+
 ## Executed locally
 
 | Check | Result and scope |
@@ -16,6 +18,7 @@
 | Refreshed main + operations check/build | **PASS**, exit 0, sequential `npm run check` then `npm run build` on `c76fa70` + operations files. Typecheck/lint passed; **5 files / 140 tests passed**, Vitest 4.04s. Build compiled in 7.2s, TypeScript passed, 6/6 static pages; analyze and all four coordination endpoints dynamic. Parent-lockfile warning only. No deploy. Monitoring Node tests independently **19/19 passed** again on this refreshed tree. |
 | Consent scope probe | At `b35a4fb`, confirmed invite carried between different activities in same slot. At merged `c76fa70`, independent probe **passes closure**: old invite superseded; new activity-scoped invitation requires approval. No real invitation or Work source fix. See [refresh](INTEGRATION_QA_REFRESH.md). |
 | Diff checks | Whitespace checked; no application/business-logic, dependency or hosting diff. |
+| Hosted GitHub CI | Verified [DayBridge CI run 39065205674](https://github.com/dude297/c0mpiled-hackathon/actions/runs/39065205674) on operations head `5596c0b`: **SUCCESS**; `app-check`, `app-build`, `monitor-tests` each completed successfully, including locked install/setup steps. This validates the hosted CI jobs, not activation of the default-branch status-comment monitor. Later documentation/base refresh is separately visible on PR #8. |
 
 Test coverage includes routing sample PR/review/inline/issue/push/CI/check/status events; bot-loop suppression; exact-head checks and trusted independent approval; unknown/behind/conflicting merge state; cleared labels/reviews/threads; contract/commit changes; sticky-comment roundtrip and spoofed author rejection; duplicate events with zero second write; existing comment PATCH instead of new POST; no-permission review signal replay; ETag/304; pagination; GraphQL error fail-closed behavior; 403/429/reset/Retry-After; exponential backoff; aborted retry/sleep; fixed API origin and disabled redirects; token exclusion from serialized client/state; polling cadence; atomic state save; duplicate/stale PID locks; corrupt-state recovery; start/once/stop; process-level termination.
 
