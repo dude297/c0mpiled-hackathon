@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Ban, Calendar, CalendarPlus, Check, ChevronDown, CircleX, CloudRain, LoaderCircle, MapPin, Printer, ShieldCheck, Sparkles, Sun, Users } from "lucide-react";
+import { Ban, Calendar, CalendarPlus, Car, Check, ChevronDown, CircleX, CloudRain, LoaderCircle, MapPin, Printer, ShieldCheck, Sparkles, Sun, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -150,8 +150,12 @@ export function PlanPanel({ result, loading, onSave }: {
   onSave: () => Promise<void>;
 }) {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "error">("idle");
-  // Additive enrichments from the API; both optional.
-  type Enriched = { venueByItem?: Record<string, { address: string; stepFree: boolean | null }>; weather?: { summary: string; outdoorConcern: boolean } | null };
+  // Additive enrichments from the API; all optional.
+  type Enriched = {
+    venueByItem?: Record<string, { address: string; stepFree: boolean | null }>;
+    weather?: { summary: string; outdoorConcern: boolean } | null;
+    rideshareByItem?: Record<string, { uberLink: string; lyftLink: string; estimate?: { fareLow: number; fareHigh: number } | null } | null>;
+  };
   const extra = result as (AnalysisResult & Enriched) | null;
   async function handleSave() {
     try {
@@ -208,6 +212,7 @@ export function PlanPanel({ result, loading, onSave }: {
             <ul className="grid gap-3">
               {result.plan.map((i) => {
                 const venue = extra?.venueByItem?.[i.activityId];
+                const ride = extra?.rideshareByItem?.[i.activityId];
                 const day = i.when.split(" ")[0];
                 const cal = calendarLink(i);
                 return (
@@ -230,6 +235,33 @@ export function PlanPanel({ result, loading, onSave }: {
                         {b.mitigation}
                       </p>
                     ))}
+                    {ride && (
+                      <div className="mt-3 flex flex-wrap items-center gap-2 print:hidden">
+                        <a
+                          href={ride.uberLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 md:text-base"
+                        >
+                          <Car className="size-4" aria-hidden="true" />
+                          Ride with Uber
+                        </a>
+                        <a
+                          href={ride.lyftLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 md:text-base"
+                        >
+                          <Car className="size-4" aria-hidden="true" />
+                          Ride with Lyft
+                        </a>
+                        {ride.estimate && (
+                          <span className="text-sm text-muted-foreground md:text-base">
+                            est. ${ride.estimate.fareLow}–${ride.estimate.fareHigh} each way
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <a
                       href={cal}
                       target="_blank"

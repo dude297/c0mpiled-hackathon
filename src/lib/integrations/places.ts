@@ -1,4 +1,5 @@
 import type { PlanItem } from "@/lib/schema";
+import { rideshareFor } from "./rideshare";
 
 // Third-party enrichment for plan items. Every call is key-gated and fails soft:
 // enrichment is additive, so the deterministic plan must never break.
@@ -6,6 +7,8 @@ import type { PlanItem } from "@/lib/schema";
 export type VenueInfo = {
   name: string;
   address: string;
+  lat: number | null;
+  lon: number | null;
   stepFree: boolean | null;
   source: "google" | "none";
 };
@@ -21,7 +24,7 @@ async function lookupVenue(name: string): Promise<VenueInfo | null> {
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": key,
-        "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.accessibilityOptions",
+        "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.accessibilityOptions,places.location",
       },
       body: JSON.stringify({ textQuery: name, maxResultCount: 1 }),
       signal: AbortSignal.timeout(4_000),
@@ -33,6 +36,8 @@ async function lookupVenue(name: string): Promise<VenueInfo | null> {
     return {
       name: place.displayName?.text ?? name,
       address: place.formattedAddress ?? "",
+      lat: typeof place.location?.latitude === "number" ? place.location.latitude : null,
+      lon: typeof place.location?.longitude === "number" ? place.location.longitude : null,
       stepFree: typeof place.accessibilityOptions?.wheelchairAccessibleEntrance === "boolean"
         ? place.accessibilityOptions.wheelchairAccessibleEntrance
         : null,
@@ -86,6 +91,16 @@ export async function enrichResult(result: {
   ]);
   const venueByItem = new Map<string, VenueInfo | null>();
   result.plan.forEach((i, idx) => venueByItem.set(i.activityId, venues[idx] ?? null));
+  const rideshareByItem: Record<string, Awaited<ReturnType<typeof rideshareFor>>> = {};
+  for (let idx = 0; idx < result.plan.length; idx++) {
+    const item = result.plan[idx];
+    const venue = venues[idx];
+    rideshareByItem[item.activityId] = await rideshareFor(
+      item,
+      venue?.lat != null && venue?.lon != null ? { lat: venue.lat, lon: venue.lon } : null,
+      venue?.name ?? item.name,
+    );
+  }
   const evidence = [...result.evidence];
   for (const v of venueByItem.values()) {
     if (v?.source === "google" && v.stepFree !== null) {
@@ -96,5 +111,5 @@ export async function enrichResult(result: {
       });
     }
   }
-  return { venueByItem: Object.fromEntries(venueByItem), weather, evidence };
+  return { venueByItem: Object.fromEntries(venueByItem), weather, evidence, rideshareByItem };
 }

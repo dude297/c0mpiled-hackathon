@@ -20,8 +20,8 @@ export async function POST(req: Request) {
   });
 
   const base: AnalysisResult = { ...output, explanation, dataSource: ai.name };
-  // Additive enrichment: venue data, weather, extra evidence. All fail soft.
-  const { venueByItem, weather, evidence } = await enrichResult(base);
+  // Additive enrichment: venue data, weather, rideshare, extra evidence. All fail soft.
+  const { venueByItem, weather, evidence, rideshareByItem } = await enrichResult(base);
   const result: AnalysisResult = { ...base, evidence };
-  return Response.json({ ...result, venueByItem, weather });
+  return Response.json({ ...result, venueByItem, weather, rideshareByItem });
 }
