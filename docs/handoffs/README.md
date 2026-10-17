@@ -8,7 +8,8 @@
 |---|---|---|
 | Lead (repo owner) | Supabase + AI (save/share plans, plain-words intake, live model) | [lead-supabase-ai.md](lead-supabase-ai.md) |
 | Teammate A | UI (all of `src/app/page.tsx`, `src/components/**`, styling) | [teammate-a-ui.md](teammate-a-ui.md) |
-| Teammate B | Real activity data, demo profiles, pitch, rehearsal | [teammate-b-data-pitch.md](teammate-b-data-pitch.md) |
+| Teammate B | Real activity data, third-party connectors/handoffs, demo profiles, pitch and rehearsal | [teammate-b-data-pitch.md](teammate-b-data-pitch.md) |
+| Teammate C | Coordination UI (`/coordinate`: approvals, READY/replan, simulator, timeline) | [teammate-c-coordination-ui.md](teammate-c-coordination-ui.md) |
 | Claude (with lead) | Engine, schema, API, tests, merges, demo reliability | — |
 
 ## Setup (everyone, about 5 minutes)
@@ -20,6 +21,10 @@ npm run dev                     # http://localhost:3000, then click "Load demo: 
 npm run check                   # typecheck + lint + tests; must pass before you hand anything off
 ```
 Node 24 / npm 11. Next.js 16 has breaking changes; its docs are in `node_modules/next/dist/docs/`.
+
+## Integration boundaries
+
+Teammate B owns new `src/integrations/**` and (if required) `src/app/api/integrations/**`, as well as the activity catalog and demo. Opus owns the coordination state machine and typed provider port; GLM owns `src/simulation/**`; the lead retains the local AI adapter, Supabase, secrets and deployments. Teammate A alone wires API responses into UI. Begin with one demonstrably real read-only source or map/calendar handoff. Any external email, SMS, ride request, booking, or data sharing requires explicit authorization; external delivery does not equal confirmation. Keep an offline fallback and label simulated output.
 
 ## Team rules
 - **One owner per file.** Only edit the files listed in your handoff. If you need a change in someone else's file, ask them in chat.
