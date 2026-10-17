@@ -184,7 +184,13 @@ function CoordinateInner() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Request failed");
+      if (!res.ok) {
+        // integration: a stale/invalid stored profile must not wedge the page; the retry falls back to the Maya demo.
+        try {
+          sessionStorage.removeItem("daybridge:profile");
+        } catch {}
+        throw new Error(data.error ?? "Request failed");
+      }
       setPlan(data.plan);
       setEvents(data.events ?? []);
       setNotice(null);
