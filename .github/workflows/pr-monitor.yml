@@ -1,0 +1,62 @@
+name: DayBridge PR monitor
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, closed, edited, ready_for_review, converted_to_draft, labeled, unlabeled, review_requested, review_request_removed]
+  issue_comment:
+    types: [created, edited, deleted]
+  push:
+    branches: ['**']
+  workflow_run:
+    workflows: ['DayBridge CI', 'DayBridge review signal']
+    types: [completed]
+  check_run:
+    types: [completed]
+  status:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+# The only write operation is one updatable PR conversation comment.
+permissions:
+  contents: read
+  pull-requests: write
+  checks: read
+
+concurrency:
+  group: daybridge-pr-monitor
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && github.event.sender.type != 'Bot' &&
+       !contains(github.event.comment.body, '<!-- daybridge-pr-monitor:'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Always trusted default-branch code. Never checkout a PR head, artifact or event-controlled ref.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24'
+      - name: Check trusted installation
+        id: installed
+        shell: bash
+        run: |
+          if test -f scripts/pr-monitor/monitor.mjs; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+            echo 'Monitor activation pending: human lead must merge the reviewed installation into the default branch.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Reconcile PR status
+        if: steps.installed.outputs.available == 'true'
+        run: node scripts/pr-monitor/monitor.mjs --event
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DAYBRIDGE_REPOSITORY: ${{ github.repository }}
