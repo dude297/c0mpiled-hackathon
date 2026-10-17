@@ -47,3 +47,11 @@ stream.addEventListener("events", (event) => {
 ```
 
 The stream accepts no personal profile and forwards no user data to the public source. Only events with provider coordinates within the local radius are exposed by discovery. This backend stream is implemented; UI subscription is still the UI owner's integration step.
+
+## Free maps and directions (no key)
+
+Every coordinate-backed event now includes `mapLink` and `directionsLink`, constructed from the existing source coordinates via Google Maps URLs. Neither Google Places nor an API key is needed for these links. No lookup is made when building or returning them. `origin` is deliberately omitted so the app doesn't send a user's home/profile location; the user chooses the start point in Google Maps. Unknown coordinates yield null links, never guessed destinations.
+
+UI owner: use `mapLink` for **Open in Google Maps**, and `directionsLink` for **Get directions**. These open another service when the user clicks; they do not verify accessibility, travel time or a booking. Existing Google Places and fare estimation remain optional and are not required for this event discovery path.
+
+Official URL documentation: https://developers.google.com/maps/documentation/urls/get-started

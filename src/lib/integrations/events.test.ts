@@ -4,11 +4,17 @@ const now = new Date("2026-10-17T20:00:00Z");
 const entry = { id: 1, title: "Arts &amp; Community", url: "https://events.berkeley.edu/live/events/1", date_iso: "2026-10-18T10:00:00-07:00", location: "Community Room", location_latitude: 37.87, location_longitude: -122.26 };
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); vi.resetModules(); });
 it("normalizes source events without inventing feasibility", () => {
-  expect(parsePublicEvents({ data: [entry] }, now)?.[0]).toMatchObject({ name: "Arts & Community", startsAt: "2026-10-18T17:00:00.000Z", proximity: "local", accessibility: "unknown", cost: "unknown", eligibility: "check-source", verified: false });
+  const event = parsePublicEvents({ data: [entry] }, now)![0];
+  expect(new URL(event.mapLink!).searchParams.get("query")).toBe("37.87,-122.26");
+  const directions = new URL(event.directionsLink!);
+  expect(directions.searchParams.get("destination")).toBe("37.87,-122.26");
+  expect(directions.searchParams.has("origin")).toBe(false);
+  expect(directions.searchParams.has("key")).toBe(false);
+  expect(event).toMatchObject({ name: "Arts & Community", startsAt: "2026-10-18T17:00:00.000Z", proximity: "local", accessibility: "unknown", cost: "unknown", eligibility: "check-source", verified: false });
 });
 it("keeps today's all-day events and unknown locations honestly labeled", () => {
   const result = parsePublicEvents({ data: [{ ...entry, is_all_day: 1, date_iso: "2026-10-17T00:00:00-07:00", location_latitude: null, location_longitude: null }] }, now);
-  expect(result?.[0]).toMatchObject({ allDay: true, proximity: "unknown" });
+  expect(result?.[0]).toMatchObject({ allDay: true, proximity: "unknown", mapLink: null, directionsLink: null });
 });
 it.each([
   { is_canceled: 1 }, { is_online: 1 }, { date_iso: "2026-10-16T10:00:00-07:00" },
