@@ -149,7 +149,8 @@ function HomeContent() {
           </div>
         </div>
       )}
-      <AppDiscovery compact />
+      {/* Public listings wait for the person's own week: they must not stand in for it, then jump down when it lands. */}
+      {(s.result || !s.analyzing) && <AppDiscovery compact />}
     </div>
   );
 }
