@@ -9,6 +9,7 @@
 | Lead (repo owner) | Supabase + AI (save/share plans, plain-words intake, live model) | [lead-supabase-ai.md](lead-supabase-ai.md) |
 | Teammate A | UI (all of `src/app/page.tsx`, `src/components/**`, styling) | [teammate-a-ui.md](teammate-a-ui.md) |
 | Teammate B | Real activity data, third-party connectors/handoffs, demo profiles, pitch and rehearsal | [teammate-b-data-pitch.md](teammate-b-data-pitch.md) |
+| Teammate C | Coordination UI (`/coordinate`: approvals, READY/replan, simulator, timeline) | [teammate-c-coordination-ui.md](teammate-c-coordination-ui.md) |
 | Claude (with lead) | Engine, schema, API, tests, merges, demo reliability | — |
 
 ## Setup (everyone, about 5 minutes)
