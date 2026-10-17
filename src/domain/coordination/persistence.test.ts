@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Activity } from "@/domain/activities";
 import { CommandResult, type CoordinationPlan, type Contact, type Profile } from "@/lib/schema";
-import { createCoordinator, currentActions, currentDeps, readyViolations, type Coordinator } from "./coordinator";
+import { createCoordinator, currentActions, MAX_LOG_EVENTS, currentDeps, readyViolations, type Coordinator } from "./coordinator";
 import { createMockProvider } from "./provider";
 import { createMemoryStore, type CoordinationStore } from "./store";
 
@@ -176,5 +176,22 @@ describe("store-backed coordinator", () => {
     // The user's retry reuses the same idempotency keys; the provider dedupes, and the plan proceeds.
     expect(ok(await c.command(id, { type: "execute" })).plan.state).toBe("PENDING_CONFIRMATION");
     expect(prov.calls.length).toBe(currentActions(before.plan).length);
+  });
+
+  it("caps the event log per plan (429) without writing", async () => {
+    const inner = createMemoryStore();
+    const id = await toAwaitingApproval(make(inner));
+    const full: CoordinationStore = {
+      ...inner,
+      kind: inner.kind,
+      async load(planId) {
+        const e = await inner.load(planId);
+        if (e) e.log = Array.from({ length: MAX_LOG_EVENTS }, (_, i) => ({ ...e.log[0], seq: i + 1 }));
+        return e;
+      },
+    };
+    const rev = (await inner.load(id))!.rev;
+    await expect(make(full).command(id, { type: "cancel" })).rejects.toMatchObject({ status: 429 });
+    expect((await inner.load(id))!.rev).toBe(rev);
   });
 });

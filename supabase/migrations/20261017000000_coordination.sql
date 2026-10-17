@@ -42,8 +42,9 @@ create policy "owner reads events" on public.coordination_events
 
 revoke all on public.coordination_plans, public.coordination_events, public.coordination_seen_keys from anon;
 revoke all on public.coordination_seen_keys from authenticated;
-revoke insert, update, delete, truncate, references, trigger
-  on public.coordination_plans, public.coordination_events from authenticated;
+-- revoke all (not a privilege list): Supabase's default grants include PG17's MAINTAIN (LOCK TABLE, VACUUM, REINDEX).
+revoke all on public.coordination_plans, public.coordination_events from authenticated;
+grant select on public.coordination_plans, public.coordination_events to authenticated;
 
 -- Shared by both RPCs. Any failure (e.g. duplicate (plan_id, seq)) aborts the calling RPC's whole transaction.
 create function public.coordination_append(p_id uuid, p_events jsonb, p_keys text[])
@@ -59,9 +60,14 @@ begin
 end $$;
 
 -- Insert a new plan at rev 1 with its initial log and keys. Duplicate id raises (unique violation).
+-- Abuse ceiling: max 20 plans per owner. The per-owner advisory lock serializes concurrent creates (no overshoot).
 create function public.coordination_create(p_id uuid, p_owner uuid, p_plan jsonb, p_events jsonb, p_keys text[])
 returns void language plpgsql security definer set search_path = '' as $$
 begin
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(p_owner::text));
+  if (select count(*) from public.coordination_plans where owner_id = p_owner) >= 20 then
+    raise exception 'plan_limit' using errcode = 'P0001';
+  end if;
   insert into public.coordination_plans (id, owner_id, rev, plan) values (p_id, p_owner, 1, p_plan);
   perform public.coordination_append(p_id, p_events, p_keys);
 end $$;

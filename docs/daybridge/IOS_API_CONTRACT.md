@@ -44,7 +44,7 @@ if (!session) await supabase.auth.signInAnonymously();
   - Don't call `signOut()` before upgrading. That throws the anonymous user away.
 - **Keys:**
   - The Supabase URL and the publishable (anon) key are public by design, so shipping them in the app is fine.
-  - Never ship a `service_role` / secret key, an AI key, or `x-daybridge-demo-key`.
+  - Never ship a `service_role` / secret key or an AI key.
   - Never log access tokens, refresh tokens, or full request headers. Strip `Authorization` from crash-reporter breadcrumbs.
 
 ## 3. Endpoints
@@ -53,7 +53,7 @@ if (!session) await supabase.auth.signInAnonymously();
 | `POST /api/coordination/plans` | `CreatePlanInput` | `CommandResult` |
 | `GET /api/coordination/plans/:id` | none | `{ plan: CoordinationPlan, events: CoordinationEvent[] }` (full log) |
 | `POST /api/coordination/plans/:id/commands` | `PlanCommand` | `CommandResult` |
-| `POST /api/coordination/plans/:id/events` | `ProviderEvent` | **Demo only. A client must never call it.** It's disabled in production unless `DAYBRIDGE_DEMO_EVENTS=1` **and** the server-secret header `x-daybridge-demo-key` matches. |
+| `POST /api/coordination/plans/:id/events` | `ProviderEvent` | **Not a client endpoint; never call it.** Simulated provider callbacks for local demos only. In a production build with Supabase configured it **always returns 403** (there is no key or flag that opens it). Without Supabase it is open only on a local `next start` with `DAYBRIDGE_DEMO_EVENTS=1`. |
 
 `CommandResult = { plan, outcome: "applied" | "duplicate" | "ignored" | "rejected", reason?, events }`. Here `events` holds only the events this call appended.
 
@@ -68,7 +68,7 @@ if (!session) await supabase.auth.signInAnonymously();
 | 200 `rejected` | Valid request, refused by plan rules | Render `plan`, show `reason`, no auto-retry |
 | 400 | Body failed schema validation (`"path: message"`) or the activity is unknown | Bug or bad input; show the message, don't retry |
 | 401 | Bearer token missing or invalid | Refresh the session once, retry once, else re-auth |
-| 403 | Forbidden (the demo events endpoint) | Don't retry |
+| 403 | Forbidden (the events endpoint, always in production) | Don't retry; clients never call it |
 | 404 | Unknown plan, **or a plan owned by another user** (existence is not leaked) | Remove the id from local storage |
 | 409 | "Plan changed concurrently; retry" (the server already retried 3 times) | `GET` the plan, re-check that the user's intent still applies, then resend once |
 | 500 | Server error | Retry with backoff only if the command is retry-safe (§7) |

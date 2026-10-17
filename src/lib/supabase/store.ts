@@ -1,4 +1,5 @@
 import { CoordinationEvent, CoordinationPlan } from "@/lib/schema";
+import { CoordinationError } from "@/domain/coordination/coordinator";
 import type { CoordinationStore } from "@/domain/coordination/store";
 import { adminClient } from "./server";
 
@@ -24,6 +25,7 @@ function toEvent(r: EventRow) {
 export function createSupabaseStore(): CoordinationStore {
   const rpc = async (fn: string, args: Record<string, unknown>) => {
     const { data, error } = await adminClient().rpc(fn, args);
+    if (error?.code === "P0001" && error.message === "plan_limit") throw new CoordinationError(429, "Plan limit reached for this account");
     if (error) throw new Error(`${fn} failed: ${error.message}`);
     return data as unknown;
   };

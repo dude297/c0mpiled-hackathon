@@ -33,12 +33,14 @@ export type CoordinatorDeps = {
 };
 
 export const MAX_COMMIT_ATTEMPTS = 3;
+// Abuse ceiling: every command appends at least one event, so this caps writes (and load size) per plan.
+export const MAX_LOG_EVENTS = 500;
 
 type Entry = StoredPlan;
 type Pending = Omit<CoordinationEvent, "seq" | "at">;
 
 export class CoordinationError extends Error {
-  constructor(public status: 400 | 401 | 403 | 404 | 409 | 503, message: string) {
+  constructor(public status: 400 | 401 | 403 | 404 | 409 | 429 | 503, message: string) {
     super(message);
   }
 }
@@ -219,6 +221,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
     return withLock(id, async () => {
       for (let attempt = 0; attempt < MAX_COMMIT_ATTEMPTS; attempt++) {
         const e = await entry(id, ownerId);
+        if (e.log.length >= MAX_LOG_EVENTS) throw new CoordinationError(429, "This plan has reached its activity limit; start a new plan");
         const logLen = e.log.length;
         const keyCount = e.seenKeys.size;
         const result = await fn(e);

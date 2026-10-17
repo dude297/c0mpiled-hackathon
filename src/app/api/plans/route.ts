@@ -17,6 +17,13 @@ export async function POST(req: Request) {
     const msg = issue?.path[0] === "consent" ? "Consent is required to share a plan." : issue?.code === "unrecognized_keys" ? `Unexpected field(s): ${issue.keys.join(", ")}. Send only {result, consent, firstNameOnly?, expiresInDays?}.` : (issue?.message ?? "Invalid input");
     return json({ error: msg }, 400);
   }
-  const { id, revokeToken, expiresAt } = createShare(parsed.data);
+  let created;
+  try {
+    created = await createShare(parsed.data);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : "share create failed");
+    return json({ error: "Sharing is not available right now." }, 503);
+  }
+  const { id, revokeToken, expiresAt } = created;
   return json({ id, url: `/plan/${id}`, revokeToken, expiresAt }, 201);
 }

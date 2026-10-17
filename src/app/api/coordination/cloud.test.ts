@@ -107,6 +107,40 @@ describe("cloud mode: authentication", () => {
     expect((await r.events(req({ eventId: "e", requestId: "r", sequence: 1, type: "ride.confirmed", actor: "demo" }), ctx("x"))).status).toBe(401);
   });
 
+  it("rejects malformed Authorization headers and forged tokens on every route", async () => {
+    const valid = { profile: DEMO_PROFILES.margaret, activityId: ACTIVITIES[0].id };
+    const ev = { eventId: "e", requestId: "r", sequence: 1, type: "ride.confirmed", actor: "demo" };
+    const bad = ["Basic tok-alice", "bearer tok-alice", "Bearer", "tok-alice", "Bearer tok-alice extra", "Bearer forged.eyJzdWIiOiJ1c2VyLWFsaWNlIn0.sig"];
+    for (const authorization of bad) {
+      const h = { authorization };
+      expect((await r.create(req(valid, undefined, h))).status).toBe(401);
+      expect((await r.get(req(undefined, undefined, h), ctx("x"))).status).toBe(401);
+      expect((await r.command(req({ type: "cancel" }, undefined, h), ctx("x"))).status).toBe(401);
+      expect((await r.events(req(ev, undefined, h), ctx("x"))).status).toBe(401);
+    }
+  });
+
+  it("returns 500 'Internal error' with no detail when the store fails unexpectedly", async () => {
+    const SECRET = "connection to db.internal:5432 failed password=hunter2";
+    shared.store = { kind: "supabase", load: async () => { throw new Error(SECRET); }, create: async () => { throw new Error(SECRET); }, commit: async () => { throw new Error(SECRET); } };
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      for (const res of [
+        await r.create(req({ profile: DEMO_PROFILES.margaret, activityId: ACTIVITIES[0].id }, ALICE)),
+        await r.get(req(undefined, ALICE), ctx("x")),
+        await r.command(req({ type: "cancel" }, ALICE), ctx("x")),
+      ]) {
+        expect(res.status).toBe(500);
+        const text = await res.text();
+        expect(JSON.parse(text)).toEqual({ error: "Internal error" });
+        expect(text).not.toContain("hunter2");
+        expect(res.headers.get("x-daybridge-persistence")).toBe("supabase");
+      }
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it("marks responses with the persistence mode", async () => {
     const res = await r.create(req({ profile: DEMO_PROFILES.margaret, activityId: ACTIVITIES[0].id }, ALICE));
     expect(res.status).toBe(200);
@@ -230,6 +264,7 @@ describe("production guards", () => {
     expect((await r.create(req({ profile: DEMO_PROFILES.margaret, activityId: ACTIVITIES[0].id }, ALICE))).status).toBe(503);
     expect((await r.get(req(undefined, ALICE), ctx("x"))).status).toBe(503);
     expect((await r.command(req({ type: "cancel" }, ALICE), ctx("x"))).status).toBe(503);
+    expect((await r.events(req({ eventId: "e", requestId: "r", sequence: 1, type: "ride.confirmed", actor: "demo" }, ALICE), ctx("x"))).status).toBe(403);
   });
 
   it("uses the local memory store with no auth outside production when Supabase is not configured", async () => {
@@ -240,34 +275,53 @@ describe("production guards", () => {
     expect(res.headers.get("x-daybridge-persistence")).toBe("memory");
   });
 
-  describe("demo events gate", () => {
+  it("local `next start` demo (production, no Supabase, DAYBRIDGE_DEMO_EVENTS=1) runs in memory with events open", async () => {
+    shared.configured = false;
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("DAYBRIDGE_DEMO_EVENTS", "1");
+    r = await freshRoutes();
+    const res = await r.create(req({ profile: DEMO_PROFILES.margaret, activityId: ACTIVITIES[0].id }));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-daybridge-persistence")).toBe("memory");
+    const { plan } = CommandResult.parse(await res.json());
+    const ev = await r.events(req({ eventId: "l1", requestId: "nothing-dispatched", sequence: 1, type: "ride.confirmed", actor: "demo" }), ctx(plan.id));
+    expect(ev.status).toBe(200);
+  });
+
+  describe("demo events gate (cloud)", () => {
     const KEY = "k".repeat(32);
     const ev = { eventId: "g1", requestId: "nothing-dispatched", sequence: 1, type: "ride.confirmed", actor: "demo" };
-    const post = async (id: string, headers: Record<string, string> = {}) => (await r.events(req(ev, ALICE, headers), ctx(id))).status;
+    const post = async (id: string, token: string | undefined, headers: Record<string, string> = {}) =>
+      (await r.events(req(ev, token, headers), ctx(id))).status;
 
-    it("is closed without the flag, without a key, with a wrong key, and with a short configured key", async () => {
+    it("production + Supabase: /events is always 403, for any flag/key/header/token combination", async () => {
       const plan = await createActionable(ALICE);
       vi.stubEnv("NODE_ENV", "production");
-      vi.stubEnv("DAYBRIDGE_DEMO_KEY", KEY);
-      expect(await post(plan.id, { "x-daybridge-demo-key": KEY })).toBe(403); // no flag
-      vi.stubEnv("DAYBRIDGE_DEMO_EVENTS", "1");
-      expect(await post(plan.id)).toBe(403); // no header
-      expect(await post(plan.id, { "x-daybridge-demo-key": "x".repeat(32) })).toBe(403); // wrong key
-      expect(await post(plan.id, { "x-daybridge-demo-key": KEY.slice(1) })).toBe(403); // wrong length
-      vi.stubEnv("DAYBRIDGE_DEMO_KEY", "short-key");
-      expect(await post(plan.id, { "x-daybridge-demo-key": "short-key" })).toBe(403); // configured key < 32 chars
+      for (const flag of [undefined, "1", "true"]) {
+        for (const key of [undefined, KEY]) {
+          vi.unstubAllEnvs();
+          vi.stubEnv("NODE_ENV", "production");
+          if (flag) vi.stubEnv("DAYBRIDGE_DEMO_EVENTS", flag);
+          if (key) vi.stubEnv("DAYBRIDGE_DEMO_KEY", key);
+          for (const headers of [{} as Record<string, string>, { "x-daybridge-demo-key": KEY }, { "x-daybridge-demo-key": "x" }]) {
+            for (const token of [ALICE, BOB, undefined]) expect(await post(plan.id, token, headers)).toBe(403);
+          }
+        }
+      }
+      // Nothing was ingested.
+      vi.unstubAllEnvs();
+      const { events } = (await (await r.get(req(undefined, ALICE), ctx(plan.id))).json()) as { events: { type: string }[] };
+      expect(events.some((e) => JSON.stringify(e).includes("g1"))).toBe(false);
     });
 
-    it("opens with flag + correct key (forged callback is then recorded as rejected)", async () => {
+    it("non-production cloud: events open but owner-checked (forged callback recorded as rejected; bob -> 404; no token -> 401)", async () => {
       const plan = await createActionable(ALICE);
-      vi.stubEnv("NODE_ENV", "production");
-      vi.stubEnv("DAYBRIDGE_DEMO_EVENTS", "1");
-      vi.stubEnv("DAYBRIDGE_DEMO_KEY", KEY);
-      const res = await r.events(req(ev, ALICE, { "x-daybridge-demo-key": KEY }), ctx(plan.id));
+      const res = await r.events(req(ev, ALICE), ctx(plan.id));
       expect(res.status).toBe(200);
       expect(CommandResult.parse(await res.json()).outcome).toBe("rejected");
-      // Gate passed but ownership still enforced.
-      expect((await r.events(req(ev, BOB, { "x-daybridge-demo-key": KEY }), ctx(plan.id))).status).toBe(404);
+      expect(await post(plan.id, BOB)).toBe(404);
+      expect(await post(plan.id, BOB, { "x-daybridge-demo-key": KEY })).toBe(404);
+      expect(await post(plan.id, undefined)).toBe(401);
     });
   });
 });

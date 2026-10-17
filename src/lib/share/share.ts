@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { ACTIVITIES } from "@/domain/activities";
 import { AnalysisResult } from "@/lib/schema";
+import { adminClient, supabaseConfigured } from "@/lib/supabase/server";
 
 // Opt-in, redacted, read-only plan snapshots. See docs/daybridge/SHARE_CONTRACT.md.
 // Redaction is an ALLOWLIST: nothing from the client payload is copied verbatim except
@@ -17,15 +18,20 @@ export const ShareInput = z
   .strict();
 export type ShareInput = z.infer<typeof ShareInput>;
 
-export type SharedItem = { name: string; when: string; travel: string; costPerWeek: number; tips: string[] };
-export type SharedPlan = {
-  displayName: string;
-  summary: string;
-  items: SharedItem[];
-  dataSource: "mock" | "live";
-  createdAt: string;
-  expiresAt: string;
-};
+// Shape of a stored snapshot. Re-validated on every durable read: anything else is treated as not found.
+const SharedItem = z.object({ name: z.string(), when: z.string(), travel: z.string(), costPerWeek: z.number(), tips: z.array(z.string()) }).strict();
+export const SharedPlan = z
+  .object({
+    displayName: z.string(),
+    summary: z.string(),
+    items: z.array(SharedItem).max(7),
+    dataSource: z.enum(["mock", "live"]),
+    createdAt: z.string().datetime(),
+    expiresAt: z.string().datetime(),
+  })
+  .strict();
+export type SharedItem = z.infer<typeof SharedItem>;
+export type SharedPlan = z.infer<typeof SharedPlan>;
 
 export const MAX_BODY_CHARS = 200_000;
 export const MAX_SHARES = 1000;
@@ -89,35 +95,66 @@ export function redact(input: ShareInput, now = new Date()): SharedPlan {
   };
 }
 
-// ─── In-memory demo store ───
-// ponytail: process memory, lost on restart and not shared across instances. Swap for a DB table before real use.
+// ─── Store: Supabase table `share_snapshots` when configured (durable), else in-memory demo map ───
+// ponytail: memory mode is process-local, lost on restart and not shared across instances.
 type Entry = { plan: SharedPlan; tokenHash: Buffer };
 const g = globalThis as typeof globalThis & { __daybridgeShares?: Map<string, Entry> };
 const store = (g.__daybridgeShares ??= new Map());
+const TABLE = "share_snapshots"; // server-only: RLS on, no policies, no anon/authenticated grants
 
 export const ID_RE = /^[A-Za-z0-9_-]{22}$/; // 128-bit base64url
 const sha256 = (s: string) => createHash("sha256").update(s).digest();
+const bytea = (b: Buffer) => `\\x${b.toString("hex")}`;
+
+export const shareStoreKind = (): "supabase" | "memory" => (supabaseConfigured() ? "supabase" : "memory");
 
 export function shareStoreAvailable(): boolean {
-  return process.env.NODE_ENV !== "production" || process.env.SHARE_STORE === "memory";
+  return supabaseConfigured() || process.env.NODE_ENV !== "production" || process.env.SHARE_STORE === "memory";
 }
 
 function prune(now: number) {
   for (const [id, e] of store) if (Date.parse(e.plan.expiresAt) <= now) store.delete(id);
 }
 
-export function createShare(input: ShareInput, now = new Date()) {
-  prune(now.getTime());
-  while (store.size >= MAX_SHARES) store.delete(store.keys().next().value!); // evict oldest
+// Throws on a storage failure (routes answer 503).
+// `cap` is injectable for tests only; the routes always use MAX_SHARES.
+export async function createShare(input: ShareInput, now = new Date(), cap = MAX_SHARES) {
   const plan = redact(input, now);
   const id = randomBytes(16).toString("base64url");
   const revokeToken = randomBytes(32).toString("base64url");
-  store.set(id, { plan, tokenHash: sha256(revokeToken) });
+  if (supabaseConfigured()) {
+    // One locked transaction: prune expired, insert, evict oldest beyond `cap` (same ceiling as memory).
+    const { error } = await adminClient().rpc("share_snapshot_create", {
+      p_id: id,
+      p_plan: plan,
+      p_token_hash: bytea(sha256(revokeToken)),
+      p_expires_at: plan.expiresAt,
+      p_now: now.toISOString(),
+      p_cap: cap,
+    });
+    if (error) throw new Error(`share insert failed: ${error.message}`);
+  } else {
+    prune(now.getTime());
+    while (store.size >= cap) store.delete(store.keys().next().value!); // evict oldest
+    store.set(id, { plan, tokenHash: sha256(revokeToken) });
+  }
   return { id, revokeToken, expiresAt: plan.expiresAt };
 }
 
-export function getShare(id: string, now = new Date()): SharedPlan | null {
+// Missing, expired, invalid or unreadable → null (page 404). Never throws.
+export async function getShare(id: string, now = new Date()): Promise<SharedPlan | null> {
   if (!ID_RE.test(id)) return null;
+  if (supabaseConfigured()) {
+    const { data, error } = await adminClient().from(TABLE).select("plan").eq("id", id).gt("expires_at", now.toISOString()).maybeSingle();
+    if (error) {
+      console.error("share read failed:", error.message);
+      return null;
+    }
+    if (!data) return null;
+    const parsed = SharedPlan.safeParse(data.plan);
+    if (!parsed.success) console.error("share snapshot failed validation; treating as not found");
+    return parsed.success ? parsed.data : null;
+  }
   const e = store.get(id);
   if (!e) return null;
   if (Date.parse(e.plan.expiresAt) <= now.getTime()) {
@@ -127,8 +164,17 @@ export function getShare(id: string, now = new Date()): SharedPlan | null {
   return e.plan;
 }
 
-export function revokeShare(id: string, token: string): boolean {
-  const e = ID_RE.test(id) ? store.get(id) : undefined;
+// Unknown id / wrong token → false. Throws on a storage failure.
+export async function revokeShare(id: string, token: string): Promise<boolean> {
+  if (!ID_RE.test(id)) return false;
+  if (supabaseConfigured()) {
+    // Compared in SQL: both sides are SHA-256 digests of a 256-bit random token, so equality timing
+    // leaks nothing usable (an attacker cannot steer the digest of their guess). One atomic delete.
+    const { data, error } = await adminClient().from(TABLE).delete().eq("id", id).eq("token_hash", bytea(sha256(token))).select("id");
+    if (error) throw new Error(`share revoke failed: ${error.message}`);
+    return data.length > 0;
+  }
+  const e = store.get(id);
   if (!e || !timingSafeEqual(sha256(token), e.tokenHash)) return false;
   store.delete(id);
   return true;

@@ -23,11 +23,21 @@ export async function ensureSession() {
   return signed.session;
 }
 
-/** fetch that adds `Authorization: Bearer <access_token>` when cloud is enabled; plain fetch otherwise. */
+/**
+ * fetch that adds `Authorization: Bearer <access_token>` when cloud is enabled; plain fetch otherwise.
+ * On a 401 it refreshes the session once and retries the same request once (auth fails before any
+ * state change, so the retry is safe). Bodies must be re-sendable (strings/JSON), which ours are.
+ */
 export async function authFetch(input: string, init: RequestInit = {}) {
   const session = await ensureSession();
   if (!session) return fetch(input, init);
-  const headers = new Headers(init.headers);
-  headers.set("Authorization", `Bearer ${session.access_token}`);
-  return fetch(input, { ...init, headers });
+  const withToken = (token: string) => {
+    const headers = new Headers(init.headers);
+    headers.set("Authorization", `Bearer ${token}`);
+    return fetch(input, { ...init, headers });
+  };
+  const res = await withToken(session.access_token);
+  if (res.status !== 401) return res;
+  const { data } = await browserClient().auth.refreshSession();
+  return data.session ? withToken(data.session.access_token) : res;
 }

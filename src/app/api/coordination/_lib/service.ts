@@ -18,7 +18,8 @@ const fail = (status: number, error: string) => Response.json({ error }, { statu
 // Without Supabase, hosted production fails closed (PR #22). The local demo runs `next start` with
 // DAYBRIDGE_DEMO_EVENTS=1, which keeps the full in-memory flow working there.
 export const HOSTED_DISABLED = "Coordination runs in the local demo for now. The hosted version needs sign-in and storage first.";
-const localDemo = () => process.env.NODE_ENV !== "production" || process.env.DAYBRIDGE_DEMO_EVENTS === "1";
+// Never on Vercel: a hosted deploy without Supabase must not fall back to public in-memory mode.
+const localDemo = () => process.env.NODE_ENV !== "production" || (process.env.DAYBRIDGE_DEMO_EVENTS === "1" && !process.env.VERCEL);
 
 // Supabase configured -> persistent store + verified user (cloud). Otherwise -> in-memory local demo, no auth.
 export async function context(req: Request): Promise<Ctx | Response> {
@@ -37,7 +38,7 @@ export async function context(req: Request): Promise<Ctx | Response> {
 // Cloud (Supabase configured) production: always 403. No public synthetic-event injection, by any flag or key.
 export function demoEventsEnabled() {
   if (process.env.NODE_ENV !== "production") return true;
-  return !supabaseConfigured() && process.env.DAYBRIDGE_DEMO_EVENTS === "1";
+  return !supabaseConfigured() && localDemo();
 }
 
 export async function handle(ctx: Ctx, fn: () => Promise<unknown>) {
@@ -52,8 +53,15 @@ export async function handle(ctx: Ctx, fn: () => Promise<unknown>) {
   }
 }
 
+const MAX_BODY_CHARS = 64_000; // largest valid input (profile + 10 contacts) is a few KB
+
 export async function parseBody<T extends z.ZodType>(req: Request, schema: T): Promise<z.infer<T> | Response> {
-  const body = await req.json().catch(() => null);
+  const text = await req.text().catch(() => "");
+  if (text.length > MAX_BODY_CHARS) return Response.json({ error: "Request body too large" }, { status: 413 });
+  let body: unknown = null;
+  try {
+    body = JSON.parse(text);
+  } catch {}
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
