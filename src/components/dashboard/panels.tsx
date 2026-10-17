@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Ban, Calendar, Check, ChevronDown, CircleX, LoaderCircle, MapPin, Printer, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { Ban, Calendar, Check, ChevronDown, CircleX, Hand, LoaderCircle, MapPin, Printer, ShieldCheck, Sparkles, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -217,6 +217,13 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
                       {b.mitigation}
                     </p>
                   ))}
+                  <a
+                    href={`/coordinate?activityId=${i.activityId}`}
+                    className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80 focus-visible:ring-3 focus-visible:ring-ring/50 md:text-base print:hidden"
+                  >
+                    <Hand className="size-4" aria-hidden="true" />
+                    Get me there →
+                  </a>
                 </li>
               ))}
             </ul>
