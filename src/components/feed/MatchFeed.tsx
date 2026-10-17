@@ -41,7 +41,7 @@ function MatchCard({ item, added, flash, onToggle, result }: { item: PlanItem; a
   return (
     <li>
     <article
-      className={`rounded-2xl border-2 p-4 shadow-sm transition-[color,background-color,border-color,opacity] duration-300 motion-reduce:transition-none md:p-5 ${added ? "border-primary bg-primary/5" : "border-dashed border-border bg-card"} ${flash === "add" ? "db-flash-ok" : ""} ${flash === "remove" ? "opacity-70" : ""}`}
+      className={`rounded-2xl match-card border-2 p-4 shadow-sm transition-[color,background-color,border-color,opacity] duration-300 motion-reduce:transition-none md:p-5 ${added ? "border-primary bg-primary/5" : "border-dashed border-border bg-card"} ${flash === "add" ? "db-flash-ok" : ""} ${flash === "remove" ? "opacity-70" : ""}`}
     >
       <h3 className="text-xl font-semibold leading-snug md:text-2xl">{item.name}</h3>
       <ul className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5 text-base text-foreground/75 md:text-lg">
@@ -117,7 +117,7 @@ export function MatchFeed({ result, added, onToggle }: { result: AnalysisResult;
             </p>
           </div>
         ) : (
-          <ul className="db-stagger grid gap-4">
+          <ul className="db-stagger grid gap-5 md:grid-cols-2">
             {result.plan.map((item) => (
               <MatchCard
                 key={item.activityId}
