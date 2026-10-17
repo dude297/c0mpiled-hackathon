@@ -57,6 +57,7 @@ export function buildHandsFreeHtml(mode: Mode): string {
   var MODEL = ${JSON.stringify(MODEL)};
   var mode = ${JSON.stringify(mode)};
   var running = true, stream = null, landmarker = null, lastVideoTime = -1, errors = 0;
+  var vision = null, files = null, delegate = null, switching = false;
   var phase = 'starting', lastFace = null;
   var baseline = { gaze: 0, tilt: 0 };
   var calib = null;
@@ -101,7 +102,12 @@ export function buildHandsFreeHtml(mode: Mode): string {
   }
 
   window.__hf = {
-    setMode: function (m) { if (m === 'look' || m === 'tilt') { mode = m; resetDwell(); } },
+    setMode: function (m) {
+      if (m !== 'look' && m !== 'tilt') return;
+      mode = m; zone = 'center';
+      // Wait for the middle before the next answer (don't let a held side fire under the new mode).
+      if (phase === 'tracking') { dwell = rearmDwell(); sendProgress(null, 0, true); } else resetDwell();
+    },
     recalibrate: function () { if (running && landmarker) startCalib(); },
     stop: function () { stop(false); }
   };
@@ -126,7 +132,8 @@ export function buildHandsFreeHtml(mode: Mode): string {
     var cats = res.faceBlendshapes && res.faceBlendshapes[0] ? res.faceBlendshapes[0].categories : [];
     for (var i = 0; i < cats.length; i++) bs[cats[i].categoryName] = cats[i].score;
     var gaze = gazeFromBlendshapes(bs);
-    var tilt = tiltFromLandmarks(lm[33], lm[263]);
+    var aspect = video.videoWidth && video.videoHeight ? video.videoWidth / video.videoHeight : 1;
+    var tilt = tiltFromLandmarks(lm[33], lm[263], aspect);
 
     if (phase === 'calibrating') {
       calib.gaze.push(gaze); calib.tilt.push(tilt);
@@ -159,14 +166,40 @@ export function buildHandsFreeHtml(mode: Mode): string {
     sendProgress(r.side, r.progress);
   }
 
+  function make(d) {
+    return withTimeout(vision.FaceLandmarker.createFromOptions(files, {
+      baseOptions: { modelAssetPath: MODEL, delegate: d },
+      runningMode: 'VIDEO',
+      numFaces: 1,
+      outputFaceBlendshapes: true
+    }), 25000).then(function (l) { delegate = d; return l; });
+  }
+  // GPU made a landmarker but it keeps throwing on frames (WebGL in WKWebView can do this):
+  // swap to CPU once instead of giving up. The loop pauses until the new one is ready.
+  function fallBackToCpu(err) {
+    switching = true;
+    try { landmarker.close(); } catch (e) {}
+    landmarker = null;
+    make('CPU').then(function (l) {
+      if (!running) { try { l.close(); } catch (e) {} return; }
+      landmarker = l; errors = 0; switching = false;
+      requestAnimationFrame(loop);
+    }, function (e) { fail('load', (e && e.message) || err); });
+  }
+
   function loop() {
-    if (!running) return;
+    if (!running || switching) return;
     if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
       lastVideoTime = video.currentTime;
       var now = performance.now();
       var res = null;
       try { res = landmarker.detectForVideo(video, now); errors = 0; }
-      catch (e) { if (++errors > 30) return fail('load', e); }
+      catch (e) {
+        if (++errors > 30) {
+          if (delegate === 'GPU') return fallBackToCpu(e);
+          return fail('load', e);
+        }
+      }
       handle(res, now);
     }
     requestAnimationFrame(loop);
@@ -187,16 +220,8 @@ export function buildHandsFreeHtml(mode: Mode): string {
     phase = 'loading';
     post({ type: 'status', state: 'loading' });
     try {
-      var vision = await withTimeout(import(CDN + '/vision_bundle.mjs'), 20000);
-      var files = await withTimeout(vision.FilesetResolver.forVisionTasks(CDN + '/wasm'), 20000);
-      var make = function (delegate) {
-        return withTimeout(vision.FaceLandmarker.createFromOptions(files, {
-          baseOptions: { modelAssetPath: MODEL, delegate: delegate },
-          runningMode: 'VIDEO',
-          numFaces: 1,
-          outputFaceBlendshapes: true
-        }), 25000);
-      };
+      vision = await withTimeout(import(CDN + '/vision_bundle.mjs'), 20000);
+      files = await withTimeout(vision.FilesetResolver.forVisionTasks(CDN + '/wasm'), 20000);
       try { landmarker = await make('GPU'); } catch (e) { landmarker = await make('CPU'); }
     } catch (e) {
       return fail('load', e && e.message ? e.message : e);

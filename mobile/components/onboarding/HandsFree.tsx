@@ -174,13 +174,19 @@ export function HandsFreeDeck({
     webRef.current?.injectJavaScript(`window.__hf && window.__hf.setMode(${JSON.stringify(m)}); true;`);
   };
 
-  const answer = (liked: boolean) => {
-    if (!top) return;
-    const msg = `${liked ? 'Liked' : 'Passed on'} ${top.label}`;
-    setSaid(msg);
-    AccessibilityInfo.announceForAccessibility(msg);
-    deckRef.current?.swipe(liked ? 1 : -1); // same path as the No / Yes buttons (haptic + answer)
+  // Every answer lands here — gaze/tilt, the ✕/❤️ targets, the No/Yes bar and a finger swipe —
+  // so each one is announced ("Liked Gardening") before it's recorded.
+  const recordAnswer = (key: Interest['key'], liked: boolean) => {
+    const label = INTEREST_META.find((i) => i.key === key)?.label;
+    if (label) {
+      const msg = `${liked ? 'Liked' : 'Passed on'} ${label}`;
+      setSaid(msg);
+      AccessibilityInfo.announceForAccessibility(msg);
+    }
+    onAnswer(key, liked);
   };
+  // Same path as the No / Yes buttons (fling + haptic + recordAnswer).
+  const answer = (liked: boolean) => deckRef.current?.swipe(liked ? 1 : -1);
 
   const onMessage = (e: WebViewMessageEvent) => {
     const m = parsePageMessage(e.nativeEvent.data);
@@ -212,16 +218,21 @@ export function HandsFreeDeck({
       label={top?.label}
       active={tracking && progress.side === side}
       progress={shown}
-      onPress={() => deckRef.current?.swipe(side === 'right' ? 1 : -1)}
+      onPress={() => answer(side === 'right')}
     />
   );
 
+  // statusText is a live region, so it only changes when the step changes; the calibration
+  // percent (updates ~5×/s) sits in a separate, non-live Text so TalkBack doesn't repeat it.
   let statusText = '';
+  let percent = '';
   if (phase === 'starting') statusText = 'Starting the camera…';
   else if (phase === 'loading') statusText = 'Getting ready… (a few seconds)';
   else if (face === false) statusText = "Can't see your face. Hold the phone in front of you, in good light.";
-  else if (phase === 'calibrating') statusText = `Look at the middle of the screen… ${Math.round(calib * 100)}%`;
-  else if (tracking)
+  else if (phase === 'calibrating') {
+    statusText = 'Look at the middle of the screen…';
+    percent = `${Math.round(calib * 100)}%`;
+  } else if (tracking)
     statusText = mode === 'look' ? 'Look toward No or Yes and hold.' : 'Tilt your head toward No or Yes and hold.';
 
   return (
@@ -265,8 +276,14 @@ export function HandsFreeDeck({
                 <Text style={[type.bodyStrong, { color: colors.text }]} accessibilityLiveRegion="polite">
                   {statusText}
                 </Text>
+                {percent ? (
+                  <Text style={[type.label, { color: colors.textMuted }]} importantForAccessibility="no" accessibilityElementsHidden>
+                    {percent}
+                  </Text>
+                ) : null}
                 {said ? (
-                  <Text style={[type.bodyStrong, { color: colors.like }]} accessibilityLiveRegion="polite">
+                  // Not a live region: announceForAccessibility already speaks it (avoids a double read on TalkBack).
+                  <Text style={[type.bodyStrong, { color: colors.like }]}>
                     {said}
                   </Text>
                 ) : null}
@@ -301,7 +318,7 @@ export function HandsFreeDeck({
         cursor={cursor}
         enterFrom={enterFrom}
         canBack
-        onAnswer={onAnswer}
+        onAnswer={recordAnswer}
         onBack={onBack}
         left={live ? target('left') : null}
         right={live ? target('right') : null}

@@ -18,7 +18,7 @@ writeFileSync(file, out.outputText);
 const tsImpl = await import(pathToFileURL(file).href);
 rmSync(dir, { recursive: true, force: true });
 
-const names = ['TUNING', 'GAZE_SIGN', 'TILT_SIGN', 'gazeFromBlendshapes', 'tiltFromLandmarks', 'classify', 'initialDwell', 'stepDwell'];
+const names = ['TUNING', 'GAZE_SIGN', 'TILT_SIGN', 'gazeFromBlendshapes', 'tiltFromLandmarks', 'classify', 'initialDwell', 'rearmDwell', 'stepDwell'];
 const jsImpl = new Function(`${tsImpl.HANDSFREE_CORE_JS}; return { ${names.join(', ')} };`)();
 
 let n = 0;
@@ -32,7 +32,7 @@ same('GAZE_SIGN', jsImpl.GAZE_SIGN, tsImpl.GAZE_SIGN);
 same('TILT_SIGN', jsImpl.TILT_SIGN, tsImpl.TILT_SIGN);
 
 for (const impl of [tsImpl, jsImpl]) {
-  const { gazeFromBlendshapes, tiltFromLandmarks, classify, initialDwell, stepDwell, TUNING } = impl;
+  const { gazeFromBlendshapes, tiltFromLandmarks, classify, initialDwell, rearmDwell, stepDwell, TUNING } = impl;
 
   // Gaze: looking to the person's right (= screen right, ❤️) is positive; clamped to [-1, 1].
   assert.ok(gazeFromBlendshapes({ eyeLookInLeft: 0.6, eyeLookOutRight: 0.6 }) > 0.5);
@@ -45,6 +45,21 @@ for (const impl of [tsImpl, jsImpl]) {
   assert.ok(Math.abs(tiltFromLandmarks({ x: 0.3, y: 0.5 }, { x: 0.7, y: 0.5 })) < 1e-9);
   assert.ok(tiltFromLandmarks({ x: 0.3, y: 0.6 }, { x: 0.7, y: 0.4 }) > 15);
   assert.ok(tiltFromLandmarks({ x: 0.3, y: 0.4 }, { x: 0.7, y: 0.6 }) < -15);
+
+  // Aspect ratio: a real 15° roll in a 480x640 portrait frame (pixels) must read as 15°, not ~11.5°
+  // (and in a 640x480 landscape frame, not ~19.7°).
+  const rollFrame = (deg, w, h) => {
+    const r = (deg * Math.PI) / 180, cx = w / 2, cy = h / 2, half = 60; // eye corners 120 px apart
+    // Positive = toward the screen's right = 33 lower in the raw image (see TILT_SIGN).
+    return [{ x: (cx - half * Math.cos(r)) / w, y: (cy + half * Math.sin(r)) / h }, { x: (cx + half * Math.cos(r)) / w, y: (cy - half * Math.sin(r)) / h }];
+  };
+  for (const [w, h] of [[480, 640], [640, 480], [720, 1280]]) {
+    const [a, b] = rollFrame(15, w, h);
+    assert.ok(Math.abs(tiltFromLandmarks(a, b, w / h) - 15) < 1e-6, `15° roll reads 15° at ${w}x${h}`);
+    assert.ok(Math.abs(tiltFromLandmarks(a, b) - 15) > 2, `uncorrected ${w}x${h} is off (proves the fix matters)`);
+  }
+  assert.equal(classify(tiltFromLandmarks(...rollFrame(14, 480, 640), 480 / 640), 'center', TUNING.tilt.threshold, TUNING.tilt.hysteresis), 'center');
+  assert.equal(classify(tiltFromLandmarks(...rollFrame(16, 480, 640), 480 / 640), 'center', TUNING.tilt.threshold, TUNING.tilt.hysteresis), 'right');
 
   // Zones + hysteresis.
   const L = TUNING.look;
@@ -100,6 +115,22 @@ for (const impl of [tsImpl, jsImpl]) {
   assert.deepEqual(fires(log), []);
   assert.equal(log.find((r, i) => i > 0 && log[i - 1].side === null && r.side === 'right' && i > 100).progress < 0.05, true);
 
+  // After a Look/Tilt switch (rearmDwell): a side already held can't fire until the middle is held 400 ms.
+  const runFrom = (s, zones, dwellMs) => {
+    const log = [];
+    let t = 0;
+    for (const [zone, ms] of zones)
+      for (let i = 0; i < ms; i += 10) {
+        const r = stepDwell(s, zone, (t += 10), dwellMs, TUNING.rearmMs);
+        s = r.state;
+        log.push(r);
+      }
+    return log;
+  };
+  assert.deepEqual(fires(runFrom(rearmDwell(), [['right', 3000]], 800)), []);
+  assert.deepEqual(fires(runFrom(rearmDwell(), [['right', 1000], ['center', 300], ['right', 1000]], 800)), []);
+  assert.deepEqual(fires(runFrom(rearmDwell(), [['right', 1000], ['center', 450], ['right', 900]], 800)), ['right']);
+
   // Tilt dwell is shorter.
   log = run([['left', 850]], TUNING.tilt.dwellMs);
   assert.deepEqual(fires(log), ['left']);
@@ -126,5 +157,8 @@ for (const v of [-1.2, -0.3, -0.2, 0, 0.2, 0.3, 1.2])
 const bs = { eyeLookInLeft: 0.3, eyeLookOutRight: 0.1, eyeLookOutLeft: 0.05, eyeLookInRight: 0.2 };
 same('gaze', jsImpl.gazeFromBlendshapes(bs), tsImpl.gazeFromBlendshapes(bs));
 same('tilt', jsImpl.tiltFromLandmarks({ x: 0.31, y: 0.52 }, { x: 0.69, y: 0.47 }), tsImpl.tiltFromLandmarks({ x: 0.31, y: 0.52 }, { x: 0.69, y: 0.47 }));
+for (const asp of [0.5625, 0.75, 1, 1.3333])
+  same(`tilt aspect ${asp}`, jsImpl.tiltFromLandmarks({ x: 0.31, y: 0.52 }, { x: 0.69, y: 0.47 }, asp), tsImpl.tiltFromLandmarks({ x: 0.31, y: 0.52 }, { x: 0.69, y: 0.47 }, asp));
+same('rearmDwell', jsImpl.rearmDwell(), tsImpl.rearmDwell());
 
 console.log(`handsfree: all checks passed (${n} parity/behaviour groups, TS + injected JS)`);

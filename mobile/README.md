@@ -42,6 +42,10 @@ hosts a tiny page (`lib/handsfreePage.ts`) that loads MediaPipe Face Landmarker 
 Pure dwell / zone logic lives in `lib/handsfree.ts` (tuning + left/right sign constants at the top), with a
 plain-JS twin injected into the page. Camera frames never leave the phone. Not available in the web preview.
 
+**Before merge:** `react-native-webview@14.0.1` (Expo-bundled, installed with `npx expo install`) is a new
+package and needs the lead's sign-off under the team's no-new-packages rule. Look threshold (0.2) and the
+left/right gaze sign (`GAZE_SIGN`) still need a check on a real phone.
+
 ## Checks
 
 ```bash

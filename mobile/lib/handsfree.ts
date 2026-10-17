@@ -7,9 +7,11 @@
 export type Mode = 'look' | 'tilt';
 export type Zone = 'left' | 'center' | 'right'; // left = ✕ (no), right = ❤️ (yes) — screen sides
 
-// Tuning. Gaze is unitless in [-1, 1]; tilt is in degrees.
+// Tuning. Gaze is unitless in [-1, 1]; tilt is in degrees. Look threshold is 0.2 (spec says ~0.25):
+// a glance at the edge of a phone held at arm's length is small, so 0.25 risks never firing.
+// Not yet tuned on a device — if it fires by accident, raise it; if it never fires, lower to ~0.15.
 export const TUNING = {
-  look: { dwellMs: 1500, threshold: 0.25, hysteresis: 0.07 },
+  look: { dwellMs: 1500, threshold: 0.2, hysteresis: 0.06 },
   tilt: { dwellMs: 800, threshold: 15, hysteresis: 3 },
   rearmMs: 400, // must look/hold back at the middle this long before the next answer
   calibrateMs: 2000, // "look at the middle" step at start
@@ -35,9 +37,10 @@ export function gazeFromBlendshapes(b: Record<string, number>): number {
 }
 
 // Head roll in degrees from the outer eye corners (landmarks 33 and 263, normalized x/y),
-// positive = tilted toward the screen's right (❤️).
-export function tiltFromLandmarks(p33: { x: number; y: number }, p263: { x: number; y: number }): number {
-  const deg = (Math.atan2(p263.y - p33.y, p263.x - p33.x) * 180) / Math.PI;
+// positive = tilted toward the screen's right (❤️). aspect = frame width / height: landmarks are
+// normalized per axis, so without it a 480x640 portrait frame reads ~19.7° of real roll as 15°.
+export function tiltFromLandmarks(p33: { x: number; y: number }, p263: { x: number; y: number }, aspect = 1): number {
+  const deg = (Math.atan2(p263.y - p33.y, (p263.x - p33.x) * aspect) * 180) / Math.PI;
   return TILT_SIGN * deg;
 }
 
@@ -66,6 +69,9 @@ export type DwellStep = {
 };
 
 export const initialDwell = (): DwellState => ({ side: null, since: 0, needsCenter: false, centerSince: null });
+// After a Look/Tilt switch: wait for the middle before answering, so a head already turned or tilted
+// to one side can't fire straight away under the new mode.
+export const rearmDwell = (): DwellState => ({ side: null, since: 0, needsCenter: true, centerSince: null });
 
 // One frame of the dwell machine. zone = null means no face (resets the hold).
 export function stepDwell(s: DwellState, zone: Zone | null, now: number, dwellMs: number, rearmMs: number): DwellStep {
@@ -95,7 +101,7 @@ export function stepDwell(s: DwellState, zone: Zone | null, now: number, dwellMs
 // Plain-JS twin of everything above, injected into the WebView page. Keep in sync (see top).
 export const HANDSFREE_CORE_JS = String.raw`
 var TUNING = {
-  look: { dwellMs: 1500, threshold: 0.25, hysteresis: 0.07 },
+  look: { dwellMs: 1500, threshold: 0.2, hysteresis: 0.06 },
   tilt: { dwellMs: 800, threshold: 15, hysteresis: 3 },
   rearmMs: 400,
   calibrateMs: 2000
@@ -109,8 +115,9 @@ function gazeFromBlendshapes(b) {
   var left = g('eyeLookOutLeft') + g('eyeLookInRight');
   return clamp((GAZE_SIGN * (right - left)) / 2, -1, 1);
 }
-function tiltFromLandmarks(p33, p263) {
-  var deg = (Math.atan2(p263.y - p33.y, p263.x - p33.x) * 180) / Math.PI;
+function tiltFromLandmarks(p33, p263, aspect) {
+  if (aspect == null) aspect = 1;
+  var deg = (Math.atan2(p263.y - p33.y, (p263.x - p33.x) * aspect) * 180) / Math.PI;
   return TILT_SIGN * deg;
 }
 function classify(v, prev, threshold, hysteresis) {
@@ -122,6 +129,7 @@ function classify(v, prev, threshold, hysteresis) {
   return 'center';
 }
 function initialDwell() { return { side: null, since: 0, needsCenter: false, centerSince: null }; }
+function rearmDwell() { return { side: null, since: 0, needsCenter: true, centerSince: null }; }
 function stepDwell(s, zone, now, dwellMs, rearmMs) {
   if (zone === null) {
     return { state: { side: null, since: now, needsCenter: s.needsCenter, centerSince: null }, side: null, progress: 0, fired: null };
