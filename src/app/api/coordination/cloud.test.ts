@@ -24,6 +24,8 @@ vi.mock("@/lib/supabase/store", async () => {
   };
   return { createSupabaseStore: () => (shared.store ??= counted()) };
 });
+// Rate limiting has its own tests (ratelimit.test.ts); here it always allows.
+vi.mock("@/lib/supabase/ratelimit", () => ({ rateLimit: async () => true, retryAfterSec: () => 1 }));
 vi.mock("@/lib/supabase/auth", () => {
   const users: Record<string, string> = { "Bearer tok-alice": "user-alice", "Bearer tok-bob": "user-bob" };
   return { getUserId: async (req: Request) => users[req.headers.get("authorization") ?? ""] ?? null };

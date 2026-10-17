@@ -19,6 +19,7 @@ vi.mock("@/lib/supabase/store", async () => {
 vi.mock("@/lib/supabase/auth", () => ({
   getUserId: async (req: Request) => (req.headers.get("authorization") === "Bearer tok-alice" ? "user-alice" : null),
 }));
+vi.mock("@/lib/supabase/ratelimit", () => ({ rateLimit: async () => true, retryAfterSec: () => 1 })); // limiter has its own tests; fails closed on the mocked adminClient
 vi.mock("next/server", () => ({ connection: async () => {} }));
 vi.mock("next/navigation", () => ({
   notFound: () => {

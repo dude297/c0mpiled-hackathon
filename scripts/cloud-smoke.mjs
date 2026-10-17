@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import assert from "node:assert/strict";
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
 
 const [A, B] = process.argv.slice(2);
 const STATE = process.env.SMOKE_STATE; // optional: file to hand plan id + token to a post-restart `reload` run
@@ -88,6 +89,35 @@ ok("production demo-event injection is disabled (403)");
 
 plan = (await call(B, `/api/coordination/plans/${id}`, alice)).body.plan;
 assert.notEqual(plan.state, "READY");
-ok(`final state ${plan.state}; READY still requires confirmed dependencies`);
+ok(`state ${plan.state} after execute; READY still requires confirmed dependencies`);
+// Signed provider callbacks (simulated providers only) are the one production path to confirmation.
+// Enabled when the servers run with PROVIDER_WEBHOOK_SECRET_MOCK_RIDE / _MOCK_INVITE; pass the same values here.
+const SECRETS = { "mock-ride": process.env.PROVIDER_WEBHOOK_SECRET_MOCK_RIDE, "mock-invite": process.env.PROVIDER_WEBHOOK_SECRET_MOCK_INVITE };
+if (SECRETS["mock-ride"] && SECRETS["mock-invite"]) {
+  const callback = async (base, provider, body, secret = SECRETS[provider]) => {
+    const raw = JSON.stringify(body);
+    const t = Math.floor(Date.now() / 1000);
+    const sig = `t=${t},v1=${createHmac("sha256", secret).update(`${t}.${raw}`).digest("hex")}`;
+    const res = await fetch(`${base}/api/providers/${provider}/callback`, { method: "POST", headers: { "content-type": "application/json", "x-daybridge-signature": sig }, body: raw });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  };
+  const live = plan.actions.filter((a) => a.status === "dispatched");
+  const evFor = (a, n) => ({ planId: id, eventId: `smoke-${a.id}-${n}`, requestId: a.providerRequestId, sequence: 1, type: a.scope.kind === "ride" ? "ride.confirmed" : "invite.accepted" });
+  const forged = await callback(A, "mock-ride", evFor(live[0], 0), "x".repeat(40));
+  assert.equal(forged.status, 401);
+  ok("callback with a wrong signature -> 401");
+  for (const [i, a] of live.entries()) {
+    const r = await callback(i % 2 ? B : A, a.scope.kind === "ride" ? "mock-ride" : "mock-invite", evFor(a, 1));
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.outcome, "applied");
+  }
+  const replay = await callback(B, live[0].scope.kind === "ride" ? "mock-ride" : "mock-invite", evFor(live[0], 1));
+  assert.equal(replay.body.outcome, "duplicate");
+  ok("signed callback replayed on the other process -> duplicate");
+  plan = (await call(A, `/api/coordination/plans/${id}`, alice)).body.plan;
+  assert.equal(plan.state, "READY");
+  ok("all dependencies confirmed by signed callbacks across processes -> READY");
+}
+
 if (STATE) writeFileSync(STATE, JSON.stringify({ id, token: alice, events: (await call(A, `/api/coordination/plans/${id}`, alice)).body.events.length }));
 console.log("cloud smoke: all checks passed");

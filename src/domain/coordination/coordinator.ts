@@ -37,6 +37,11 @@ export const MAX_COMMIT_ATTEMPTS = 3;
 export const MAX_LOG_EVENTS = 500;
 
 type Entry = StoredPlan;
+// Trusted server-side caller (signed provider callbacks). Accepted only by ingest(); user routes pass a userId/null,
+// which can never equal this object, so no user path gains owner bypass.
+export type SystemCaller = { system: true };
+type Caller = string | null | undefined | SystemCaller;
+const isSystem = (c: Caller): c is SystemCaller => typeof c === "object" && c !== null && c.system === true;
 type Pending = Omit<CoordinationEvent, "seq" | "at">;
 
 export class CoordinationError extends Error {
@@ -205,9 +210,9 @@ export function createCoordinator(deps: CoordinatorDeps) {
   }
 
   // A wrong owner gets the same 404 as a missing plan, so plan ids leak nothing.
-  async function entry(id: string, ownerId: string | null | undefined) {
+  async function entry(id: string, ownerId: Caller) {
     const e = await store.load(id);
-    if (!e || e.ownerId !== (ownerId ?? null)) throw new CoordinationError(404, `Plan "${id}" not found`);
+    if (!e || (!isSystem(ownerId) && e.ownerId !== (ownerId ?? null))) throw new CoordinationError(404, `Plan "${id}" not found`);
     return e;
   }
 
@@ -217,7 +222,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
   // approved and reuses its idempotencyKey. ponytail: at-least-once dispatch, safe for the key-deduping mock only;
   // live providers need a two-phase claim (commit "dispatching" first, then call) before they can be wired in.
   const dispatchedIn = new WeakSet<Entry>();
-  function mutate(id: string, ownerId: string | null | undefined, fn: (e: Entry) => Promise<CommandResult>): Promise<CommandResult> {
+  function mutate(id: string, ownerId: Caller, fn: (e: Entry) => Promise<CommandResult>): Promise<CommandResult> {
     return withLock(id, async () => {
       for (let attempt = 0; attempt < MAX_COMMIT_ATTEMPTS; attempt++) {
         const e = await entry(id, ownerId);
@@ -421,7 +426,7 @@ export function createCoordinator(deps: CoordinatorDeps) {
     });
   }
 
-  function ingest(id: string, ev: ProviderEvent, ownerId?: string | null): Promise<CommandResult> {
+  function ingest(id: string, ev: ProviderEvent, ownerId?: string | null | SystemCaller): Promise<CommandResult> {
     return mutate(id, ownerId, async (e) => {
       const p = e.plan;
       const type = ev.type;

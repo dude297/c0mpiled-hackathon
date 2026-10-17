@@ -118,7 +118,8 @@ function prune(now: number) {
 
 // Throws on a storage failure (routes answer 503).
 // `cap` is injectable for tests only; the routes always use MAX_SHARES.
-export async function createShare(input: ShareInput, now = new Date(), cap = MAX_SHARES) {
+// `creatorUserId` (durable store only) lets a signed-in creator list/revoke later without the token.
+export async function createShare(input: ShareInput, now = new Date(), cap = MAX_SHARES, creatorUserId: string | null = null) {
   const plan = redact(input, now);
   const id = randomBytes(16).toString("base64url");
   const revokeToken = randomBytes(32).toString("base64url");
@@ -131,6 +132,7 @@ export async function createShare(input: ShareInput, now = new Date(), cap = MAX
       p_expires_at: plan.expiresAt,
       p_now: now.toISOString(),
       p_cap: cap,
+      p_creator: creatorUserId,
     });
     if (error) throw new Error(`share insert failed: ${error.message}`);
   } else {
@@ -178,6 +180,35 @@ export async function revokeShare(id: string, token: string): Promise<boolean> {
   if (!e || !timingSafeEqual(sha256(token), e.tokenHash)) return false;
   store.delete(id);
   return true;
+}
+
+// Cloud candidate: creator recovery. Durable store only (memory mode has no creators).
+// Deletes only when the row's creator_user_id equals the verified caller. Unknown/foreign/anonymous → false.
+export async function revokeShareAsCreator(id: string, userId: string): Promise<boolean> {
+  if (!ID_RE.test(id) || !supabaseConfigured()) return false;
+  const { data, error } = await adminClient().from(TABLE).delete().eq("id", id).eq("creator_user_id", userId).select("id");
+  if (error) throw new Error(`share revoke failed: ${error.message}`);
+  return data.length > 0;
+}
+
+export type MyShare = { id: string; url: string; expiresAt: string; createdAt: string; summary: string };
+// The caller's unexpired shares, newest first. No tokens, no creator id. Throws on a storage failure.
+export async function listMyShares(userId: string, now = new Date()): Promise<MyShare[]> {
+  const { data, error } = await adminClient()
+    .from(TABLE)
+    .select("id, expires_at, created_at, summary:plan->>summary")
+    .eq("creator_user_id", userId)
+    .gt("expires_at", now.toISOString())
+    .order("created_at", { ascending: false })
+    .limit(100); // ponytail: no pagination; 100 live links per person is plenty for the demo
+  if (error) throw new Error(`share list failed: ${error.message}`);
+  return (data as unknown as { id: string; expires_at: string; created_at: string; summary: string | null }[]).map((r) => ({
+    id: r.id,
+    url: `/plan/${r.id}`,
+    expiresAt: new Date(r.expires_at).toISOString(),
+    createdAt: new Date(r.created_at).toISOString(),
+    summary: r.summary ?? "",
+  }));
 }
 
 export function _resetShareStore() {

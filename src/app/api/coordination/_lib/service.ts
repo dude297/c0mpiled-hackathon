@@ -2,6 +2,7 @@ import { CoordinationError, createCoordinator, type Coordinator } from "@/domain
 import { createMockProvider } from "@/domain/coordination/provider";
 import { createMemoryStore } from "@/domain/coordination/store";
 import { getUserId } from "@/lib/supabase/auth";
+import { rateLimit, retryAfterSec } from "@/lib/supabase/ratelimit";
 import { supabaseConfigured } from "@/lib/supabase/server";
 import { createSupabaseStore } from "@/lib/supabase/store";
 import type { z } from "zod";
@@ -21,17 +22,39 @@ export const HOSTED_DISABLED = "Coordination runs in the local demo for now. The
 // Never on Vercel: a hosted deploy without Supabase must not fall back to public in-memory mode.
 const localDemo = () => process.env.NODE_ENV !== "production" || (process.env.DAYBRIDGE_DEMO_EVENTS === "1" && !process.env.VERCEL);
 
-// Supabase configured -> persistent store + verified user (cloud). Otherwise -> in-memory local demo, no auth.
-export async function context(req: Request): Promise<Ctx | Response> {
-  if (supabaseConfigured()) {
-    const coordinator = (g.__daybridgeCloudCoordinator ??= createCoordinator({ provider: createMockProvider(), store: createSupabaseStore() }));
-    const userId = await getUserId(req);
-    if (!userId) return fail(401, "Sign in required");
-    return { coordinator, userId, persistence: "supabase" };
+// Per-user write limits (cloud mode only; the local memory demo is never limited).
+export const LIMITS = { write: { limit: 60, windowSec: 60 }, create: { limit: 10, windowSec: 3600 } } as const;
+const CREATE_PATHS = new Set(["/api/coordination/plans", "/api/coordination/demo"]);
+
+async function overLimit(req: Request, userId: string): Promise<Response | null> {
+  if (req.method === "GET" || req.method === "HEAD") return null;
+  const buckets: (keyof typeof LIMITS)[] = CREATE_PATHS.has(new URL(req.url).pathname) ? ["write", "create"] : ["write"];
+  for (const b of buckets) {
+    const { limit, windowSec } = LIMITS[b];
+    if (!(await rateLimit(`${b}:${userId}`, limit, windowSec)))
+      return Response.json({ error: "Too many requests; try again shortly" }, { status: 429, headers: { "Retry-After": String(retryAfterSec(windowSec)) } });
   }
-  if (!localDemo()) return fail(503, HOSTED_DISABLED);
-  const coordinator = (g.__daybridgeCoordinator ??= createCoordinator({ provider: createMockProvider(), store: createMemoryStore() }));
-  return { coordinator, userId: null, persistence: "memory" };
+  return null;
+}
+
+// Supabase configured -> persistent store + verified user (cloud). Otherwise -> in-memory local demo, no auth.
+// The coordinator for this deployment's mode: Supabase (cloud), in-memory (local demo), or null (fail closed).
+// Also used by signed provider callbacks, which act for the system rather than a user.
+export function systemCoordinator(): Coordinator | null {
+  if (supabaseConfigured()) return (g.__daybridgeCloudCoordinator ??= createCoordinator({ provider: createMockProvider(), store: createSupabaseStore() }));
+  if (!localDemo()) return null;
+  return (g.__daybridgeCoordinator ??= createCoordinator({ provider: createMockProvider(), store: createMemoryStore() }));
+}
+
+export async function context(req: Request): Promise<Ctx | Response> {
+  const coordinator = systemCoordinator();
+  if (!coordinator) return fail(503, HOSTED_DISABLED);
+  if (!supabaseConfigured()) return { coordinator, userId: null, persistence: "memory" };
+  const userId = await getUserId(req);
+  if (!userId) return fail(401, "Sign in required");
+  const limited = await overLimit(req, userId);
+  if (limited) return limited;
+  return { coordinator, userId, persistence: "supabase" };
 }
 
 // Simulated provider callbacks. Local demo: as before (always in dev, DAYBRIDGE_DEMO_EVENTS=1 under `next start`).
