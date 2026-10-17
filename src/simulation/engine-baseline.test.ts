@@ -1,10 +1,35 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Activity } from "@/domain/activities";
 import { checkActivity, runScenario } from "@/domain/engine";
 import type { Profile } from "@/lib/schema";
 
 // Synthetic fixtures only. The real catalog (src/domain/activities.ts) is owned by
-// Teammate B and must not be modified or imported for data here.
+// Teammate B and must not be modified or imported for data here. Fixture injection
+// uses vi.mock with a hoisted mutable array so every plan-level test exercises the
+// REAL runScenario (no re-implementation of engine logic).
+
+const fixtures = vi.hoisted(() => {
+  const base: Activity = {
+    id: "synthetic-1",
+    name: "Synthetic Activity",
+    tags: ["gardening"],
+    day: "Mon",
+    time: "morning",
+    costPerWeek: 5,
+    travelMin: { drive: 10 },
+    stepFree: true,
+    groupSize: "small",
+    noisy: false,
+    hearingLoop: false,
+  };
+  return { acts: [base] as Activity[] };
+});
+
+vi.mock("@/domain/activities", async (importOriginal) => {
+  // Keep types from the real module; only replace the ACTIVITIES data.
+  const real = await importOriginal<typeof import("@/domain/activities")>();
+  return { ...real, ACTIVITIES: fixtures.acts };
+});
 
 const baseProfile: Profile = {
   name: "Test Person",
@@ -18,21 +43,22 @@ const baseProfile: Profile = {
   prefersSmallGroups: false,
 };
 
-const baseActivity: Activity = {
-  id: "synthetic-1",
-  name: "Synthetic Activity",
-  tags: ["gardening"],
-  day: "Mon",
-  time: "morning",
-  costPerWeek: 5,
-  travelMin: { drive: 10 },
-  stepFree: true,
-  groupSize: "small",
-  noisy: false,
-  hearingLoop: false,
-};
+const baseActivity: Activity = { ...fixtures.acts[0]! };
 
-describe("Phase 1 baseline regression (synthetic fixtures)", () => {
+function setCatalog(acts: Activity[]) {
+  fixtures.acts.length = 0;
+  fixtures.acts.push(...acts);
+}
+
+afterEach(() => setCatalog([baseActivity]));
+
+// Convenience: run the REAL engine against a temporary synthetic catalog.
+function runWith(acts: Activity[], profile: Profile) {
+  setCatalog(acts);
+  return runScenario({ profile });
+}
+
+describe("Phase 1 baseline regression (synthetic fixtures, real engine)", () => {
   describe("mobility and accessibility constraints", () => {
     it("walker + stairs is a hard access barrier", () => {
       const checks = checkActivity(
@@ -145,12 +171,15 @@ describe("Phase 1 baseline regression (synthetic fixtures)", () => {
     });
 
     it("plan never places two activities on the same day", () => {
-      // Two different-day activities that both match interests; a third same-day one must not collide.
-      const a1 = { ...baseActivity, id: "s-a", name: "Act A", day: "Mon" as const, tags: ["gardening" as const] };
-      const a2 = { ...baseActivity, id: "s-b", name: "Act B", day: "Tue" as const, tags: ["gardening" as const] };
-      const a3 = { ...baseActivity, id: "s-c", name: "Act C", day: "Mon" as const, tags: ["gardening" as const] };
-      const { plan } = runScenarioWithCatalog([a1, a2, a3], baseProfile);
-      const days = plan.map((i) => i.when.split(" ")[0]);
+      const out = runWith(
+        [
+          { ...baseActivity, id: "s-a", name: "Act A", day: "Mon" },
+          { ...baseActivity, id: "s-b", name: "Act B", day: "Tue" },
+          { ...baseActivity, id: "s-c", name: "Act C", day: "Mon" },
+        ],
+        baseProfile,
+      );
+      const days = out.plan.map((i) => i.when.split(" ")[0]);
       expect(new Set(days).size).toBe(days.length);
     });
   });
@@ -167,45 +196,49 @@ describe("Phase 1 baseline regression (synthetic fixtures)", () => {
     });
 
     it("plan cumulative cost never exceeds budget", () => {
-      const acts = [
-        { ...baseActivity, id: "b-1", name: "B1", day: "Mon" as const, costPerWeek: 6 },
-        { ...baseActivity, id: "b-2", name: "B2", day: "Tue" as const, costPerWeek: 6 },
-        { ...baseActivity, id: "b-3", name: "B3", day: "Wed" as const, costPerWeek: 6 },
-      ];
-      const { plan } = runScenarioWithCatalog(acts, { ...baseProfile, budgetPerWeek: 10 });
-      expect(plan.reduce((s, i) => s + i.costPerWeek, 0)).toBeLessThanOrEqual(10);
-      expect(plan).toHaveLength(1); // only one affordable activity fits
+      const out = runWith(
+        [
+          { ...baseActivity, id: "b-1", name: "B1", day: "Mon", costPerWeek: 6 },
+          { ...baseActivity, id: "b-2", name: "B2", day: "Tue", costPerWeek: 6 },
+          { ...baseActivity, id: "b-3", name: "B3", day: "Wed", costPerWeek: 6 },
+        ],
+        { ...baseProfile, budgetPerWeek: 10 },
+      );
+      expect(out.plan.reduce((s, i) => s + i.costPerWeek, 0)).toBeLessThanOrEqual(10);
+      expect(out.plan).toHaveLength(1); // only one affordable activity fits
     });
 
     it("zero budget still yields a feasible free activity", () => {
-      const acts = [
-        { ...baseActivity, id: "free-1", name: "Free Act", costPerWeek: 0, day: "Mon" as const },
-        { ...baseActivity, id: "paid-1", name: "Paid Act", costPerWeek: 5, day: "Tue" as const },
-      ];
-      const { plan, blocked } = runScenarioWithCatalog(acts, { ...baseProfile, budgetPerWeek: 0 });
-      expect(plan.map((i) => i.activityId)).toEqual(["free-1"]);
-      expect(blocked.find((b) => b.name === "Paid Act")?.barriers).toContainEqual(
+      const out = runWith(
+        [
+          { ...baseActivity, id: "free-1", name: "Free Act", costPerWeek: 0, day: "Mon" },
+          { ...baseActivity, id: "paid-1", name: "Paid Act", costPerWeek: 5, day: "Tue" },
+        ],
+        { ...baseProfile, budgetPerWeek: 0 },
+      );
+      expect(out.plan.map((i) => i.activityId)).toEqual(["free-1"]);
+      expect(out.blocked.find((b) => b.name === "Paid Act")?.barriers).toContainEqual(
         expect.objectContaining({ rule: "cost", severity: "hard" }),
       );
     });
 
     it("greedy plan prefers the highest-scored affordable activity when budget forces a choice", () => {
-      // "Expensive Match" scores higher by interests but exceeds budget; "Cheap Match" fits.
-      const acts: Activity[] = [
-        { ...baseActivity, id: "cheap", name: "Cheap Match", costPerWeek: 2, day: "Mon", tags: ["gardening"] },
-        { ...baseActivity, id: "pricey", name: "Pricey Match", costPerWeek: 9, day: "Tue", tags: ["gardening", "walking"] },
-      ];
-      const { plan } = runScenarioWithCatalog(acts, { ...baseProfile, budgetPerWeek: 5 });
-      expect(plan[0]?.activityId).toBe("cheap");
+      // "Pricey Match" scores higher (2 matching interests) but exceeds the budget
+      // once chosen first; the greedy planner keeps the affordable one.
+      const out = runWith(
+        [
+          { ...baseActivity, id: "cheap", name: "Cheap Match", costPerWeek: 2, day: "Mon", tags: ["gardening"] },
+          { ...baseActivity, id: "pricey", name: "Pricey Match", costPerWeek: 9, day: "Tue", tags: ["gardening", "walking"] },
+        ],
+        { ...baseProfile, budgetPerWeek: 5 },
+      );
+      expect(out.plan[0]?.activityId).toBe("cheap");
     });
   });
 
   describe("no matching interests", () => {
     it("no interest overlap means empty plan, no blocked items, no fabricated evidence", () => {
-      const out = runScenarioWithCatalog([baseActivity], {
-        ...baseProfile,
-        interests: ["tech"],
-      });
+      const out = runWith([baseActivity], { ...baseProfile, interests: ["tech"] });
       expect(out.plan).toHaveLength(0);
       expect(out.blocked).toHaveLength(0);
       expect(out.evidence).toHaveLength(0);
@@ -221,58 +254,92 @@ describe("Phase 1 baseline regression (synthetic fixtures)", () => {
         { ...baseActivity, id: "d-2", name: "D2", day: "Tue", tags: ["gardening"] },
       ];
       const profile = { ...baseProfile, interests: ["gardening", "walking"] as Profile["interests"] };
-      const r1 = runScenarioWithCatalog(acts, profile);
-      const r2 = runScenarioWithCatalog(acts, profile);
-      const r3 = runScenarioWithCatalog(acts, profile);
+      const r1 = runWith(acts, profile);
+      const r2 = runWith(acts, profile);
+      const r3 = runWith(acts, profile);
       expect(r1.plan).toEqual(r2.plan);
       expect(r2.plan).toEqual(r3.plan);
       // d-1 matches 2 interests so it must rank first; MAX_PLAN=3 allows both.
       expect(r1.plan.map((i) => i.activityId)).toEqual(["d-1", "d-2"]);
     });
 
+    it("plan caps at three activities (MAX_PLAN) even with more feasible days", () => {
+      const days = ["Mon", "Tue", "Wed", "Thu"] as const;
+      const acts: Activity[] = days.map((day, i) => ({
+        ...baseActivity, id: `cap-${i}`, name: `Cap ${i}`, day, costPerWeek: 0, tags: ["gardening"],
+      }));
+      const out = runWith(acts, baseProfile);
+      expect(out.plan).toHaveLength(3); // MAX_PLAN = 3 in engine.ts
+    });
+
     it("ranking is stable when two activities have identical scores (tie broken by id)", () => {
-      const acts = [
-        { ...baseActivity, id: "zzz", name: "Z Act", day: "Mon" as const },
-        { ...baseActivity, id: "aaa", name: "A Act", day: "Tue" as const },
-      ];
-      const out1 = runScenarioWithCatalog(acts, baseProfile);
-      const out2 = runScenarioWithCatalog(acts, baseProfile);
+      const out1 = runWith(
+        [
+          { ...baseActivity, id: "zzz", name: "Z Act", day: "Mon" },
+          { ...baseActivity, id: "aaa", name: "A Act", day: "Tue" },
+        ],
+        baseProfile,
+      );
+      const out2 = runWith(
+        [
+          { ...baseActivity, id: "zzz", name: "Z Act", day: "Mon" },
+          { ...baseActivity, id: "aaa", name: "A Act", day: "Tue" },
+        ],
+        baseProfile,
+      );
       expect(out1.plan.map((i) => i.activityId)).toEqual(["aaa", "zzz"]); // lexicographic tiebreak
       expect(out1.plan).toEqual(out2.plan);
     });
 
+    it("travel time breaks a score tie between equally matching activities", () => {
+      // Equal interests and no soft barriers: the nearer activity must rank first.
+      const out = runWith(
+        [
+          { ...baseActivity, id: "far", name: "Far Act", day: "Mon", travelMin: { drive: 30 } },
+          { ...baseActivity, id: "near", name: "Near Act", day: "Tue", travelMin: { drive: 10 } },
+        ],
+        baseProfile,
+      );
+      expect(out.plan[0]?.activityId).toBe("near");
+      expect(out.plan[0]?.score).toBeGreaterThan(out.plan[1]?.score ?? 0);
+    });
+
     it("soft barriers reduce score; a clean activity outranks an equally matching one with soft barriers", () => {
-      const acts = [
-        { ...baseActivity, id: "noisy", name: "Noisy Act", noisy: true, day: "Mon" as const, tags: ["gardening" as const] },
-        { ...baseActivity, id: "quiet", name: "Quiet Act", noisy: false, day: "Tue" as const, tags: ["gardening" as const] },
-      ];
-      const out = runScenarioWithCatalog(acts, { ...baseProfile, hearingImpaired: true });
+      const out = runWith(
+        [
+          { ...baseActivity, id: "noisy", name: "Noisy Act", noisy: true, day: "Mon", tags: ["gardening"] },
+          { ...baseActivity, id: "quiet", name: "Quiet Act", noisy: false, day: "Tue", tags: ["gardening"] },
+        ],
+        { ...baseProfile, hearingImpaired: true },
+      );
       expect(out.plan[0]?.activityId).toBe("quiet");
     });
   });
 
   describe("incorrect or misleading evidence", () => {
     it("every planned item has at least one verified evidence claim", () => {
-      const acts = [
-        { ...baseActivity, id: "e-1", name: "E1", day: "Mon" as const },
-        { ...baseActivity, id: "e-2", name: "E2", day: "Tue" as const },
-      ];
-      const { plan, evidence } = runScenarioWithCatalog(acts, baseProfile);
-      expect(plan.length).toBeGreaterThan(0);
-      for (const item of plan) {
-        const claims = evidence.filter((e) => e.claim.startsWith(item.name));
+      const out = runWith(
+        [
+          { ...baseActivity, id: "e-1", name: "E1", day: "Mon" },
+          { ...baseActivity, id: "e-2", name: "E2", day: "Tue" },
+        ],
+        baseProfile,
+      );
+      expect(out.plan.length).toBeGreaterThan(0);
+      for (const item of out.plan) {
+        const claims = out.evidence.filter((e) => e.claim.startsWith(item.name));
         expect(claims.length).toBeGreaterThan(0);
         expect(claims.every((e) => e.verified)).toBe(true);
       }
     });
 
     it("blocked activities contribute only failed (unverified) evidence, never claimed as passing", () => {
-      const acts = [
-        { ...baseActivity, id: "bad", name: "Blocked Act", costPerWeek: 99, day: "Mon" as const },
-      ];
-      const { plan, evidence } = runScenarioWithCatalog(acts, baseProfile);
-      expect(plan).toHaveLength(0);
-      for (const e of evidence) {
+      const out = runWith(
+        [{ ...baseActivity, id: "bad", name: "Blocked Act", costPerWeek: 99, day: "Mon" }],
+        baseProfile,
+      );
+      expect(out.plan).toHaveLength(0);
+      for (const e of out.evidence) {
         expect(e.claim.startsWith("Blocked Act")).toBe(true);
         expect(e.verified).toBe(false);
         expect(e.source).toContain("rule:cost");
@@ -280,31 +347,32 @@ describe("Phase 1 baseline regression (synthetic fixtures)", () => {
     });
 
     it("no evidence claims reference activities outside the input catalog", () => {
-      const acts = [{ ...baseActivity, id: "only", name: "Only Act", day: "Mon" as const }];
-      const { evidence } = runScenarioWithCatalog(acts, baseProfile);
-      for (const e of evidence) expect(e.claim.startsWith("Only Act")).toBe(true);
+      const out = runWith([{ ...baseActivity, id: "only", name: "Only Act", day: "Mon" }], baseProfile);
+      for (const e of out.evidence) expect(e.claim.startsWith("Only Act")).toBe(true);
     });
 
     it("an infeasible activity is never presented as planned (no false success)", () => {
-      const acts = [
-        { ...baseActivity, id: "good", name: "Good Act", day: "Mon" as const },
-        { ...baseActivity, id: "bad", name: "Bad Act", stepFree: false, day: "Tue" as const },
-      ];
-      const { plan, blocked } = runScenarioWithCatalog(acts, { ...baseProfile, mobility: "wheelchair" });
-      expect(plan.map((i) => i.activityId)).toEqual(["good"]);
-      expect(blocked.find((b) => b.name === "Bad Act")).toBeDefined();
+      const out = runWith(
+        [
+          { ...baseActivity, id: "good", name: "Good Act", day: "Mon" },
+          { ...baseActivity, id: "bad", name: "Bad Act", stepFree: false, day: "Tue" },
+        ],
+        { ...baseProfile, mobility: "wheelchair" },
+      );
+      expect(out.plan.map((i) => i.activityId)).toEqual(["good"]);
+      expect(out.blocked.find((b) => b.name === "Bad Act")).toBeDefined();
       // Cross-check: nothing in the plan appears in blocked and vice versa.
-      const planNames = new Set(plan.map((i) => i.name));
-      for (const b of blocked) expect(planNames.has(b.name)).toBe(false);
+      const planNames = new Set(out.plan.map((i) => i.name));
+      for (const b of out.blocked) expect(planNames.has(b.name)).toBe(false);
     });
   });
 
   describe("empty and invalid inputs", () => {
     it("single matching activity that is infeasible still yields structured, empty-plan output", () => {
-      const out = runScenarioWithCatalog(
-        [{ ...baseActivity, id: "x", name: "X", costPerWeek: 50 }],
-        { ...baseProfile, budgetPerWeek: 1 },
-      );
+      const out = runWith([{ ...baseActivity, id: "x", name: "X", costPerWeek: 50 }], {
+        ...baseProfile,
+        budgetPerWeek: 1,
+      });
       expect(out.plan).toHaveLength(0);
       expect(out.blocked).toHaveLength(1);
       expect(out.summary).toBeTruthy();
@@ -312,7 +380,7 @@ describe("Phase 1 baseline regression (synthetic fixtures)", () => {
     });
 
     it("engine tolerates an empty times list without crashing (still returns a structured result)", () => {
-      const out = runScenarioWithCatalog([baseActivity], {
+      const out = runWith([baseActivity], {
         ...baseProfile,
         times: [], // Zod would reject this at the API edge; engine itself must not crash
       });
@@ -321,72 +389,10 @@ describe("Phase 1 baseline regression (synthetic fixtures)", () => {
     });
 
     it("zero maxTravelMin blocks all transport without crashing", () => {
-      const out = runScenarioWithCatalog([baseActivity], {
-        ...baseProfile,
-        maxTravelMin: 0,
-      });
+      const out = runWith([baseActivity], { ...baseProfile, maxTravelMin: 0 });
       expect(out.plan).toHaveLength(0);
       expect(out.blocked).toHaveLength(1);
       expect(out.blocked[0]?.barriers.some((b) => b.rule === "transport")).toBe(true);
     });
   });
 });
-
-// --- helpers -------------------------------------------------------------
-
-// Replay of the plan-building part of runScenario against a synthetic catalog,
-// used to exercise ordering/budget/day-dedup logic without touching the real
-// catalog file. Mirrors src/domain/engine.ts greedy semantics exactly.
-function runScenarioWithCatalog(acts: Activity[], profile: Profile) {
-  const relevant = acts.filter((a) => a.tags.some((t) => profile.interests.includes(t)));
-  const assessed = relevant.map((a) => {
-    const checks = checkActivity(profile, a);
-    const barriers = checks.flatMap((c) => (c.barrier ? [c.barrier] : []));
-    const matches = a.tags.filter((t) => profile.interests.includes(t)).length;
-    const softCount = barriers.filter((b) => b.severity === "soft").length;
-    // Score mirrors engine: matches*10 minus 2 per soft barrier, minus travel/10.
-    // Travel term is derived from the transport check detail where possible;
-    // for ordering tests the relative order only depends on matches/soft count,
-    // so a constant travel proxy keeps determinism without duplicating bestRoute.
-    const score = Math.round((10 * matches - 2 * softCount) * 10) / 10;
-    return { a, checks, barriers, feasible: checks.every((c) => c.ok), score };
-  });
-
-  const usedDays = new Set<string>();
-  let spent = 0;
-  const ranked = assessed.filter((x) => x.feasible).sort((x, y) => y.score - x.score || x.a.id.localeCompare(y.a.id));
-  const plan: { activityId: string; name: string; when: string; costPerWeek: number }[] = [];
-  for (const x of ranked) {
-    if (usedDays.has(x.a.day) || spent + x.a.costPerWeek > profile.budgetPerWeek) continue;
-    usedDays.add(x.a.day);
-    spent += x.a.costPerWeek;
-    plan.push({ activityId: x.a.id, name: x.a.name, when: `${x.a.day} ${x.a.time}`, costPerWeek: x.a.costPerWeek });
-  }
-
-  const planIds = new Set(plan.map((i) => i.activityId));
-  const evidence = assessed.flatMap((x) =>
-    x.checks
-      .filter((c) => planIds.has(x.a.id) || !c.ok)
-      .map((c) => ({ claim: `${x.a.name}: ${c.detail}`, source: `activity:${x.a.id}/rule:${c.rule}`, verified: c.ok })),
-  );
-
-  const blocked = assessed
-    .filter((x) => !x.feasible)
-    .map((x) => ({ name: x.a.name, barriers: x.barriers.filter((b) => b.severity === "hard") }));
-
-  const items = [
-    { label: "Matching interests", value: String(relevant.length) },
-    { label: "Feasible", value: String(assessed.filter((x) => x.feasible).length) },
-    { label: "Blocked", value: String(blocked.length) },
-    { label: "Weekly cost", value: `$${spent}` },
-    { label: "Barriers to work around", value: String(plan.length) },
-  ];
-
-  return {
-    plan,
-    blocked,
-    evidence,
-    summary: plan.length ? "plan" : "No activity fits",
-    items,
-  };
-}
