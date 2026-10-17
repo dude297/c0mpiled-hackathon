@@ -23,7 +23,9 @@ export function gazeFromBlendshapes(shapes: readonly Blendshape[], swap = false)
   const s = (name: string) => shapes.find((b) => b.categoryName === name)?.score ?? 0;
   const towardRight = s("eyeLookInLeft") + s("eyeLookOutRight");
   const towardLeft = s("eyeLookOutLeft") + s("eyeLookInRight");
-  const value = clamp1((towardRight - towardLeft) / 2);
+  const raw = (towardRight - towardLeft) / 2;
+  if (!Number.isFinite(raw)) return Number.NaN;
+  const value = clamp1(raw);
   return swap ? -value : value;
 }
 
@@ -37,15 +39,18 @@ export function gazeFromBlendshapes(shapes: readonly Blendshape[], swap = false)
 export function yawFromLandmarks(nose: Point, a: Point, b: Point, aspect = 4 / 3): number | null {
   if (![nose.x, nose.y, a.x, a.y, b.x, b.y, aspect].every(Number.isFinite) || aspect <= 0) return null;
   const eyeDistance = Math.hypot((b.x - a.x) * aspect, b.y - a.y);
-  if (eyeDistance < 1e-6) return null;
-  return -((nose.x - (a.x + b.x) / 2) * aspect) / eyeDistance;
+  if (!Number.isFinite(eyeDistance) || eyeDistance < 1e-6) return null;
+  const yaw = -((nose.x - (a.x + b.x) / 2) * aspect) / eyeDistance;
+  return Number.isFinite(yaw) ? yaw : null;
 }
 
 export type LookSignal = { gaze: number; yaw: number };
 
 /** Eye movement and head turning contribute together; their combined sign selects the side. */
 export function combineLook(sample: LookSignal, base: LookSignal): number {
-  return clamp1((sample.gaze - base.gaze) + (sample.yaw - base.yaw));
+  const value = (sample.gaze - base.gaze) + (sample.yaw - base.yaw);
+  // Preserve unusable input as invalid, so classifyZone drops tracking instead of arming at center.
+  return Number.isFinite(value) ? clamp1(value) : Number.NaN;
 }
 
 /**
@@ -63,7 +68,8 @@ export function rollFromEyeCorners(a: Point, b: Point, aspect = 4 / 3, swap = fa
 }
 
 /** Zone with hysteresis: enter a side past +/-threshold, return to center only below threshold - hysteresis. */
-export function classifyZone(value: number, prev: Zone, threshold: number, hysteresis: number): Zone {
+export function classifyZone(value: number, prev: Zone, threshold: number, hysteresis: number): Zone | null {
+  if (!Number.isFinite(value)) return null;
   if (value > threshold) return "right";
   if (value < -threshold) return "left";
   if (prev === "right" && value > threshold - hysteresis) return "right";
@@ -106,7 +112,8 @@ export function stepCalibration(
   sample: SignalSample | null,
 ): CalibrationStep {
   const left = (ms: number) => Math.max(1, Math.ceil((CALIBRATION_MS - ms) / 1000));
-  if (!sample) {
+  if (!sample || !Number.isFinite(t) || t < 0 || (c.lastT !== null && t < c.lastT)
+    || ![sample.gaze, sample.yaw, sample.tilt].every(Number.isFinite)) {
     const calib = { ...c, lastT: null };
     return { calib, secondsLeft: left(c.faceMs), base: null };
   }
