@@ -168,7 +168,7 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-base md:text-lg">
-        {loading && !result ? (
+        {loading ? (
           <div className="flex items-center gap-3 py-8 text-muted-foreground" role="status" aria-live="polite">
             <LoaderCircle className="size-6 animate-spin" aria-hidden="true" />
             Building the plan…
@@ -177,7 +177,7 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
           <div className="rounded-xl border-2 border-dashed p-8 text-center">
             <p className="text-lg font-semibold">No plan yet</p>
             <p className="mt-1 text-base text-muted-foreground">
-              Pick a demo above and hit Build plan — it takes one click.
+              Open the profile below, pick a demo, and hit Build plan — it takes one click.
             </p>
           </div>
         ) : result.plan.length === 0 ? (
@@ -364,6 +364,8 @@ export function IntakeSlot({ onIntake }: { onIntake: (text: string) => Promise<v
   );
 }
 
+// Kept as the lead's /api/plans slot: the plan panel's inline Save & share is wired to
+// savePlan in page.tsx; this component is available for /plan/[id] pages once they exist.
 export function SaveShareSlot({ onSave }: { onSave: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
