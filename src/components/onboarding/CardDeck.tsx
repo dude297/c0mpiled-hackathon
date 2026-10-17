@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, Heart, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HandsFree } from "@/components/handsfree/HandsFree";
 import type { Profile } from "@/lib/schema";
 
 // Swipe-card onboarding: produces the same Profile as the manual form.
@@ -362,6 +363,10 @@ export function CardDeck({
             if (!loading) setHistory(pickedToHistory(picked, INTEREST_COUNT));
           }}
         />
+      )}
+
+      {!showGrid && card.type === "interest" && (
+        <HandsFree label={card.interest.label} onAnswer={(liked) => swipeCard(liked ? 1 : -1, card)} />
       )}
 
       {!showGrid && card.type === "interest" && (
