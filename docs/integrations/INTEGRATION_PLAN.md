@@ -30,6 +30,11 @@ Why: completes the caregiver loop the lead's `/plan/{id}` starts.
 - Share link: lead's Supabase work (not ours).
 - Caregiver email: single server-side `fetch` to Resend's REST API. **No SDK package.** Needs `RESEND_API_KEY` — ask lead before adding env var.
 
+### P1 — Rideshare (Uber + Lyft) — DONE
+- Deep links always on: `m.uber.com/ul/` + `lyft.com/ride` with destination pre-filled (Berkeley Civic Center default pickup; coordinates come from Places when a key exists).
+- Real fare estimates: `UBER_API_TOKEN` (server-only, price_estimates scope) → shows "est. $X–$Y each way". Fails soft without a token.
+- Zero packages.
+
 ### P2 — Transit reality (slide material)
 - AC Transit GTFS open feed for real bus minutes; East Bay Paratransit deep link for the workaround text.
 - Not demo-critical; document, don't build unless time allows.
