@@ -27,6 +27,9 @@ describe("plan handoffs", () => {
   });
   it("rides need coordinates", () => {
     expect(planRideLinks(venue)?.uberLink).toContain("m.uber.com");
+    // Uber forwards "+" verbatim into the app; spaces must be %20.
+    expect(planRideLinks({ ...venue, name: "Doe Library" })?.uberLink).toContain("Doe%20Library");
+    expect(planRideLinks({ ...venue, name: "Doe Library" })?.uberLink).not.toContain("+");
     expect(planRideLinks({ ...venue, lat: null })).toBeNull();
     expect(planRideLinks(undefined)).toBeNull();
   });
