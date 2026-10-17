@@ -14,10 +14,10 @@
 | Owner | Exclusive scope | Files / deliverables |
 |---|---|---|
 | Teammate A | UI/UX, accessibility, layout, frontend endpoint wiring | `src/app/page.tsx`, `src/app/layout.tsx`, `src/app/globals.css`, `src/components/**` |
-| Teammate B | Real program research, activity catalog, demo profiles, pitch/slides/video/rehearsal | `src/domain/activities.ts`, source evidence for activities, slides, pitch and demo materials |
+| Teammate B | Real activity data, third-party integrations/handoffs, demo profiles, pitch/slides/video/rehearsal | `src/domain/activities.ts`, new `src/integrations/**`, optional `src/app/api/integrations/**`, `docs/handoffs/teammate-b-integrations.md`, demo and pitch |
 | Human lead | Supabase save/share, local AI model endpoint/intake, secrets, architectural decisions and merges | `src/lib/ai/**`, `src/app/api/intake/**`, `src/app/api/plans/**`, `src/app/plan/**`, `src/lib/supabase.ts`, `supabase/**`, `.env.example`, deployment decisions |
 
-These are **reserved**, not available to an AI agent by default. If a change is needed, supply a small interface request to its owner rather than editing that owner's files.
+These are **reserved**, not available to an AI agent by default. If a change is needed, supply a small interface request to its owner rather than editing that owner's files. Teammate B builds external provider connectors/handoffs only after agreeing on Opus's `ProviderPort` contract. Lead retains secrets, Supabase, local AI, and approval of any external side effects.
 
 ## Non-negotiable engineering rules
 
@@ -28,7 +28,7 @@ These are **reserved**, not available to an AI agent by default. If a change is 
 5. `REQUESTED` is not `CONFIRMED`, `CONFIRMED` is not `ATTENDED`, and `READY` requires every dependency confirmed. On cancellation, `READY` must be revoked immediately.
 6. Provider callbacks need stable idempotency keys and event evidence. Never claim real confirmations from a simulated provider.
 7. Feedback generates a proposed preference patch; apply it only after the user confirms.
-8. Local-first, reproducible and privacy-safe: no external messages, payments, real bookings or sensitive personal information in mock workflow tests.
+8. Local-first, reproducible and privacy-safe: no external messages, payments, real bookings or sensitive personal information in mock workflow tests. Read-only third-party sources should preserve provenance, URL and checked time; estimated venue details are not verified live information.
 9. No new npm packages, databases, auth, infra, or UI/pitch features without lead approval. Maintain future pivot flexibility.
 10. Tests prove behavior. Before a coding PR: `npm run check`, `npm run build`, plus precise repro instructions. Disclose failures and unverified assumptions.
 
@@ -38,7 +38,7 @@ These are **reserved**, not available to an AI agent by default. If a change is 
 
 **Own:** `src/domain/coordination/**`, `src/app/api/coordination/**`, additive changes to `src/lib/schema.ts`, and unit tests colocated with the new coordinator. May write `docs/daybridge/COORDINATION_CONTRACT.md`.
 
-**Do not touch:** human-owned UI/catalog/AI/Supabase files, `src/simulation/**` (GLM), GPT Work documents, or existing `src/domain/engine.ts` unless the lead approves a narrow patch.
+**Do not touch:** human-owned UI/catalog/integrations/AI/Supabase files, `src/simulation/**` (GLM), GPT Work documents, or existing `src/domain/engine.ts` unless the lead approves a narrow patch. Publish `ProviderPort` and event/approval contracts for Teammate B's external connections; adapters never determine authoritative READY themselves.
 
 **Sequence:**
 1. Publish a small, versioned Zod contract: plan/intervention/approval/dependency/event/preference patch, and request/response examples. Notify all owners.
@@ -53,7 +53,7 @@ These are **reserved**, not available to an AI agent by default. If a change is 
 
 **Own:** new `src/simulation/**` and `docs/daybridge/SIMULATION_GUIDE.md` only. Add tests inside `src/simulation/**`. This is backend QA tooling **not UI and not the real activity catalog**.
 
-**Do not touch:** `src/domain/activities.ts`, `src/domain/coordination/**`, `src/lib/schema.ts`, `src/lib/ai/**`, human UI files, or deployment.
+**Do not touch:** `src/domain/activities.ts`, `src/integrations/**`, `src/app/api/integrations/**`, `src/domain/coordination/**`, `src/lib/schema.ts`, `src/lib/ai/**`, human UI files, or deployment.
 
 **Sequence:**
 1. Before Opus's API is frozen, implement baseline regression tests around existing `runScenario` with inline synthetic profiles and activities (no modification to the human-owned catalog).
@@ -68,7 +68,7 @@ These are **reserved**, not available to an AI agent by default. If a change is 
 
 **Own:** `docs/daybridge/EVALUATION_MATRIX.md`, `docs/daybridge/THREAT_AND_FAILURE_REVIEW.md`, `docs/daybridge/INTEGRATION_CHECKLIST.md`, and PR review notes. No source-code modifications by default.
 
-**Do not own:** slides, pitch, demo video or runbook, activity research/catalog, UI, Supabase implementation or AI adapter. Those belong to teammates/lead.
+**Do not own:** slides, pitch, demo video or runbook, activity research/catalog, third-party integrations, UI, Supabase implementation or AI adapter. Those belong to teammates/lead.
 
 **Sequence:**
 1. Audit actual repository implementation against P0-1 through P0-8, marking implemented/partial/missing with file paths.
@@ -81,9 +81,9 @@ These are **reserved**, not available to an AI agent by default. If a change is 
 
 ## Parallel execution and dependencies
 
-1. **Immediately:** GPT Work audits the baseline; GLM runs independent baseline regression/failure test preparation; Opus freezes the coordination contracts.
-2. **After contract freeze:** GLM implements simulated provider adapter + coordinator integration tests; Teammate A can integrate endpoints in the UI only through their assigned branch; human lead retains local model and Supabase.
-3. **PR order:** Opus contract/core -> GLM simulator/tests -> human-owned UI/data integration -> Work acceptance report; order can change if dependencies demand it. No bot pushes to main.
+1. **Immediately:** GPT Work audits the baseline; GLM runs independent baseline regression/failure test preparation; Opus freezes the coordination contracts; Teammate B researches real data/provider permissions and implements a read-only external handoff.
+2. **After contract freeze:** GLM implements simulated provider adapter + coordinator integration tests; Teammate B may implement one sandbox-only/consent-gated provider adapter against Opus's frozen `ProviderPort`; Teammate A integrates endpoints in the UI only through their assigned branch; human lead retains local model and Supabase.
+3. **PR order:** Opus contract/core -> GLM simulator/tests and Teammate B external read-only connection/provider bridge -> Teammate A UI integration -> Work acceptance report; order can change if dependencies demand it. No bot pushes to main.
 4. **Lead approves:** integration, full `npm run check` and `npm run build`, offline recovery trace, human demo/pitch rehearsal, and any deploy.
 5. If scope must shrink, prioritize an end-to-end feasible plan with auditable blocked/approved/confirmed states over P1 embellishments.
 
