@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Calendar, CircleX, Hand, MapPin, SearchX, ShieldCheck, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HandoffLinks } from "@/components/discovery/HandoffLinks";
 import type { AnalysisResult, Barrier, PlanItem } from "@/lib/schema";
 
 export const money = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(2)}`;
@@ -36,7 +37,7 @@ export const pendingCalendarReveal = new Set<string>();
 
 type Flash = { id: string; kind: "add" | "remove" };
 
-function MatchCard({ item, added, flash, onToggle }: { item: PlanItem; added: boolean; flash: Flash["kind"] | null; onToggle: () => void }) {
+function MatchCard({ item, added, flash, onToggle, result }: { item: PlanItem; added: boolean; flash: Flash["kind"] | null; onToggle: () => void; result?: AnalysisResult }) {
   return (
     <li>
     <article
@@ -79,6 +80,7 @@ function MatchCard({ item, added, flash, onToggle }: { item: PlanItem; added: bo
         <Hand className="size-5" aria-hidden="true" />
         Get me there →
       </Link>
+      <HandoffLinks item={item} result={result} />
     </article>
     </li>
   );
@@ -123,6 +125,7 @@ export function MatchFeed({ result, added, onToggle }: { result: AnalysisResult;
                 added={added.has(item.activityId)}
                 flash={flash?.id === item.activityId ? flash.kind : null}
                 onToggle={() => toggle(item)}
+                result={result}
               />
             ))}
           </ul>

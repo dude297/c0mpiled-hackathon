@@ -10,6 +10,7 @@ import { MatchFeed, hardBarriers, toggleInSet } from "@/components/feed/MatchFee
 import { CardDeck } from "@/components/onboarding/CardDeck";
 import { Hero } from "@/components/hero/Hero";
 import { PlanStages } from "@/components/hero/PlanStages";
+import { DiscoveryFeed } from "@/components/discovery/DiscoveryFeed";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DEMO_PROFILES } from "@/domain/activities";
@@ -283,6 +284,9 @@ export default function Home() {
         {tab === "details" && details}
         </div>
       </div>
+
+      {/* Separate from the personalized plan: public listings, not checked for fit. */}
+      <DiscoveryFeed />
 
       {/* Print-only: same output whichever tab is open. */}
       <div className="hidden print:block">

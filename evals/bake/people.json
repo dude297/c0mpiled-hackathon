@@ -1,0 +1,735 @@
+[
+  {
+    "id": "p01",
+    "note": "all interests, drive only, big budget",
+    "profile": {
+      "name": "Agnes Holloway",
+      "interests": [
+        "gardening",
+        "music",
+        "cards",
+        "walking",
+        "crafts",
+        "faith",
+        "learning",
+        "volunteering",
+        "cooking",
+        "tech"
+      ],
+      "mobility": "full",
+      "transport": [
+        "drive"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "budgetPerWeek": 200,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p02",
+    "note": "wheelchair, paratransit only, $5",
+    "profile": {
+      "name": "Bernard Okafor",
+      "interests": [
+        "music",
+        "faith",
+        "cards"
+      ],
+      "mobility": "wheelchair",
+      "transport": [
+        "paratransit"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "morning",
+        "afternoon"
+      ],
+      "budgetPerWeek": 5,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p03",
+    "note": "walker + walk-only (engine forbids walking with a walker)",
+    "profile": {
+      "name": "Clara Jimenez",
+      "interests": [
+        "walking",
+        "gardening"
+      ],
+      "mobility": "walker",
+      "transport": [
+        "walk"
+      ],
+      "maxTravelMin": 60,
+      "times": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "budgetPerWeek": 50,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p04",
+    "note": "cane, walk only, $0, one time slot",
+    "profile": {
+      "name": "Desmond Pike",
+      "interests": [
+        "cards",
+        "tech",
+        "learning"
+      ],
+      "mobility": "cane",
+      "transport": [
+        "walk"
+      ],
+      "maxTravelMin": 20,
+      "times": [
+        "afternoon"
+      ],
+      "budgetPerWeek": 0,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p05",
+    "note": "bus only, 15 min limit, $0",
+    "profile": {
+      "name": "Eleanor Vance",
+      "interests": [
+        "cards",
+        "tech"
+      ],
+      "mobility": "full",
+      "transport": [
+        "bus"
+      ],
+      "maxTravelMin": 15,
+      "times": [
+        "afternoon"
+      ],
+      "budgetPerWeek": 0,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p06",
+    "note": "walker, family rides only",
+    "profile": {
+      "name": "Felix Nakamura",
+      "interests": [
+        "crafts",
+        "walking"
+      ],
+      "mobility": "walker",
+      "transport": [
+        "family"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "morning"
+      ],
+      "budgetPerWeek": 10,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p07",
+    "note": "one interest, 5-min travel limit (nothing that close)",
+    "profile": {
+      "name": "Gloria Dunn",
+      "interests": [
+        "music"
+      ],
+      "mobility": "full",
+      "transport": [
+        "family"
+      ],
+      "maxTravelMin": 5,
+      "times": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "budgetPerWeek": 200,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p08",
+    "note": "long travel limit, wide times",
+    "profile": {
+      "name": "Harriet Szabo",
+      "interests": [
+        "music",
+        "walking"
+      ],
+      "mobility": "cane",
+      "transport": [
+        "bus",
+        "walk"
+      ],
+      "maxTravelMin": 120,
+      "times": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "budgetPerWeek": 200,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p09",
+    "note": "wheelchair, evenings only",
+    "profile": {
+      "name": "Ivan Petrov",
+      "interests": [
+        "music",
+        "cooking"
+      ],
+      "mobility": "wheelchair",
+      "transport": [
+        "drive"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "evening"
+      ],
+      "budgetPerWeek": 50,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p10",
+    "note": "every mode, every interest, $0 budget",
+    "profile": {
+      "name": "June Achebe",
+      "interests": [
+        "gardening",
+        "music",
+        "cards",
+        "walking",
+        "crafts",
+        "faith",
+        "learning",
+        "volunteering",
+        "cooking",
+        "tech"
+      ],
+      "mobility": "full",
+      "transport": [
+        "drive",
+        "bus",
+        "paratransit",
+        "family",
+        "walk"
+      ],
+      "maxTravelMin": 120,
+      "times": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "budgetPerWeek": 0,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p11",
+    "note": "walker, paratransit only, 45 min",
+    "profile": {
+      "name": "Kenji Sato",
+      "interests": [
+        "crafts",
+        "cards"
+      ],
+      "mobility": "walker",
+      "transport": [
+        "paratransit"
+      ],
+      "maxTravelMin": 45,
+      "times": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "budgetPerWeek": 200,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p12",
+    "note": "walk only, mornings, $0",
+    "profile": {
+      "name": "Lorraine Whitfield",
+      "interests": [
+        "walking",
+        "gardening"
+      ],
+      "mobility": "full",
+      "transport": [
+        "walk"
+      ],
+      "maxTravelMin": 25,
+      "times": [
+        "morning"
+      ],
+      "budgetPerWeek": 0,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p13",
+    "note": "family only, short trips, $5",
+    "profile": {
+      "name": "Marcus Bell",
+      "interests": [
+        "faith",
+        "volunteering"
+      ],
+      "mobility": "cane",
+      "transport": [
+        "family"
+      ],
+      "maxTravelMin": 15,
+      "times": [
+        "morning",
+        "afternoon"
+      ],
+      "budgetPerWeek": 5,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p14",
+    "note": "bus only, 45 min, $50, hearing impaired only (noisy kitchen/food bank/jazz)",
+    "profile": {
+      "name": "Nadia Haddad",
+      "interests": [
+        "volunteering",
+        "cooking",
+        "music"
+      ],
+      "mobility": "full",
+      "transport": [
+        "bus"
+      ],
+      "maxTravelMin": 45,
+      "times": [
+        "afternoon",
+        "evening"
+      ],
+      "budgetPerWeek": 50,
+      "hearingImpaired": true,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p15",
+    "note": "hearing impaired + small groups (both), driver",
+    "profile": {
+      "name": "Oscar Lindqvist",
+      "interests": [
+        "music",
+        "cards"
+      ],
+      "mobility": "full",
+      "transport": [
+        "drive"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "budgetPerWeek": 50,
+      "hearingImpaired": true,
+      "prefersSmallGroups": true
+    }
+  },
+  {
+    "id": "p16",
+    "note": "one interest (tech), walker, bus",
+    "profile": {
+      "name": "Priya Raman",
+      "interests": [
+        "tech"
+      ],
+      "mobility": "walker",
+      "transport": [
+        "bus"
+      ],
+      "maxTravelMin": 20,
+      "times": [
+        "afternoon"
+      ],
+      "budgetPerWeek": 0,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p17",
+    "note": "one interest (crafts), walk only; crafts venue not walkable",
+    "profile": {
+      "name": "Quentin Ashby",
+      "interests": [
+        "crafts"
+      ],
+      "mobility": "full",
+      "transport": [
+        "walk"
+      ],
+      "maxTravelMin": 60,
+      "times": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "budgetPerWeek": 200,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p18",
+    "note": "wheelchair, family+paratransit, $5",
+    "profile": {
+      "name": "Rosa Delgado",
+      "interests": [
+        "faith",
+        "cooking",
+        "music"
+      ],
+      "mobility": "wheelchair",
+      "transport": [
+        "family",
+        "paratransit"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "afternoon"
+      ],
+      "budgetPerWeek": 5,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p19",
+    "note": "driver with a 10-min limit, $5",
+    "profile": {
+      "name": "Samuel Greer",
+      "interests": [
+        "walking",
+        "learning"
+      ],
+      "mobility": "cane",
+      "transport": [
+        "drive"
+      ],
+      "maxTravelMin": 10,
+      "times": [
+        "morning"
+      ],
+      "budgetPerWeek": 5,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p20",
+    "note": "bus only, mornings, big budget",
+    "profile": {
+      "name": "Tamsin Clarke",
+      "interests": [
+        "walking",
+        "gardening",
+        "learning"
+      ],
+      "mobility": "full",
+      "transport": [
+        "bus"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "morning"
+      ],
+      "budgetPerWeek": 200,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p21",
+    "note": "walker, evenings only, bus+family, prefers small groups only (jazz night is large)",
+    "profile": {
+      "name": "Ulysses Monroe",
+      "interests": [
+        "music",
+        "cooking"
+      ],
+      "mobility": "walker",
+      "transport": [
+        "bus",
+        "family"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "evening"
+      ],
+      "budgetPerWeek": 50,
+      "hearingImpaired": false,
+      "prefersSmallGroups": true
+    }
+  },
+  {
+    "id": "p22",
+    "note": "all interests, family only, hearing impaired only",
+    "profile": {
+      "name": "Vera Kowalski",
+      "interests": [
+        "gardening",
+        "music",
+        "cards",
+        "walking",
+        "crafts",
+        "faith",
+        "learning",
+        "volunteering",
+        "cooking",
+        "tech"
+      ],
+      "mobility": "full",
+      "transport": [
+        "family"
+      ],
+      "maxTravelMin": 120,
+      "times": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "budgetPerWeek": 50,
+      "hearingImpaired": true,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p23",
+    "note": "cane, paratransit+walk, mornings, $0",
+    "profile": {
+      "name": "Walter Ng",
+      "interests": [
+        "cards",
+        "walking"
+      ],
+      "mobility": "cane",
+      "transport": [
+        "paratransit",
+        "walk"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "morning"
+      ],
+      "budgetPerWeek": 0,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p24",
+    "note": "all interests but 5-min travel limit (closest is 6 min)",
+    "profile": {
+      "name": "Xiomara Reyes",
+      "interests": [
+        "gardening",
+        "music",
+        "cards",
+        "walking",
+        "crafts",
+        "faith",
+        "learning",
+        "volunteering",
+        "cooking",
+        "tech"
+      ],
+      "mobility": "full",
+      "transport": [
+        "drive"
+      ],
+      "maxTravelMin": 5,
+      "times": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "budgetPerWeek": 200,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p25",
+    "note": "walker driver, $0 (choir has stairs)",
+    "profile": {
+      "name": "Yusuf Adeyemi",
+      "interests": [
+        "music",
+        "faith"
+      ],
+      "mobility": "walker",
+      "transport": [
+        "drive"
+      ],
+      "maxTravelMin": 15,
+      "times": [
+        "afternoon"
+      ],
+      "budgetPerWeek": 0,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p26",
+    "note": "bus, $5, overlapping learning/tech/cards",
+    "profile": {
+      "name": "Zora Patel",
+      "interests": [
+        "learning",
+        "tech",
+        "cards"
+      ],
+      "mobility": "full",
+      "transport": [
+        "bus"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "morning",
+        "afternoon",
+        "evening"
+      ],
+      "budgetPerWeek": 5,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p27",
+    "note": "wheelchair, bus only",
+    "profile": {
+      "name": "Abel Fontaine",
+      "interests": [
+        "gardening",
+        "cards",
+        "tech"
+      ],
+      "mobility": "wheelchair",
+      "transport": [
+        "bus"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "morning",
+        "afternoon"
+      ],
+      "budgetPerWeek": 50,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p28",
+    "note": "$20 budget vs $20 + $15 evening activities (cumulative cost)",
+    "profile": {
+      "name": "Beatrice Moreau",
+      "interests": [
+        "cooking",
+        "music"
+      ],
+      "mobility": "cane",
+      "transport": [
+        "family"
+      ],
+      "maxTravelMin": 20,
+      "times": [
+        "evening"
+      ],
+      "budgetPerWeek": 20,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p29",
+    "note": "one interest, three Thursday-morning/Monday-morning clashes (one per day)",
+    "profile": {
+      "name": "Cyrus Wang",
+      "interests": [
+        "walking"
+      ],
+      "mobility": "full",
+      "transport": [
+        "drive",
+        "walk"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "morning"
+      ],
+      "budgetPerWeek": 5,
+      "hearingImpaired": false,
+      "prefersSmallGroups": false
+    }
+  },
+  {
+    "id": "p30",
+    "note": "walker, paratransit, prefers small groups only",
+    "profile": {
+      "name": "Delia Moss",
+      "interests": [
+        "music",
+        "faith",
+        "cards",
+        "learning",
+        "tech"
+      ],
+      "mobility": "walker",
+      "transport": [
+        "paratransit"
+      ],
+      "maxTravelMin": 30,
+      "times": [
+        "afternoon"
+      ],
+      "budgetPerWeek": 50,
+      "hearingImpaired": false,
+      "prefersSmallGroups": true
+    }
+  }
+]

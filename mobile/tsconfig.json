@@ -1,0 +1,13 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      // Mobile code first, then the web app's shared pure files (../src/domain, ../src/lib).
+      "@/*": ["./*", "../src/*"],
+      // The shared files live outside this folder; point their zod import at ours.
+      "zod": ["./node_modules/zod"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"]
+}

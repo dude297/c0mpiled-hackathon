@@ -1,5 +1,7 @@
 import { runScenario } from "@/domain/engine";
 import { getAiAdapter, mockAdapter } from "@/lib/ai/adapter";
+import { enrichResult } from "@/lib/integrations/places";
+import { withEnrichmentBudget } from "@/lib/integrations/budget";
 import { ScenarioInput, type AnalysisResult } from "@/lib/schema";
 
 export async function POST(req: Request) {
@@ -18,6 +20,14 @@ export async function POST(req: Request) {
     return mockAdapter.explain(parsed.data, output);
   });
 
-  const result: AnalysisResult = { ...output, explanation, dataSource: ai.name };
-  return Response.json(result);
+  const base: AnalysisResult = { ...output, explanation, dataSource: ai.name };
+  // Optional enrichment has a one-second budget (below DECISIONS.md's 2.5 s cap).
+  if (process.env.DAYBRIDGE_ENRICH !== "1") {
+    return Response.json(base);
+  }
+  const { venueByItem, weather, evidence, rideshareByItem } =
+    await withEnrichmentBudget((signal) => enrichResult(base, signal)) ??
+    { venueByItem: {}, weather: null, evidence: base.evidence, rideshareByItem: {} };
+  const result: AnalysisResult = { ...base, evidence };
+  return Response.json({ ...result, venueByItem, weather, rideshareByItem });
 }
