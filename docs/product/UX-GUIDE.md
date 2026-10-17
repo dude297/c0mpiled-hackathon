@@ -5,8 +5,8 @@ Adapted from Colleagent's UX-GUIDE for an older-adult audience. Applies to every
 ## Flow
 - Every screen serves a journey step in [journeys/](journeys/). No journey step → no screen.
 - One primary action per screen. Everything else is visually quieter (secondary, quiet, link).
-- First visit → U1 Onboarding. Returning → U2 Home, never onboarding again.
-- Never block navigation; block only the action that truly needs a missing answer (e.g. "Show my matches" needs walking aid + transport).
+- First visit → U1 Onboarding. Returning → U2 Home from the device store ([DS](SCREENS.md#ds-device-store--new-client-state-no-ui)), never onboarding again.
+- Never block navigation; block only the action that truly needs a missing answer (e.g. "Build my week" needs walking aid + transport).
 - Prefill everything known. Never ask the same thing twice (U1 review and U6 Profile are the same rows).
 
 ## Speed and calm
@@ -16,9 +16,9 @@ Adapted from Colleagent's UX-GUIDE for an older-adult audience. Applies to every
 - When something changes in the background (ride cancelled), flag it on Home as a heads-up row; never a pop-up.
 
 ## Navigation
-- Header (SH): brand · Home · Matches · Calendar (icon + word) · Profile · person switcher. Caregiver view: brand · "Caring for Margaret" · Care · Calendar · Profile · switcher.
+- Header (SH): brand · Home · Matches · Calendar (icon + word) · Profile · person switcher. Caregiver view: brand · "Caring for {name}" · Care · Calendar · Profile · switcher.
 - No nav item outside a journey.
-- **Hackathon exception:** the person switcher (Margaret / Harold / Caregiver view) is a demo and role switch on user routes. It is labeled "Demo data" once inside the menu. Remove when real accounts exist.
+- **Hackathon exception:** the person switcher (You / Margaret / Harold / Caregiver view for {name}) is a demo and role switch on user routes. It is labeled "Demo data" once inside the menu. Remove when real accounts exist.
 
 ## Affordances
 | Use | When | Not |
@@ -95,7 +95,7 @@ Today's dashboard summary card (`src/app/page.tsx`) has: an uppercase "SUGGESTED
 
 | Today | Becomes |
 |---|---|
-| "SUGGESTED PLAN" eyebrow | Removed. Page heading "Good morning, Margaret". |
+| "SUGGESTED PLAN" eyebrow | Removed. Page heading "Good morning, {name}". |
 | `result.summary` h2 ("3 activities Margaret can actually attend this week.") | One plain line: `weekSummary` ("2 outings · $5 this week"). |
 | "mock AI" badge | Removed from the card; label sits inside "Why these?" once. |
 | AI explanation paragraph | Collapsed "Why these?" disclosure. |
@@ -104,4 +104,4 @@ Today's dashboard summary card (`src/app/page.tsx`) has: an uppercase "SUGGESTED
 | Print | U4 Calendar, secondary. |
 | Save & share + "coming soon" | Hidden until sharing works; then "Share my week" in U4. |
 | Start over | U6 Profile, quiet button + undo. |
-| (missing) | **One** primary button by state: Fix my plan / Get me there / See my calendar / See matches. |
+| (missing) | **One** primary button by plan state ([U2 table](SCREENS.md#u2-home-dashboard---change-major)): Fix my plan / See what's in the way / Continue my plan / See status / Get me there / See my calendar / See matches. |
