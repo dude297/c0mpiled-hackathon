@@ -1,5 +1,7 @@
 // Pure helpers for the device store (SCREENS.md "DS"). No React, no window: unit-tested in helpers.test.ts.
-import { AnalysisResult, CoordinationPlan, PlanState, Profile } from "@/lib/schema";
+import { ACTIVITIES } from "@/domain/activities";
+import { checkActivity } from "@/domain/engine";
+import { AnalysisResult, CoordinationPlan, PlanItem, PlanState, Profile } from "@/lib/schema";
 
 export type PersonKey = "me" | "margaret" | "harold";
 export type Mode = "user" | "caregiver";
@@ -98,6 +100,34 @@ export function reconcileWeek(prevWeek: string[] | null, prev: AnalysisResult | 
     })
     .filter((d): d is DroppedOuting => d !== null);
   return { week: prevWeek.filter((id) => inPlan.has(id)), dropped };
+}
+
+/**
+ * The engine returns only its top 3 as `plan`. Every other activity that still fits (all checks pass) is appended,
+ * best score first, so a looser answer never makes a chosen outing look like it "no longer fits" and Matches can list it.
+ * Same scoring and route rule as src/domain/engine.ts.
+ */
+export function withAllMatches(profile: Profile, result: AnalysisResult): AnalysisResult {
+  const have = new Set(result.plan.map((i) => i.activityId));
+  const canWalk = profile.mobility === "full" || profile.mobility === "cane";
+  const extra: PlanItem[] = ACTIVITIES.filter((a) => !have.has(a.id) && a.tags.some((t) => profile.interests.includes(t)))
+    .flatMap((a) => {
+      const checks = checkActivity(profile, a);
+      if (!checks.every((c) => c.ok)) return [];
+      const routes = profile.transport
+        .filter((m) => m !== "walk" || canWalk)
+        .flatMap((m) => (a.travelMin[m] === undefined ? [] : [{ mode: m, min: a.travelMin[m]! }]))
+        .sort((x, y) => x.min - y.min || x.mode.localeCompare(y.mode));
+      const fitting = routes.filter((r) => r.min <= profile.maxTravelMin);
+      const route = fitting.find((r) => r.mode !== "family") ?? fitting[0] ?? routes[0];
+      if (!route) return [];
+      const barriers = checks.flatMap((c) => (c.barrier ? [c.barrier] : []));
+      const matches = a.tags.filter((t) => profile.interests.includes(t)).length;
+      const score = Math.round((10 * matches - 2 * barriers.length - route.min / 10) * 10) / 10;
+      return [{ activityId: a.id, name: a.name, when: `${a.day} ${a.time}`, travel: `${route.mode}, ${route.min} min`, costPerWeek: a.costPerWeek, score, barriers }];
+    })
+    .sort((x, y) => y.score - x.score || x.activityId.localeCompare(y.activityId));
+  return extra.length ? { ...result, plan: [...result.plan, ...extra] } : result;
 }
 
 export const toggleId = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);

@@ -56,7 +56,7 @@ function Detail({ id, from }: { id: string; from: string | null }) {
   const inWeek = s.week.includes(id);
   const when = whenText(item?.when ?? `${activity.day} ${activity.time}`);
   const mode = item ? travelMode(item.travel) : null;
-  const others = otherWays(activity, mode, s.profile?.mobility ?? null);
+  const others = otherWays(activity, mode, s.profile?.mobility ?? null, s.profile?.transport ?? null);
   const soft = item?.barriers.filter((b) => b.severity === "soft") ?? [];
   const passed = checksFor(s.result, activity.name, person).filter((c) => c.passed);
   const reason = item ? null : didntFitReason(s.result, activity.name, person);

@@ -39,11 +39,14 @@ export const travelMode = (travel: string): Transport | null => {
   return mode && mode in MODE_WORDS ? (mode as Transport) : null;
 };
 
-/** Other ways to get there (one plain line on U5). Walking is left out for walker / wheelchair users. */
-export function otherWays(activity: Pick<Activity, "travelMin">, chosen: Transport | null, mobility: Profile["mobility"] | null): string[] {
+/**
+ * Other ways to get there (one plain line on U5). Walking is left out for walker / wheelchair users.
+ * When `uses` is given, only the ways the person actually gets around are listed.
+ */
+export function otherWays(activity: Pick<Activity, "travelMin">, chosen: Transport | null, mobility: Profile["mobility"] | null, uses?: readonly Transport[] | null): string[] {
   const canWalk = mobility !== "walker" && mobility !== "wheelchair";
   return (Object.keys(MODE_WORDS) as Transport[])
-    .filter((m) => m !== chosen && activity.travelMin[m] !== undefined && (m !== "walk" || canWalk))
+    .filter((m) => m !== chosen && activity.travelMin[m] !== undefined && (m !== "walk" || canWalk) && (!uses || uses.includes(m)))
     .sort((a, b) => activity.travelMin[a]! - activity.travelMin[b]!)
     .map((m) => travelText(m, activity.travelMin[m]!));
 }
@@ -92,6 +95,13 @@ export function greeting(hour: number): string {
 }
 
 export const aiLabel = (source: AnalysisResult["dataSource"]) => (source === "live" ? "Written by AI" : "Sample AI text");
+
+/** AI explanation without developer tags ("[mock AI]") or "barrier(s)" wording. */
+export const plainExplanation = (text: string) =>
+  text
+    .replace(/\[mock AI\]\s*/gi, "")
+    .replace(/(\d+) barrier\(s\) needs? a workaround/g, (_m, n: string) => (n === "1" ? "1 thing needs a workaround" : `${n} things need a workaround`))
+    .trim();
 
 export type Primary = { label: string; href: string; coordinate: boolean };
 

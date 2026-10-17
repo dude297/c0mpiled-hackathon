@@ -2,7 +2,7 @@
 import type { AnalysisResult, Profile } from "@/lib/schema";
 import {
   DEFAULT_ACTIVE, KEYS, NOT_STARTED, PERSONS, SESSION_PROFILE_KEY,
-  friendlyAnalyzeError, parseActive, parsePlans, parseProfile, parseResult, parseWeek, personKeys, profileHash, readPlanResponse, reconcileWeek, toggleId,
+  friendlyAnalyzeError, parseActive, parsePlans, parseProfile, parseResult, parseWeek, personKeys, profileHash, readPlanResponse, reconcileWeek, toggleId, withAllMatches,
   type DroppedOuting, type Mode, type PersonKey, type PlanMap, type PlanStatus,
 } from "./helpers";
 
@@ -160,11 +160,13 @@ export function createDeviceStore(deps: StoreDeps) {
       if (id !== reqId) return null; // stale: newer run, person switch or reset
       if (!res.ok || !data || !Array.isArray(data.plan)) throw new Error("bad response");
       const prevWeek = parseWeek(local.getItem(KEYS.week(person)));
-      const { week, dropped } = reconcileWeek(prevWeek, state.result, data);
-      write(KEYS.result(person), { result: data, profileHash: profileHash(profile) });
+      // First run: the week is the engine's top picks. After that, an outing only drops when it truly stops fitting.
+      const full = withAllMatches(profile, data);
+      const { week, dropped } = prevWeek === null ? reconcileWeek(null, null, data) : reconcileWeek(prevWeek, state.result, full);
+      write(KEYS.result(person), { result: full, profileHash: profileHash(profile) });
       write(KEYS.week(person), week);
-      set({ result: data, week, dropped, analyzing: false, error: null });
-      return data;
+      set({ result: full, week, dropped, analyzing: false, error: null });
+      return full;
     } catch {
       if (id !== reqId) return null;
       set({ analyzing: false, error: friendlyAnalyzeError(httpStatus) });

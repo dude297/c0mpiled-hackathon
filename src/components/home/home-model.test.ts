@@ -3,7 +3,7 @@ import { NOT_STARTED, planStatusView, type PlanStatus } from "@/components/shell
 import type { AnalysisResult, PlanItem, PlanState } from "@/lib/schema";
 import {
   activityPrimaryLabel, attentionRows, backLink, checksFor, costWords, didntFitReason, greeting, homePrimary, nextOuting, noMatchReason,
-  otherWays, softBarrierText, todayIndex, travelLine, weekItems, weekLine, weekStrip,
+  otherWays, plainExplanation, softBarrierText, todayIndex, travelLine, weekItems, weekLine, weekStrip,
 } from "./home-model";
 
 const item = (activityId: string, when: string, extra: Partial<PlanItem> = {}): PlanItem => ({
@@ -42,6 +42,11 @@ describe("week lines", () => {
     const a = { travelMin: { drive: 6, bus: 15, walk: 20 } };
     expect(otherWays(a, "bus", "full")).toEqual(["Drive, about 6 min", "Walk, about 20 min"]);
     expect(otherWays(a, "bus", "walker")).toEqual(["Drive, about 6 min"]);
+    expect(otherWays(a, "bus", "full", ["bus", "family"])).toEqual([]);
+  });
+  it("drops the [mock AI] tag and barrier(s) wording", () => {
+    expect(plainExplanation("[mock AI] Suggested for M: X. 2 barrier(s) need a workaround, and 3 others.")).toBe("Suggested for M: X. 2 things need a workaround, and 3 others.");
+    expect(plainExplanation("[mock AI] 1 barrier(s) need a workaround")).toBe("1 thing needs a workaround");
   });
 });
 

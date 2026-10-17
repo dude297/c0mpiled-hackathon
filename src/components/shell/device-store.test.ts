@@ -88,7 +88,8 @@ describe("analyze", () => {
     store.hydrate();
     await store.analyze(me);
     await store.analyze(me);
-    expect(store.getState()).toMatchObject({ analyzing: false, result: result(["a"]) });
+    expect(store.getState()).toMatchObject({ analyzing: false });
+    expect(store.getState().result?.plan[0].activityId).toBe("a"); // still-fitting extras are appended after the top picks
     expect(store.getState().error).toMatch(/try again/);
     expect(store.getState().error).not.toMatch(/boom|500/);
   });

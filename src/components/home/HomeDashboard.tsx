@@ -10,7 +10,7 @@ import { personLabel, personName, useDeviceStore, usePlanStatus } from "@/compon
 import { whenText, withoutFallbackName } from "@/components/views/copy";
 import { writeProfileHandoff } from "./handoff";
 import {
-  activityHref, aiLabel, attentionRows, greeting, homePrimary, nextOuting, noMatchReason, todayIndex, travelLine, weekItems, weekLine, weekStrip,
+  activityHref, aiLabel, attentionRows, plainExplanation, greeting, homePrimary, nextOuting, noMatchReason, todayIndex, travelLine, weekItems, weekLine, weekStrip,
 } from "./home-model";
 import { Disclosure, GoLink, HeadsUpRow, PRIMARY, QUIET_LINK, SECONDARY } from "./ui";
 
@@ -142,7 +142,7 @@ function HomeContent() {
             {s.result.explanation.trim() && (
               <Disclosure summary="Why these?">
                 <p className="text-[1rem] text-muted-foreground">{aiLabel(s.result.dataSource)}</p>
-                <p className="text-lg whitespace-pre-line">{withoutFallbackName(s.result.explanation, person)}</p>
+                <p className="text-lg whitespace-pre-line">{withoutFallbackName(plainExplanation(s.result.explanation), person)}</p>
               </Disclosure>
             )}
           </div>

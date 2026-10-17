@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { DEMO_PROFILES } from "@/domain/activities";
+import { runScenario } from "@/domain/engine";
 import type { AnalysisResult, PlanItem } from "@/lib/schema";
 import {
   KEYS, coordinateHref, friendlyAnalyzeError, parseActive, parsePlans, parseProfile, parseResult, parseWeek,
-  planStatusView, profileHash, readPlanResponse, reconcileWeek, toggleId,
+  planStatusView, profileHash, readPlanResponse, reconcileWeek, toggleId, withAllMatches,
 } from "./helpers";
 
 const item = (activityId: string, name: string): PlanItem => ({ activityId, name, when: "Wed afternoon", travel: "Bus, 15 min", costPerWeek: 0, score: 1, barriers: [] });
@@ -124,5 +125,29 @@ describe("coordinateHref", () => {
 describe("friendlyAnalyzeError", () => {
   it("never leaks status codes", () => {
     for (const s of [null, 400, 500]) expect(friendlyAnalyzeError(s)).not.toMatch(/\d{3}/);
+  });
+});
+
+describe("withAllMatches (raising the budget never drops a still-fitting outing)", () => {
+  const run = (p: typeof DEMO_PROFILES.margaret): AnalysisResult => ({ ...runScenario({ profile: p }), explanation: "", dataSource: "mock" });
+  const m = DEMO_PROFILES.margaret;
+
+  it("keeps every chosen outing that still fits after a looser budget", () => {
+    const before = withAllMatches(m, run(m));
+    const top = run(m).plan.map((i) => i.activityId);
+    const looser = { ...m, budgetPerWeek: 25 };
+    const after = withAllMatches(looser, run(looser));
+    const { week, dropped } = reconcileWeek(top, before, after);
+    expect(dropped).toEqual([]);
+    expect(week).toEqual(top);
+  });
+
+  it("lists feasible activities beyond the top picks, never blocked ones", () => {
+    const r = run(m);
+    const full = withAllMatches(m, r);
+    expect(full.plan.slice(0, r.plan.length)).toEqual(r.plan);
+    const blocked = new Set(r.blocked.map((b) => b.name));
+    expect(full.plan.every((i) => !blocked.has(i.name))).toBe(true);
+    expect(new Set(full.plan.map((i) => i.activityId)).size).toBe(full.plan.length);
   });
 });
