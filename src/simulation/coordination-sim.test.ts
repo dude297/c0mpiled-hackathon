@@ -165,7 +165,9 @@ describe("Phase 2: adversarial provider-event simulation", () => {
     expect(revoked.plan.state).toBe("NEEDS_REPLAN");
     const dep = revoked.plan.dependencies.find((d) => d.kind === "invite")!;
     expect(["cancelled", "declined"]).toContain(dep.status);
-    expect(readyViolations(revoked.plan).length).toBeGreaterThan(0);
+    // #28: the recovery never re-invites the driver; it falls back to a user step, so READY needs an explicit accept.
+    expect(currentActions(revoked.plan).some((a) => a.scope.kind === "invite")).toBe(false);
+    expect((await s.c.command(id, { type: "accept_proposal" })).plan.state).toBe("READY");
   });
 
   it("events for a CANCELLED or COMPLETED plan are ignored, never applied", async () => {

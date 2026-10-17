@@ -1,14 +1,15 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ANSWER_LOCKOUT_MS, answersToProfile, INTEREST_COUNT, isLockedOut, likedInterests, pickedToHistory, replaceAnswer, replaceInterests, reviewRows, swipeDirection, toggleKey, TRANSPORT_OPTIONS, undoAnswer, WALKING_AID_OPTIONS, type Answer } from "@/components/onboarding/CardDeck";
+import { ANSWER_LOCKOUT_MS, answersToProfile, COMFORT_OPTIONS, comfortFromKeys, comfortToKeys, INTEREST_COUNT, isLockedOut, likedInterests, pickedToHistory, replaceAnswer, replaceInterests, reviewRows, swipeDirection, toggleChoice, toggleKey, TRANSPORT_OPTIONS, undoAnswer, WALKING_AID_OPTIONS, type Answer } from "@/components/onboarding/CardDeck";
 import { Profile, type Profile as ProfileType } from "@/lib/schema";
 
-// The two required answers; tests about other fields add them so a full Profile comes back.
+// The three required answers; tests about other fields add them so a full Profile comes back.
 const WALK: Answer = { kind: "mobility", key: "full" };
 const BUS: Answer = { kind: "transport", modes: ["bus"] };
+const NEITHER: Answer = { kind: "comfort", hearing: false, smallGroups: false };
 
 function profileOf(answers: (Answer | null)[], name: string): ProfileType {
-  const result = answersToProfile([...answers.filter((a): a is Answer => a !== null), WALK, BUS], name);
+  const result = answersToProfile([...answers.filter((a): a is Answer => a !== null), WALK, BUS, NEITHER], name);
   if (!result.ok) throw new Error(`incomplete: ${result.missing.join(",")}`);
   return result.profile;
 }
@@ -16,23 +17,23 @@ function profileOf(answers: (Answer | null)[], name: string): ProfileType {
 describe("answersToProfile — PR #12 review: never infer mobility or transport", () => {
   it("lead repro: an old stairs 'fine' answer and no transport answer is incomplete, never drive", () => {
     const result = answersToProfile([{ kind: "mobility", key: "fine" } as unknown as Answer], "QA no car");
-    expect(result).toEqual({ ok: false, missing: ["mobility", "transport"] });
+    expect(result).toEqual({ ok: false, missing: ["mobility", "transport", "comfort"] });
     expect(JSON.stringify(result)).not.toContain("drive");
   });
 
   it("lead repro (avoid case): no walker and no paratransit/family invented", () => {
     const result = answersToProfile([{ kind: "mobility", key: "avoid" } as unknown as Answer], "QA");
-    expect(result).toEqual({ ok: false, missing: ["mobility", "transport"] });
+    expect(result).toEqual({ ok: false, missing: ["mobility", "transport", "comfort"] });
   });
 
   it("walking aid without transport is incomplete; transport without walking aid is incomplete", () => {
-    expect(answersToProfile([{ kind: "mobility", key: "walker" }], "A")).toEqual({ ok: false, missing: ["transport"] });
-    expect(answersToProfile([{ kind: "transport", modes: ["drive"] }], "A")).toEqual({ ok: false, missing: ["mobility"] });
-    expect(answersToProfile([{ kind: "mobility", key: "full" }, { kind: "transport", modes: [] }], "A")).toEqual({ ok: false, missing: ["transport"] });
+    expect(answersToProfile([{ kind: "mobility", key: "walker" }, NEITHER], "A")).toEqual({ ok: false, missing: ["transport"] });
+    expect(answersToProfile([{ kind: "transport", modes: ["drive"] }, NEITHER], "A")).toEqual({ ok: false, missing: ["mobility"] });
+    expect(answersToProfile([{ kind: "mobility", key: "full" }, { kind: "transport", modes: [] }, NEITHER], "A")).toEqual({ ok: false, missing: ["transport"] });
   });
 
   it("walker + bus only yields mobility walker and transport ['bus'] exactly", () => {
-    const result = answersToProfile([{ kind: "mobility", key: "walker" }, { kind: "transport", modes: ["bus"] }], "Ruth");
+    const result = answersToProfile([{ kind: "mobility", key: "walker" }, { kind: "transport", modes: ["bus"] }, NEITHER], "Ruth");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.profile.mobility).toBe("walker");
@@ -42,7 +43,7 @@ describe("answersToProfile — PR #12 review: never infer mobility or transport"
   it("transport is exactly what was picked for every walking aid (no mobility→transport path)", () => {
     for (const aid of WALKING_AID_OPTIONS) {
       for (const mode of TRANSPORT_OPTIONS) {
-        const result = answersToProfile([{ kind: "mobility", key: aid.key }, { kind: "transport", modes: [mode.key] }], "A");
+        const result = answersToProfile([{ kind: "mobility", key: aid.key }, { kind: "transport", modes: [mode.key] }, NEITHER], "A");
         expect(result.ok && result.profile.mobility).toBe(aid.key);
         expect(result.ok && result.profile.transport).toEqual([mode.key]);
       }
@@ -51,7 +52,7 @@ describe("answersToProfile — PR #12 review: never infer mobility or transport"
 
   it("walking aid maps 1:1 and multi-select transport keeps every pick", () => {
     expect(WALKING_AID_OPTIONS.map((o) => o.key)).toEqual(["full", "cane", "walker", "wheelchair"]);
-    const result = answersToProfile([{ kind: "mobility", key: "wheelchair" }, { kind: "transport", modes: ["family", "paratransit"] }], "A");
+    const result = answersToProfile([{ kind: "mobility", key: "wheelchair" }, { kind: "transport", modes: ["family", "paratransit"] }, NEITHER], "A");
     expect(result.ok && result.profile.mobility).toBe("wheelchair");
     expect(result.ok && [...result.profile.transport].sort()).toEqual(["family", "paratransit"]);
   });
@@ -66,8 +67,72 @@ describe("answersToProfile — PR #12 review: never infer mobility or transport"
     const src = readFileSync(new URL("./CardDeck.tsx", import.meta.url), "utf8");
     const choiceCard = src.slice(src.indexOf("function ChoiceCard"), src.indexOf("function TimeChoices"));
     expect(choiceCard).toMatch(/onChange=\{\(\) => \{\s*if \(locked\(\)\) return;/);
-    expect(src.match(/locked=\{locked\}/g)).toHaveLength(2);
+    expect(src.match(/locked=\{locked\}/g)).toHaveLength(3);
     expect(src).toMatch(/const locked = \(\) => inLockout\(lastRecordAt\)/);
+  });
+});
+
+describe("answersToProfile — PR #12 review: hearing + group size asked explicitly", () => {
+  it("lead probe: walking aid + transport but no comfort answer is incomplete, never defaulted to false", () => {
+    const result = answersToProfile([WALK, BUS], "QA");
+    expect(result).toEqual({ ok: false, missing: ["comfort"] });
+    expect(JSON.stringify(result)).not.toMatch(/hearingImpaired|prefersSmallGroups/);
+  });
+
+  it("missing comfort is reported alongside the other required fields", () => {
+    const result = answersToProfile([], "QA");
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.missing).toContain("comfort");
+  });
+
+  it("a malformed comfort answer counts as unanswered", () => {
+    const bad = { kind: "comfort", hearing: "yes" } as unknown as Answer;
+    expect(answersToProfile([WALK, BUS, bad], "QA")).toEqual({ ok: false, missing: ["comfort"] });
+  });
+
+  it("Neither → both false, from an explicit answer", () => {
+    const answer = comfortFromKeys(["neither"]);
+    expect(answer).toEqual({ kind: "comfort", hearing: false, smallGroups: false });
+    const result = answersToProfile([WALK, BUS, answer], "A");
+    expect(result.ok && result.profile.hearingImpaired).toBe(false);
+    expect(result.ok && result.profile.prefersSmallGroups).toBe(false);
+    expect(result.ok && result.defaults).not.toContain("comfort");
+  });
+
+  it("each option maps to its own boolean", () => {
+    const hearing = answersToProfile([WALK, BUS, comfortFromKeys(["hearing"])], "A");
+    expect(hearing.ok && [hearing.profile.hearingImpaired, hearing.profile.prefersSmallGroups]).toEqual([true, false]);
+    const groups = answersToProfile([WALK, BUS, comfortFromKeys(["smallGroups"])], "A");
+    expect(groups.ok && [groups.profile.hearingImpaired, groups.profile.prefersSmallGroups]).toEqual([false, true]);
+    const both = answersToProfile([WALK, BUS, comfortFromKeys(["hearing", "smallGroups"])], "A");
+    expect(both.ok && [both.profile.hearingImpaired, both.profile.prefersSmallGroups]).toEqual([true, true]);
+    expect(both.ok && Profile.safeParse(both.profile).success).toBe(true);
+  });
+
+  it("options are the two questions plus an exclusive Neither", () => {
+    expect(COMFORT_OPTIONS.map((o) => o.key)).toEqual(["hearing", "smallGroups", "neither"]);
+    expect(COMFORT_OPTIONS.map((o) => o.label)).toEqual(["Noisy rooms are hard for me to hear in", "I prefer small groups", "Neither of these"]);
+  });
+
+  it("Neither clears the others; any other pick clears Neither", () => {
+    expect(toggleChoice(["hearing", "smallGroups"], "neither", "neither")).toEqual(["neither"]);
+    expect(toggleChoice(["neither"], "hearing", "neither")).toEqual(["hearing"]);
+    expect(toggleChoice(["hearing"], "smallGroups", "neither")).toEqual(["hearing", "smallGroups"]);
+    expect(toggleChoice(["neither"], "neither", "neither")).toEqual([]);
+    expect(toggleChoice(["drive"], "bus")).toEqual(["drive", "bus"]);
+  });
+
+  it("Change re-opens with the saved picks (Neither when both false)", () => {
+    expect(comfortToKeys({ hearing: false, smallGroups: false })).toEqual(["neither"]);
+    expect(comfortToKeys({ hearing: true, smallGroups: true })).toEqual(["hearing", "smallGroups"]);
+  });
+
+  it("card sits right after transport and Continue is gated on a pick", () => {
+    const src = readFileSync(new URL("./CardDeck.tsx", import.meta.url), "utf8");
+    expect(src).toMatch(/\{ type: "transport" \},\s*\{ type: "comfort" \},/);
+    expect(src).toMatch(/heading="Anything else that helps\?"\s*helper="Pick any that apply\."/);
+    expect(src).toContain("disabled={disabled || ordered.length === 0}");
+    expect(src).not.toMatch(/hearingImpaired: false|prefersSmallGroups: false/);
   });
 });
 
@@ -106,7 +171,7 @@ describe("answersToProfile", () => {
   });
 
   it("falls back to defaults for missing optional answers and reports which were defaulted", () => {
-    const result = answersToProfile([WALK, BUS], "");
+    const result = answersToProfile([WALK, BUS, NEITHER], "");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.defaults).toEqual(["interests", "times", "travel", "budget"]);
@@ -125,6 +190,7 @@ describe("answersToProfile", () => {
         { kind: "travel", min: 45 },
         { kind: "mobility", key: "cane" },
         { kind: "transport", modes: ["family", "walk"] },
+        { kind: "comfort", hearing: true, smallGroups: false },
         { kind: "budget", amount: 25 },
       ],
       "Yihong",
@@ -146,24 +212,47 @@ describe("review step", () => {
     { kind: "travel", min: 15 },
     { kind: "mobility", key: "walker" },
     { kind: "transport", modes: ["bus", "family"] },
+    { kind: "comfort", hearing: true, smallGroups: false },
     { kind: "budget", amount: 0 },
   ];
   const answered = (h: (Answer | null)[]) => h.filter((a): a is Answer => a !== null);
 
   it("lists every answer in plain words and labels defaults", () => {
     const rows = reviewRows(answered(full));
-    expect(rows.map((r) => r.field)).toEqual(["interests", "times", "travel", "mobility", "transport", "budget"]);
+    expect(rows.map((r) => r.field)).toEqual(["interests", "times", "travel", "mobility", "transport", "hearing", "groupSize", "budget"]);
     const by = Object.fromEntries(rows.map((r) => [r.field, r]));
     expect(by.interests).toMatchObject({ value: "Music & singing", isDefault: false });
     expect(by.times).toMatchObject({ value: "Mornings, Afternoons", isDefault: true });
     expect(by.travel).toMatchObject({ value: "A short drive (about 15 minutes)", isDefault: false });
     expect(by.mobility).toMatchObject({ value: "A walker", isDefault: false });
     expect(by.transport).toMatchObject({ value: "Bus or train, Family or friends drive me", isDefault: false });
+    expect(by.hearing).toMatchObject({ label: "Hearing", value: "Noisy rooms are hard to hear in", isDefault: false });
+    expect(by.groupSize).toMatchObject({ label: "Group size", value: "Any size is fine", isDefault: false });
     expect(by.budget).toMatchObject({ value: "Free only ($0 a week)", isDefault: false });
   });
 
+  it("hearing + group size rows read the explicit answer and never show a guessed value", () => {
+    const by = (answers: Answer[]) => Object.fromEntries(reviewRows(answers).map((r) => [r.field, r.value]));
+    expect(by([WALK, BUS, NEITHER])).toMatchObject({ hearing: "No trouble hearing", groupSize: "Any size is fine" });
+    expect(by([WALK, BUS, comfortFromKeys(["smallGroups"])])).toMatchObject({ hearing: "No trouble hearing", groupSize: "Prefers small groups" });
+    expect(by([WALK, BUS])).toMatchObject({ hearing: "Not answered yet", groupSize: "Not answered yet" });
+  });
+
+  it("Change on hearing / group size swaps only that answer", () => {
+    const comfortIndex = full.findIndex((a) => a?.kind === "comfort");
+    const changed = replaceAnswer(full, comfortIndex, comfortFromKeys(["smallGroups"]));
+    changed.forEach((a, i) => { if (i !== comfortIndex) expect(a).toBe(full[i]); });
+    const result = answersToProfile(answered(changed), "A");
+    expect(result.ok && result.profile.hearingImpaired).toBe(false);
+    expect(result.ok && result.profile.prefersSmallGroups).toBe(true);
+    expect(result.ok && result.profile.transport).toEqual(["bus", "family"]);
+    expect(result.ok && result.profile.mobility).toBe("walker");
+    expect(result.ok && result.profile.interests).toEqual(["music"]);
+    expect(result.ok && result.profile.budgetPerWeek).toBe(0);
+  });
+
   it("labels the interests default when nothing was liked", () => {
-    const rows = reviewRows(answered([...pickedToHistory([], INTEREST_COUNT), WALK, BUS]));
+    const rows = reviewRows(answered([...pickedToHistory([], INTEREST_COUNT), WALK, BUS, NEITHER]));
     expect(rows[0]).toMatchObject({ field: "interests", value: "Learning new things", isDefault: true });
   });
 
@@ -177,6 +266,7 @@ describe("review step", () => {
     expect(result.ok && result.profile.mobility).toBe("walker");
     expect(result.ok && result.profile.maxTravelMin).toBe(15);
     expect(result.ok && result.profile.budgetPerWeek).toBe(0);
+    expect(result.ok && result.profile.hearingImpaired).toBe(true);
   });
 
   it("Change on interests keeps every later answer", () => {
