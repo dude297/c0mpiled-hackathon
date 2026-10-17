@@ -36,7 +36,7 @@ async function askLlm(text: string): Promise<Suggestion> {
         { role: "user", content: text },
       ],
     }),
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS) || 20_000),
   });
   if (!res.ok) throw new Error(`AI endpoint returned ${res.status}`);
   const data = await res.json();
