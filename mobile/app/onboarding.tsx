@@ -1,7 +1,9 @@
 // Native onboarding. Order:
-// name → 10 interests → times → travel → walking aid → how you get places → budget → review
-// ("Here's what we heard", each answer with Change) → answersToProfile → analyze → Matches.
-// Walking aid and transport are always asked, never inferred; analyze can't run until both are answered.
+// name → 10 interests → times → travel → walking aid → how you get places → anything else that helps
+// (hearing / group size) → budget → review ("Here's what we heard", each answer with Change)
+// → answersToProfile → analyze → Matches.
+// Walking aid, transport, hearing and group size are always asked, never inferred or defaulted;
+// analyze can't run until all are answered.
 // Interests: swipe deck (default), the Easier view grid, or Hands-free (look / head tilt answers the
 // same swipe cards). Switching modes keeps every answer.
 import { useRouter } from 'expo-router';
@@ -19,13 +21,16 @@ import { PillButton, s as ui } from '@/components/onboarding/ui';
 import {
   answersToProfile,
   BUDGET_OPTIONS,
+  COMFORT_OPTIONS,
   INTEREST_META,
   MOBILITY_OPTIONS,
   reviewRows,
   TIME_OPTIONS,
   TRANSPORT_OPTIONS,
   TRAVEL_BUCKETS,
+  toggleComfort,
   type Answer,
+  type ComfortKey,
   type ReviewField,
 } from '@/lib/onboarding';
 import { useApp } from '@/lib/store';
@@ -36,7 +41,7 @@ type TimeSlot = (typeof TIME_OPTIONS)[number]['key'];
 type MobilityKey = (typeof MOBILITY_OPTIONS)[number]['key'];
 type TransportKey = (typeof TRANSPORT_OPTIONS)[number]['key'];
 
-const STEPS = ['name', 'interests', 'times', 'travel', 'mobility', 'transport', 'budget', 'review'] as const;
+const STEPS = ['name', 'interests', 'times', 'travel', 'mobility', 'transport', 'comfort', 'budget', 'review'] as const;
 const stepOf = (f: (typeof STEPS)[number]) => STEPS.indexOf(f);
 const VIEWS = [
   { key: 'swipe', label: 'Swipe', hint: 'One card at a time. Swipe or use the No and Yes buttons.' },
@@ -61,6 +66,7 @@ export default function Onboarding() {
   const [travel, setTravel] = useState<number | null>(null);
   const [mobility, setMobility] = useState<MobilityKey | null>(null);
   const [transport, setTransport] = useState<TransportKey[]>([]);
+  const [comfort, setComfort] = useState<ComfortKey[]>([]);
   const [budget, setBudget] = useState<number | null>(null);
   const [editing, setEditing] = useState(false); // came from the review's Change: Continue returns there
   const submitting = useRef(false); // double-tap lockout for See my matches
@@ -74,7 +80,7 @@ export default function Onboarding() {
     setStep((i) => Math.min(i + 1, STEPS.length - 1));
   };
 
-  // "3 of 17" in swipe mode (name + 10 cards + 5 questions + review); "3 of 8" in easier view.
+  // "3 of 18" in swipe mode (name + 10 cards + 6 questions + review); "3 of 9" in easier view.
   const interestSpan = easy ? 1 : INTEREST_META.length;
   const total = 1 + interestSpan + STEPS.length - 2;
   const pos = current === 'name' ? 1 : current === 'interests' ? 2 + (easy ? 0 : cursor) : interestSpan + step;
@@ -120,6 +126,7 @@ export default function Onboarding() {
     ...(travel !== null ? [{ kind: 'travel', min: travel } as const] : []),
     ...(mobility ? [{ kind: 'mobility', key: mobility } as const] : []),
     ...(transport.length ? [{ kind: 'transport', keys: transport } as const] : []),
+    ...(comfort.length ? [{ kind: 'comfort', keys: comfort } as const] : []),
     ...(budget !== null ? [{ kind: 'budget', amount: budget } as const] : []),
   ];
 
@@ -137,7 +144,7 @@ export default function Onboarding() {
     if (submitting.current || loading) return;
     const result = answersToProfile(answers(), name);
     if (!result.ok) {
-      // Never guess walking aid or transport: go ask the first missing one.
+      // Never guess walking aid, transport, hearing or group size: go ask the first missing one.
       setEditing(true);
       return setStep(stepOf(result.missing[0]));
     }
@@ -284,6 +291,19 @@ export default function Onboarding() {
               p.includes(id as TransportKey) ? p.filter((k) => k !== id) : [...p, id as TransportKey],
             )
           }
+          onContinue={next}
+          bottomInset={bottom}
+        />
+      )}
+
+      {current === 'comfort' && (
+        <ChoiceStep
+          title="Anything else that helps?"
+          multi
+          helper="Pick any that apply."
+          options={COMFORT_OPTIONS.map((o) => ({ id: o.key, label: o.label }))}
+          selected={comfort}
+          onToggle={(id) => setComfort((p) => toggleComfort(p, id as ComfortKey))}
           onContinue={next}
           bottomInset={bottom}
         />

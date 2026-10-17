@@ -28,7 +28,7 @@ export function ReviewStep({
         </Text>
         <Text style={[type.body, { color: colors.textMuted }]}>Check each answer. Tap Change to fix one.</Text>
         {rows.map((r) => (
-          <View key={r.field} style={st.row} accessible={false}>
+          <View key={r.id} style={st.row} accessible={false}>
             <View style={{ flex: 1, gap: 2 }} accessible accessibilityLabel={`${r.title}: ${r.text}`}>
               <Text style={[type.label, { color: colors.textMuted }]}>{r.title}</Text>
               <Text style={[type.heading, { color: colors.text }]}>{r.value}</Text>

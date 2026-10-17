@@ -51,6 +51,22 @@ export const TRANSPORT_OPTIONS = [
   { key: 'walk', emoji: '🚶', label: 'I walk there' },
 ] as const satisfies readonly { key: Transport; emoji: string; label: string }[];
 
+// Asked directly (pick any that apply) — never defaulted. "Neither of these" is exclusive, so both
+// Profile.hearingImpaired and Profile.prefersSmallGroups always come from an explicit answer.
+export const COMFORT_OPTIONS = [
+  { key: 'hearing', label: 'Noisy rooms are hard for me to hear in' },
+  { key: 'smallGroups', label: 'I prefer small groups' },
+  { key: 'neither', label: 'Neither of these' },
+] as const;
+export type ComfortKey = (typeof COMFORT_OPTIONS)[number]['key'];
+
+// Tap on the comfort card: "Neither" clears the others; any other option clears "Neither".
+export function toggleComfort(prev: readonly ComfortKey[], key: ComfortKey): ComfortKey[] {
+  if (prev.includes(key)) return prev.filter((k) => k !== key);
+  if (key === 'neither') return ['neither'];
+  return [...prev.filter((k) => k !== 'neither'), key];
+}
+
 export const BUDGET_OPTIONS = [
   { amount: 0, label: 'Free only', detail: '$0 a week' },
   { amount: 10, label: 'A little', detail: 'up to $10 a week' },
@@ -63,17 +79,19 @@ export type Answer =
   | { kind: 'travel'; min: number }
   | { kind: 'mobility'; key: Mobility }
   | { kind: 'transport'; keys: Transport[] }
+  | { kind: 'comfort'; keys: ComfortKey[] }
   | { kind: 'times'; keys: TimeSlot[] }
   | { kind: 'budget'; amount: number };
 
 // Card order, same as web: one card per interest, then times, travel, walking aid, how you get places,
-// budget, then a review of every answer before matching.
+// anything else that helps (hearing / group size), budget, then a review of every answer before matching.
 export type CardDef =
   | { type: 'interest'; interest: (typeof INTEREST_META)[number] }
   | { type: 'times' }
   | { type: 'travel' }
   | { type: 'mobility' }
   | { type: 'transport' }
+  | { type: 'comfort' }
   | { type: 'budget' };
 
 export const CARDS: CardDef[] = [
@@ -82,12 +100,14 @@ export const CARDS: CardDef[] = [
   { type: 'travel' },
   { type: 'mobility' },
   { type: 'transport' },
+  { type: 'comfort' },
   { type: 'budget' },
 ];
 
-// Fields that may fall back to a default. Mobility and transport never do: they must be answered.
+// Fields that may fall back to a default. Mobility, transport and comfort (hearing + group size)
+// never do: they must be answered.
 export type DefaultField = 'interests' | 'times' | 'travel' | 'budget';
-export type RequiredField = 'mobility' | 'transport';
+export type RequiredField = 'mobility' | 'transport' | 'comfort';
 export type ProfileResult =
   | { ok: true; profile: Profile; defaulted: DefaultField[] }
   | { ok: false; missing: RequiredField[] };
@@ -111,6 +131,13 @@ function readAnswers(answers: readonly Answer[]) {
   // Keep option order and drop anything that isn't a real choice.
   const chosen = new Set<string>(pick(answers, 'transport')?.keys ?? []);
   const transport = TRANSPORT_OPTIONS.map((o) => o.key).filter((k) => chosen.has(k));
+  // Comfort: only real keys count; "neither" must stand alone (with another option it's contradictory).
+  const said = new Set<string>(pick(answers, 'comfort')?.keys ?? []);
+  const ck = COMFORT_OPTIONS.map((o) => o.key).filter((k) => said.has(k));
+  const comfort =
+    ck.length === 0 || (ck.includes('neither') && ck.length > 1)
+      ? null
+      : { hearingImpaired: ck.includes('hearing'), prefersSmallGroups: ck.includes('smallGroups') };
   return {
     interests: likedInterests.length ? likedInterests : null,
     times: times.size ? [...times] : null,
@@ -118,17 +145,19 @@ function readAnswers(answers: readonly Answer[]) {
     budget: pick(answers, 'budget')?.amount ?? null,
     mobility,
     transport: transport.length ? transport : null,
+    comfort,
   };
 }
 
-// Mobility and transport come ONLY from the explicit answers. If either is missing, nothing is
-// invented: the result says what's missing and the caller must ask before analyzing.
+// Mobility, transport, hearing and group size come ONLY from the explicit answers. If any is missing,
+// nothing is invented: the result says what's missing and the caller must ask before analyzing.
 export function answersToProfile(answers: readonly Answer[], name: string): ProfileResult {
   const r = readAnswers(answers);
   const missing: RequiredField[] = [];
   if (!r.mobility) missing.push('mobility');
   if (!r.transport) missing.push('transport');
-  if (!r.mobility || !r.transport) return { ok: false, missing };
+  if (!r.comfort) missing.push('comfort');
+  if (!r.mobility || !r.transport || !r.comfort) return { ok: false, missing };
 
   const defaulted: DefaultField[] = [];
   if (!r.interests) defaulted.push('interests');
@@ -146,16 +175,17 @@ export function answersToProfile(answers: readonly Answer[], name: string): Prof
       maxTravelMin: r.travel ?? DEFAULTS.travel,
       times: r.times ?? DEFAULTS.times,
       budgetPerWeek: r.budget ?? DEFAULTS.budget,
-      hearingImpaired: false,
-      prefersSmallGroups: false,
+      hearingImpaired: r.comfort.hearingImpaired,
+      prefersSmallGroups: r.comfort.prefersSmallGroups,
     },
   };
 }
 
 // "Here's what we heard": every answer in plain words, in card order. `text` carries "(default)"
-// when the value wasn't chosen; `field` is the card the Change button jumps back to.
+// when the value wasn't chosen; `field` is the card the Change button jumps back to (Hearing and
+// Group size both come from the comfort card); `id` is unique per row.
 export type ReviewField = DefaultField | RequiredField;
-export type ReviewRow = { field: ReviewField; title: string; value: string; isDefault: boolean; text: string };
+export type ReviewRow = { id: string; field: ReviewField; title: string; value: string; isDefault: boolean; text: string };
 
 const labelOf = <T extends { key: string; label: string }>(opts: readonly T[], keys: readonly string[]) =>
   opts.filter((o) => keys.includes(o.key)).map((o) => o.label).join(', ');
@@ -168,9 +198,14 @@ const budgetText = (amount: number) => {
   return b ? `${b.label} (${b.detail})` : `Up to $${amount} a week`;
 };
 
+// Plain words for the two comfort answers (review + Details screen).
+export const HEARING_TEXT = { yes: 'Noisy rooms are hard to hear in', no: 'No trouble hearing' } as const;
+export const GROUP_TEXT = { yes: 'Prefers small groups', no: 'Any size is fine' } as const;
+
 export function reviewRows(answers: readonly Answer[]): ReviewRow[] {
   const r = readAnswers(answers);
-  const row = (field: ReviewField, title: string, value: string, isDefault: boolean): ReviewRow => ({
+  const row = (field: ReviewField, title: string, value: string, isDefault: boolean, id: string = field): ReviewRow => ({
+    id,
     field,
     title,
     value,
@@ -183,6 +218,8 @@ export function reviewRows(answers: readonly Answer[]): ReviewRow[] {
     row('travel', 'How far is too far', travelText(r.travel ?? DEFAULTS.travel), r.travel === null),
     row('mobility', 'Help with walking', r.mobility ? labelOf(MOBILITY_OPTIONS, [r.mobility]) : 'Not answered yet', false),
     row('transport', 'How you get places', r.transport ? labelOf(TRANSPORT_OPTIONS, r.transport) : 'Not answered yet', false),
+    row('comfort', 'Hearing', !r.comfort ? 'Not answered yet' : r.comfort.hearingImpaired ? HEARING_TEXT.yes : HEARING_TEXT.no, false, 'hearing'),
+    row('comfort', 'Group size', !r.comfort ? 'Not answered yet' : r.comfort.prefersSmallGroups ? GROUP_TEXT.yes : GROUP_TEXT.no, false, 'groups'),
     row('budget', 'Weekly budget', budgetText(r.budget ?? DEFAULTS.budget), r.budget === null),
   ];
 }

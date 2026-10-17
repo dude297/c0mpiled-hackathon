@@ -13,6 +13,7 @@ export function ChoiceStep({
   options,
   selected,
   multi,
+  helper = 'Pick all that apply.',
   onToggle,
   onContinue,
   continueLabel = 'Continue',
@@ -25,6 +26,7 @@ export function ChoiceStep({
   options: readonly ChoiceOption[];
   selected: readonly string[];
   multi?: boolean;
+  helper?: string;
   onToggle: (id: string) => void;
   onContinue: () => void;
   continueLabel?: string;
@@ -38,7 +40,7 @@ export function ChoiceStep({
       <ScrollView contentContainerStyle={{ padding: space.md, gap: space.md }}>
         <Text ref={heading} accessibilityRole="header" style={[type.title, { color: colors.text }]}>{title}</Text>
         {subtitle ? <Text style={[type.body, { color: colors.textMuted }]}>{subtitle}</Text> : null}
-        {multi ? <Text style={[type.bodyStrong, { color: colors.text }]}>Pick all that apply.</Text> : null}
+        {multi ? <Text style={[type.bodyStrong, { color: colors.text }]}>{helper}</Text> : null}
         <View accessibilityRole={multi ? undefined : 'radiogroup'} accessibilityLabel={title} style={{ gap: space.md }}>
           {options.map((o) => (
             <OptionRow

@@ -2,7 +2,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Text, View } from 'react-native';
 
 import { BigButton, Collapsible, ResultGate, Screen, styles, useChangeAnswers } from '@/components/dashboard/ui';
-import { INTEREST_META } from '@/lib/onboarding';
+import { GROUP_TEXT, HEARING_TEXT, INTEREST_META } from '@/lib/onboarding';
 import type { Profile } from '@/lib/schema';
 import { useApp } from '@/lib/store';
 import { colors, space, type } from '@/lib/theme';
@@ -41,9 +41,8 @@ export default function Details() {
           <Row label="Getting around" value={MOBILITY[profile.mobility]} />
           <Row label="Travel" value={`Up to ${profile.maxTravelMin} minutes · ${list(profile.transport.map((t) => TRANSPORT[t]))}`} />
           <Row label="Budget" value={profile.budgetPerWeek === 0 ? 'Free activities only' : `Up to $${profile.budgetPerWeek} a week`} />
-          {(profile.hearingImpaired || profile.prefersSmallGroups) && (
-            <Row label="Also" value={list([profile.hearingImpaired && 'hard of hearing', profile.prefersSmallGroups && 'prefers small groups'].filter(Boolean) as string[])} />
-          )}
+          <Row label="Hearing" value={profile.hearingImpaired ? HEARING_TEXT.yes : HEARING_TEXT.no} />
+          <Row label="Group size" value={profile.prefersSmallGroups ? GROUP_TEXT.yes : GROUP_TEXT.no} />
         </View>
       )}
       {profile && <BigButton label="Change my answers" icon="create-outline" variant="outline" onPress={changeAnswers} hint="Goes back to the questions" />}
