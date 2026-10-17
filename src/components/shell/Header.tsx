@@ -30,10 +30,11 @@ const SHARED_CARE_NAV: NavItem[] = [
 
 export const isActive = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+function NavLink({ item, active, onNavigate }: { item: NavItem; active: boolean; onNavigate?: () => void }) {
   return (
     <Link
       href={item.href}
+      onClick={onNavigate}
       aria-current={active ? "page" : undefined}
       // Keep the Calendar word on phones too; its icon alone is easy to miss or misinterpret.
       aria-label={item.icon ? item.label : undefined}
@@ -156,7 +157,7 @@ function HeaderView({ pathname }: { pathname: string }) {
           <ul className="flex items-center gap-1">
             {nav.map((item) => (
               <li key={item.href}>
-                <NavLink item={item} active={isActive(pathname, item.href)} />
+                <NavLink item={item} active={isActive(pathname, item.href)} onNavigate={sharedCare && item.href === "/home" ? () => store.setMode("user") : undefined} />
               </li>
             ))}
           </ul>
@@ -170,7 +171,7 @@ function HeaderView({ pathname }: { pathname: string }) {
         <ul className={`mx-auto grid max-w-[75rem] px-2 ${sharedCare ? "grid-cols-2" : caregiver ? "grid-cols-3" : "grid-cols-4"}`}>
           {nav.map((item) => (
             <li key={item.href} className="flex justify-center">
-              <NavLink item={item} active={isActive(pathname, item.href)} />
+              <NavLink item={item} active={isActive(pathname, item.href)} onNavigate={sharedCare && item.href === "/home" ? () => store.setMode("user") : undefined} />
             </li>
           ))}
         </ul>
