@@ -36,13 +36,18 @@ export const liveAdapter: AiAdapter = {
       body: JSON.stringify({
         model: process.env.AI_MODEL || "qwen3-4b-instruct-2507",
         temperature: 0.2,
-        max_tokens: 250,
+        max_tokens: 160,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: JSON.stringify({ person: profile.name, plan: output.plan, blocked: output.blocked }) },
+          // Compact payload: prompt prefill dominates latency on CPU-only local models.
+          { role: "user", content: JSON.stringify({
+            person: profile.name,
+            plan: output.plan.map((i) => ({ name: i.name, when: i.when, travel: i.travel, workarounds: i.barriers.map((b) => `${b.detail} -> ${b.mitigation}`) })),
+            blocked: output.blocked.map((b) => ({ name: b.name, why: b.barriers.map((x) => x.detail) })),
+          }) },
         ],
       }),
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(Number(process.env.AI_TIMEOUT_MS) || 20_000),
     });
     if (!res.ok) throw new Error(`AI endpoint returned ${res.status}`);
     const data = await res.json();
