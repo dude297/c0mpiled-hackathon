@@ -20,7 +20,7 @@ const pageSource = readFileSync(join(here, '../lib/handsfreePage.ts'), 'utf8');
 const pageOut = ts.transpileModule(pageSource, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2020 } });
 const pageFile = join(dir, 'handsfreePage.mjs');
 writeFileSync(pageFile, pageOut.outputText.replace("from './handsfree'", "from './handsfree.mjs'"));
-const { buildHandsFreeHtml, handsFreeModeScript, parsePageMessage } = await import(pathToFileURL(pageFile).href);
+const { buildHandsFreeHtml, handsFreeModeScript, handsFreeContextScript, isCurrentPageMessage, parsePageMessage } = await import(pathToFileURL(pageFile).href);
 rmSync(dir, { recursive: true, force: true });
 
 const names = ['TUNING', 'GAZE_SIGN', 'YAW_SIGN', 'TILT_SIGN', 'gazeFromBlendshapes', 'yawFromLandmarks', 'lookFromSignals', 'tiltFromLandmarks', 'classify', 'initialDwell', 'rearmDwell', 'stepDwell'];
@@ -145,6 +145,7 @@ for (const impl of [tsImpl, jsImpl]) {
 
   // Look fires at 1.2 seconds, never before, and needs the center before another answer.
   let exact = stepDwell(initialDwell(), 'right', 0, L.dwellMs, TUNING.rearmMs);
+  for (let t = 100; t <= 1100; t += 100) exact = stepDwell(exact.state, 'right', t, L.dwellMs, TUNING.rearmMs);
   exact = stepDwell(exact.state, 'right', 1199, L.dwellMs, TUNING.rearmMs);
   assert.equal(exact.fired, null);
   assert.ok(exact.progress > 0.99);
@@ -171,7 +172,7 @@ for (const impl of [tsImpl, jsImpl]) {
   // Losing the face resets progress.
   log = run([['right', 1000], [null, 100], ['right', 1000]], L.dwellMs);
   assert.deepEqual(fires(log), []);
-  assert.equal(log.find((r, i) => i > 0 && log[i - 1].side === null && r.side === 'right' && i > 100).progress < 0.05, true);
+  assert.ok(log.at(-1).state.needsCenter, 'face loss requires a fresh center hold');
 
   // After a Look/Tilt switch (rearmDwell): a side already held can't fire until the middle is held 400 ms.
   const runFrom = (s, zones, dwellMs) => {
@@ -239,9 +240,10 @@ function cameraPage(mode, storage = new Map()) {
     ReactNativeWebView: { postMessage: (m) => messages.push(JSON.parse(m)) }, addEventListener() {},
     localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) },
   };
-  const document = { getElementById: () => ({ videoWidth: 480, videoHeight: 640 }) };
+  const visibility = {};
+  const document = { hidden: false, addEventListener: (name, fn) => { visibility[name] = fn; }, getElementById: () => ({ videoWidth: 480, videoHeight: 640 }) };
   new Function('window', 'document', scripts.join('\n'))(window, document);
-  return { window, messages, storage };
+  return { window, messages, storage, document, visibility };
 }
 
 for (const mode of ['look', 'tilt']) {
@@ -249,7 +251,7 @@ for (const mode of ['look', 'tilt']) {
   const setMode = (m) => new Function('window', handsFreeModeScript(m))(window);
   const answers = () => messages.filter((m) => m.type === 'answer').map((m) => m.liked);
   const latest = () => messages.filter((m) => m.type === 'progress').at(-1);
-  assert.deepEqual(messages.find((m) => m.type === 'ready'), { type: 'ready', swapSides: false });
+  assert.deepEqual(messages.find((m) => m.type === 'ready'), { type: 'ready', swapSides: false, session: 0, revision: 0 });
   // The ready handshake must override a stale initial HTML mode before calibration too.
   setMode(mode === 'look' ? 'tilt' : 'look');
   assert.equal(latest().mode, mode === 'look' ? 'tilt' : 'look');
@@ -291,6 +293,16 @@ for (const mode of ['look', 'tilt']) {
   const right = mode === 'look' ? { gaze: neutral.gaze + 0.06, yaw: neutral.yaw + 0.06 } : { tilt: neutral.tilt + 16 };
   const left = mode === 'look' ? { yaw: neutral.yaw - 0.1 } : { tilt: neutral.tilt - 16 };
   const dwellMs = tsImpl.TUNING[mode].dwellMs;
+  hold(right, 200);
+  new Function('window', handsFreeContextScript(0, 1))(window);
+  hold(right, 2000);
+  assert.deepEqual(answers(), [], 'manual/card context reset cannot carry the previous hold');
+  hold({}, 500);
+  hold(right, 200);
+  now += 5000;
+  hold(right, 2000);
+  assert.deepEqual(answers(), [], 'actual page cannot count a camera frame gap as hold time');
+  hold({}, 500);
   hold(right, dwellMs);
   assert.deepEqual(answers(), [], `${mode}: no early answer`);
   hold(right, 100);
@@ -359,17 +371,53 @@ const panelSource = readFileSync(join(here, '../components/onboarding/HandsFree.
 assert.match(panelSource, /modeRef.current = m/);
 assert.match(panelSource, /injectJavaScript\(handsFreeModeScript\(modeRef.current\)\)/);
 assert.match(panelSource, /if \(m.mode !== modeRef.current\) return/);
-assert.match(panelSource, /if \(m.mode === modeRef.current\) answer\(m.liked\)/);
+assert.match(panelSource, /isCurrentPageMessage\(m, context\)/);
 assert.match(panelSource, /Seeing: \{meter.zone\}/);
 assert.match(pageSource, /outputFaceBlendshapes: true/);
 assert.match(pageSource, /detectForVideo\(video, now\)/, 'MediaPipe receives raw video, not CSS-mirrored pixels');
-const progress = { type: 'progress', side: null, value: 0, signal: 0.2, zone: 'center', mode: 'look' };
+const progress = { session: 0, revision: 0, type: 'progress', side: null, value: 0, signal: 0.2, zone: 'center', mode: 'look' };
 assert.deepEqual(parsePageMessage(JSON.stringify(progress)), progress);
 assert.equal(parsePageMessage(JSON.stringify({ ...progress, mode: 'bogus' })), null);
 assert.equal(parsePageMessage(JSON.stringify({ ...progress, signal: null })), null);
-assert.deepEqual(parsePageMessage('{"type":"answer","liked":true,"mode":"look"}'), { type: 'answer', liked: true, mode: 'look' });
+assert.deepEqual(parsePageMessage('{"session":0,"revision":0,"type":"answer","liked":true,"mode":"look"}'), { session: 0, revision: 0, type: 'answer', liked: true, mode: 'look' });
 assert.equal(parsePageMessage('{"type":"answer","liked":true,"mode":"bogus"}'), null);
 assert.equal(parsePageMessage('{"type":"progress","side":null,"value":0,"signal":1e999,"zone":"center","mode":"look"}'), null);
 n++;
 
+
+// Interrupted observations must fail closed in both the TypeScript and injected implementation.
+for (const impl of [tsImpl, jsImpl]) {
+  for (const mode of ['look', 'tilt']) {
+    for (const badNow of [6100, 900, NaN, Infinity, -Infinity]) {
+      let r = impl.stepDwell(impl.initialDwell(), 'right', 1000, impl.TUNING[mode].dwellMs, 400);
+      r = impl.stepDwell(r.state, 'right', 1100, impl.TUNING[mode].dwellMs, 400);
+      r = impl.stepDwell(r.state, 'right', badNow, impl.TUNING[mode].dwellMs, 400);
+      assert.equal(r.fired, null); assert.equal(r.progress, 0); assert.equal(r.state.needsCenter, true);
+      let t = Number.isFinite(badNow) ? badNow : 1200;
+      for (let i = 0; i < 30; i++) {
+        r = impl.stepDwell(r.state, 'right', t += 100, impl.TUNING[mode].dwellMs, 400);
+        assert.equal(r.fired, null, 'side stays locked until observed center');
+      }
+      for (let i = 0; i < 6; i++) r = impl.stepDwell(r.state, 'center', t += 100, impl.TUNING[mode].dwellMs, 400);
+      assert.equal(r.state.needsCenter, false); n++;
+    }
+  }
+}
+const message = { session: 2, revision: 3, type: 'answer', mode: 'look', liked: true };
+for (const context of [{ session: 1, revision: 3, live: true }, { session: 2, revision: 4, live: true }, { session: 2, revision: 3, live: false }]) {
+  assert.equal(isCurrentPageMessage(message, context), false, 'old session/revision or stopped input is rejected'); n++;
+}
+assert.equal(isCurrentPageMessage(message, { session: 2, revision: 3, live: true }), true);
+assert.equal(parsePageMessage('{"type":"answer","liked":true,"mode":"look"}'), null, 'untagged answers fail closed');
+const page = cameraPage('look');
+new Function('window', handsFreeContextScript(0, 7))(page.window);
+assert.equal(page.messages.at(-1).revision, 7);
+new Function('window', handsFreeContextScript(0, 6))(page.window);
+assert.equal(page.messages.at(-1).revision, 7, 'stale commands cannot roll revision backward');
+page.document.hidden = true;
+page.visibility.visibilitychange();
+const count = page.messages.length;
+page.window.testFrames.handle({ faceLandmarks: [] }, 10000);
+assert.equal(page.messages.length, count, 'hidden page cannot produce answers or tracking frames');
+n++;
 console.log(`handsfree: all checks passed (${n} parity/behaviour groups, TS + injected JS)`);
