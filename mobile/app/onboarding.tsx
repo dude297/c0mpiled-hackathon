@@ -1,13 +1,14 @@
 // Native onboarding. Same questions, order and mapping as web CardDeck:
 // name → 10 interests → times → travel → stairs → budget → answersToProfile → analyze → Matches.
-// Interests: swipe deck (default) or the Easier view grid. Switching modes keeps every answer.
-import Ionicons from '@expo/vector-icons/Ionicons';
+// Interests: swipe deck (default), the Easier view grid, or Hands-free (look / head tilt answers the
+// same swipe cards). Switching modes keeps every answer.
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ChoiceStep } from '@/components/onboarding/ChoiceStep';
+import { HandsFreeDeck } from '@/components/onboarding/HandsFree';
 import { InterestGrid } from '@/components/onboarding/InterestGrid';
 import { NameStep } from '@/components/onboarding/NameStep';
 import { SwipeDeck } from '@/components/onboarding/SwipeDeck';
@@ -29,6 +30,11 @@ type TimeSlot = (typeof TIME_OPTIONS)[number]['key'];
 type StairKey = (typeof STAIR_OPTIONS)[number]['key'];
 
 const STEPS = ['name', 'interests', 'times', 'travel', 'mobility', 'budget'] as const;
+const VIEWS = [
+  { key: 'swipe', label: 'Swipe', hint: 'One card at a time. Swipe or use the No and Yes buttons.' },
+  { key: 'easy', label: 'Easier view', hint: 'Shows every idea at once as tap tiles instead of swipe cards' },
+  { key: 'hands', label: 'Hands-free', hint: 'Answer each card by looking or tilting your head toward No or Yes' },
+] as const;
 const LAST = INTEREST_META.length - 1;
 
 export default function Onboarding() {
@@ -39,6 +45,7 @@ export default function Onboarding() {
   const [step, setStep] = useState(0);
   const [name, setName] = useState('');
   const [easy, setEasy] = useState(false);
+  const [handsFree, setHandsFree] = useState(false);
   const [liked, setLiked] = useState<Partial<Record<Key, boolean>>>({});
   const [cursor, setCursor] = useState(0); // swipe deck position
   const [enterFrom, setEnterFrom] = useState<1 | -1 | null>(null);
@@ -82,6 +89,7 @@ export default function Onboarding() {
 
   const toggleEasy = (v: boolean) => {
     setEasy(v);
+    if (v) setHandsFree(false);
     setEnterFrom(null);
     if (!v && cursor > LAST) setCursor(LAST); // back to cards: show the last one, answers kept
   };
@@ -106,28 +114,33 @@ export default function Onboarding() {
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: colors.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <View style={[st.header, { paddingTop: insets.top + space.sm }]}>
-        {(showTopBack || current === 'interests') && (
-        <View style={st.headerRow}>
-          {showTopBack ? (
+        {showTopBack ? (
+          <View style={st.headerRow}>
             <PillButton variant="outline" icon="arrow-back" label="Back" onPress={back} disabled={loading} style={st.backBtn} />
-          ) : null}
-          <View style={{ flex: 1 }} />
-          {current === 'interests' ? (
-            <Pressable
-              accessibilityRole="switch"
-              accessibilityLabel="Easier view"
-              accessibilityHint="Shows every idea at once as tap tiles instead of swipe cards"
-              aria-checked={easy}
-              onPress={() => toggleEasy(!easy)}
-              style={({ pressed }) => [st.toggle, easy && st.toggleOn, pressed && ui.pressed]}>
-              <Ionicons name={easy ? 'grid' : 'grid-outline'} size={22} color={easy ? colors.onTileSelected : colors.text} />
-              <Text style={[type.label, { color: easy ? colors.onTileSelected : colors.text }]}>
-                Easier view: {easy ? 'On' : 'Off'}
-              </Text>
-            </Pressable>
-          ) : null}
-        </View>
-        )}
+          </View>
+        ) : null}
+        {current === 'interests' ? (
+          <View style={st.views} accessibilityRole="radiogroup" accessibilityLabel="How to answer">
+            {VIEWS.map((v) => {
+              const on = v.key === (easy ? 'easy' : handsFree ? 'hands' : 'swipe');
+              return (
+                <Pressable
+                  key={v.key}
+                  accessibilityRole="radio"
+                  accessibilityLabel={v.label}
+                  accessibilityHint={v.hint}
+                  aria-checked={on}
+                  onPress={() => {
+                    toggleEasy(v.key === 'easy');
+                    setHandsFree(v.key === 'hands');
+                  }}
+                  style={({ pressed }) => [st.toggle, on && st.toggleOn, pressed && ui.pressed]}>
+                  <Text style={[st.viewText, { color: on ? colors.onTileSelected : colors.text }]}>{v.label}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
         <Text style={[type.label, { color: colors.text }]}>
           {pos} of {total}
         </Text>
@@ -160,6 +173,10 @@ export default function Onboarding() {
             }}
             bottomInset={bottom}
           />
+        ) : handsFree ? (
+          <View style={{ flex: 1, paddingBottom: bottom + space.md }}>
+            <HandsFreeDeck cursor={Math.min(cursor, LAST)} enterFrom={enterFrom} onAnswer={answerCard} onBack={back} />
+          </View>
         ) : (
           <View style={{ flex: 1, paddingBottom: bottom + space.md }}>
             <SwipeDeck
@@ -235,12 +252,16 @@ const st = StyleSheet.create({
   header: { paddingHorizontal: space.md, gap: space.sm, paddingBottom: space.sm },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: space.md, minHeight: tap.min },
   backBtn: { minHeight: tap.min, paddingHorizontal: space.md },
+  views: { flexDirection: 'row', gap: space.xs },
+  viewText: { fontSize: 17, lineHeight: 20, fontWeight: '600', textAlign: 'center' },
   toggle: {
+    flex: 1,
     minHeight: tap.min,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: space.sm,
-    paddingHorizontal: space.md,
+    paddingHorizontal: space.xs,
     borderRadius: radius.pill,
     borderWidth: 2,
     borderColor: colors.text,

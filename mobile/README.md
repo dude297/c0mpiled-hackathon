@@ -33,9 +33,19 @@ the app silently falls back to on-device; the UI labels which one was used (`sou
 - `lib/onboarding.ts` — question set + `answersToProfile` (ported from web `CardDeck.tsx`)
 - `lib/theme.ts` — colors, type scale, spacing, radius, tap size
 
+## Hands-free (look / head tilt)
+
+Onboarding's interest cards have a **Hands-free** view (next to Swipe / Easier view): look toward ✕ / ❤️
+and hold 1.5 s, or tilt your head toward it and hold 0.8 s. Works in Expo Go: `react-native-webview`
+hosts a tiny page (`lib/handsfreePage.ts`) that loads MediaPipe Face Landmarker from a pinned CDN at runtime
+(needs internet the first time) and posts progress / answers back; the rings, haptics and answers are native.
+Pure dwell / zone logic lives in `lib/handsfree.ts` (tuning + left/right sign constants at the top), with a
+plain-JS twin injected into the page. Camera frames never leave the phone. Not available in the web preview.
+
 ## Checks
 
 ```bash
 npx tsc --noEmit
+node scripts/check-handsfree.mjs   # hands-free logic + TS/injected-JS parity
 npx expo export --platform ios --output-dir /tmp/dbx-ios && rm -rf /tmp/dbx-ios
 ```

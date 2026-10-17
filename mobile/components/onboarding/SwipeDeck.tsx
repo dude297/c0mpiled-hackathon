@@ -1,7 +1,7 @@
 // Tinder-style interest deck: the top card follows the finger, tilts, shows LIKE / NOPE stamps,
 // and flings off past 30% of the screen width or a fast flick. Every gesture has a button twin.
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
+import { useEffect, useImperativeHandle, useRef, type ReactNode, type Ref } from 'react';
 import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -24,6 +24,7 @@ import { CircleButton, haptic } from './ui';
 type Interest = (typeof INTEREST_META)[number];
 type Dir = 1 | -1;
 type CardHandle = { swipe: (dir: Dir) => void };
+export type SwipeDeckHandle = CardHandle; // answer the top card exactly like the No / Yes buttons
 
 const FLICK_VELOCITY = 800;
 const tick = haptic.tick; // plain function so the gesture worklet can schedule it on the JS thread
@@ -197,18 +198,25 @@ export function SwipeDeck({
   canBack,
   onAnswer,
   onBack,
+  left,
+  right,
+  ref,
 }: {
   cursor: number; // index into INTEREST_META of the top card
   enterFrom: Dir | null;
   canBack: boolean;
   onAnswer: (key: Interest['key'], liked: boolean) => void;
   onBack: () => void;
+  left?: ReactNode; // optional overlays on the deck's left / right edges (hands-free ✕ / ❤️ targets)
+  right?: ReactNode;
+  ref?: Ref<SwipeDeckHandle>;
 }) {
   const reduceMotion = useReducedMotion();
   const drag = useSharedValue(0);
   const cardRef = useRef<CardHandle>(null);
   const top = INTEREST_META[cursor];
   const next = INTEREST_META[cursor + 1];
+  useImperativeHandle(ref, () => ({ swipe: (dir: Dir) => cardRef.current?.swipe(dir) }));
 
   const commit = (dir: Dir) => {
     haptic.impact();
@@ -224,26 +232,30 @@ export function SwipeDeck({
 
   return (
     <View style={{ flex: 1 }}>
-      <View style={st.stack}>
-        {next && (
-          <Animated.View
-            style={[StyleSheet.absoluteFill, behindStyle]}
-            importantForAccessibility="no-hide-descendants"
-            accessibilityElementsHidden>
-            <CardFace interest={next} />
-          </Animated.View>
-        )}
-        {top && (
-          <SwipeCard
-            key={top.key}
-            ref={cardRef}
-            interest={top}
-            drag={drag}
-            enterFrom={enterFrom}
-            reduceMotion={reduceMotion}
-            onCommit={commit}
-          />
-        )}
+      <View style={{ flex: 1 }}>
+        <View style={st.stack}>
+          {next && (
+            <Animated.View
+              style={[StyleSheet.absoluteFill, behindStyle]}
+              importantForAccessibility="no-hide-descendants"
+              accessibilityElementsHidden>
+              <CardFace interest={next} />
+            </Animated.View>
+          )}
+          {top && (
+            <SwipeCard
+              key={top.key}
+              ref={cardRef}
+              interest={top}
+              drag={drag}
+              enterFrom={enterFrom}
+              reduceMotion={reduceMotion}
+              onCommit={commit}
+            />
+          )}
+        </View>
+        {left ? <View style={[st.side, { left: 0 }]} pointerEvents="box-none">{left}</View> : null}
+        {right ? <View style={[st.side, { right: 0 }]} pointerEvents="box-none">{right}</View> : null}
       </View>
       <View style={st.bar}>
         <CircleButton icon="arrow-undo" label="Back" a11yLabel="Back: undo last answer" color={colors.text} size={60} disabled={!canBack} onPress={onBack} />
@@ -256,6 +268,7 @@ export function SwipeDeck({
 
 const st = StyleSheet.create({
   stack: { flex: 1, marginHorizontal: space.md, marginTop: space.sm, marginBottom: space.md },
+  side: { position: 'absolute', top: 0, bottom: 0, justifyContent: 'center' },
   card: {
     flex: 1,
     backgroundColor: colors.surface,
