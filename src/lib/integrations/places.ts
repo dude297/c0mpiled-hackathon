@@ -18,7 +18,7 @@ export type VenueInfo = {
 // bound to activity IDs may produce handoffs. Unknown activities fail closed.
 const DEMO_AREA = { lat: 37.8715, lon: -122.273, radiusM: 20_000 };
 
-async function lookupVenue(activityId: string): Promise<VenueInfo | null> {
+async function lookupVenue(activityId: string, signal?: AbortSignal): Promise<VenueInfo | null> {
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) return null;
   try {
@@ -33,7 +33,7 @@ async function lookupVenue(activityId: string): Promise<VenueInfo | null> {
         "X-Goog-FieldMask": "id,displayName,formattedAddress,accessibilityOptions,location",
       },
       cache: "no-store",
-      signal: AbortSignal.timeout(4_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(4_000)]) : AbortSignal.timeout(4_000),
     });
     if (!res.ok) return null;
     const place = await res.json();
@@ -71,11 +71,11 @@ export type WeatherNote = { summary: string; outdoorConcern: boolean } | null;
 // Match the scheduled occurrence against the provider's explicit forecast dates.
 const OUTDOOR_KEYWORDS = /\b(garden|walk|walkers|walking)\b/i;
 
-async function lookupWeather(items: PlanItem[]): Promise<WeatherNote> {
+async function lookupWeather(items: PlanItem[], signal?: AbortSignal): Promise<WeatherNote> {
   try {
     const res = await fetch(
       "https://api.open-meteo.com/v1/forecast?latitude=37.8715&longitude=-122.273&daily=weathercode&timezone=America/Los_Angeles&forecast_days=7",
-      { signal: AbortSignal.timeout(4_000) },
+      { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(4_000)]) : AbortSignal.timeout(4_000) },
     );
     if (!res.ok) throw new Error(`Weather returned ${res.status}`);
     const data = await res.json();
@@ -106,14 +106,16 @@ export async function enrichResult(result: {
   plan: PlanItem[];
   blocked: { name: string }[];
   evidence: { claim: string; source: string; verified: boolean }[];
-}) {
+}, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const [venues, weather] = await Promise.all([
-    Promise.all(result.plan.map((i) => lookupVenue(i.activityId))),
-    lookupWeather(result.plan),
+    Promise.all(result.plan.map((i) => lookupVenue(i.activityId, signal))),
+    lookupWeather(result.plan, signal),
   ]);
+  signal?.throwIfAborted();
   const venueByItem = new Map<string, VenueInfo | null>();
   result.plan.forEach((i, idx) => venueByItem.set(i.activityId, venues[idx] ?? null));
-  // Estimates run in parallel — sequential awaits would cost up to 4 s per item against the 2.5 s budget.
+  // Estimates run in parallel — sequential awaits would cost up to 4 s per item against the shared request budget.
   const rideshareByItem: Record<string, Awaited<ReturnType<typeof rideshareFor>>> = {};
   const rides = await Promise.all(
     result.plan.map((item, idx) => {
@@ -122,6 +124,7 @@ export async function enrichResult(result: {
         item,
         venue?.lat != null && venue?.lon != null ? { lat: venue.lat, lon: venue.lon } : null,
         venue?.name ?? item.name,
+        signal,
       );
     }),
   );

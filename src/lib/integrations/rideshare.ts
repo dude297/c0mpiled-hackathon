@@ -47,7 +47,7 @@ type VenueCoords = { lat: number; lon: number } | null;
 // the "price_estimates" scope. Kept fail-soft: rideshare links must always work.
 type FareEstimate = NonNullable<RideshareInfo>["estimate"];
 
-async function uberEstimate(lat: number, lon: number): Promise<FareEstimate> {
+async function uberEstimate(lat: number, lon: number, signal?: AbortSignal): Promise<FareEstimate> {
   const token = process.env.UBER_API_TOKEN;
   if (!token) return null;
   try {
@@ -61,7 +61,7 @@ async function uberEstimate(lat: number, lon: number): Promise<FareEstimate> {
       headers: {
         Authorization: `Bearer ${token}`,
       },
-      signal: AbortSignal.timeout(4_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(4_000)]) : AbortSignal.timeout(4_000),
     });
     if (!res.ok) throw new Error(`Uber estimates returned ${res.status}`);
     const data = await res.json();
@@ -91,12 +91,13 @@ async function uberEstimate(lat: number, lon: number): Promise<FareEstimate> {
 
 // Builds rideshare info for one plan item. Without validated venue coordinates we skip
 // the links entirely rather than aiming a real venue name at a made-up location.
-export async function rideshareFor(item: PlanItem, coords: VenueCoords, venueName: string): Promise<RideshareInfo> {
+export async function rideshareFor(item: PlanItem, coords: VenueCoords, venueName: string, signal?: AbortSignal): Promise<RideshareInfo> {
+  if (signal?.aborted) return null;
   if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lon) ||
       Math.abs(coords.lat) > 90 || Math.abs(coords.lon) > 180) return null;
   const { lat, lon } = coords;
   const label = venueName || item.name;
-  const estimate = await uberEstimate(lat, lon);
+  const estimate = await uberEstimate(lat, lon, signal);
   return {
     uberLink: uberDeepLink(label, lat, lon),
     lyftLink: lyftDeepLink(label, lat, lon),

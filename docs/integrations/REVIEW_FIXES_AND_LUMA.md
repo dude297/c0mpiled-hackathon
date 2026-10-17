@@ -39,3 +39,9 @@ The public subscription URL was verified in Luma's UI. The live feed download wa
 ## Luma hardening follow-up
 
 Complete, balanced iCal components are required before a feed is labeled live. Repeated optional properties are accepted; duplicate required fields remain rejected. Nested alarm properties cannot overwrite event details. Downloads are counted by bytes during streaming and cancelled above 2 MB, including without content-length. UTF-8 decoding preserves characters across chunks and rejects invalid encoding. Fetch explicitly omits credentials and referrers. All follow-up verification used synthetic streams; no live requests were made. Local/floating/all-day timestamps remain explicitly unsupported and are skipped rather than assigned an invented time.
+
+## One-second analyze enrichment deadline
+
+At the user's request, optional `/api/analyze` enrichment now has a **1,000 ms total deadline**. The original 2.5-second value came from `docs/daybridge/DECISIONS.md` as a latency cap, not an external API requirement. Fast responses return immediately; timed-out enrichment returns the basic plan. A shared AbortController cancels Places, weather and fare fetches, and the pipeline checks cancellation before starting fare lookups. The latency race still returns even if an adapter ignores cancellation. The public-events and Luma endpoints retain their separate timeouts.
+
+Verification: `npm run check` passes typecheck, lint and **211 tests**, including five new deadline/cancellation regressions. The existing environment build restriction is unchanged. This fix touches the approved analyze integration exception and integration modules only; no UI, coordination, shared schema or engine changes.
