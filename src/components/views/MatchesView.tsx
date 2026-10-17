@@ -28,6 +28,7 @@ function Matches() {
   const { result, week, toggleWeek, profile } = store;
   const person = personName(store);
   const ps = usePlanStatus();
+  const [announcement, setAnnouncement] = useState("");
   // Order is fixed per result so a card doesn't jump away when it's added.
   const [order, setOrder] = useState<{ result: AnalysisResult | null; ids: string[] }>({ result: null, ids: [] });
   if (result && order.result !== result) setOrder({ result, ids: sortMatches(result.plan, week).map((i) => i.activityId) });
@@ -39,6 +40,7 @@ function Matches() {
 
   return (
     <div className="space-y-8">
+      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</p>
       <div className="space-y-2">
         <SampleNote />
         <AnalyzeLine />
@@ -61,7 +63,10 @@ function Matches() {
                 key={item.activityId}
                 item={item}
                 added={week.includes(item.activityId)}
-                onToggle={() => toggleWeek(item.activityId)}
+                onToggle={() => {
+                  toggleWeek(item.activityId);
+                  setAnnouncement(`${week.includes(item.activityId) ? "Removed" : "Added"} ${item.name} ${week.includes(item.activityId) ? "from" : "to"} your week.`);
+                }}
                 action={action}
                 actionHref={coordinateHref(item.activityId, planId)}
                 onGo={() => writeProfileHandoff(profile)}
@@ -112,7 +117,7 @@ function MatchCard({ item, added, onToggle, action, actionHref, onGo }: {
   return (
     <li className="flex flex-col gap-3 rounded-2xl border p-5">
       <h2 className="text-[1.375rem] font-semibold leading-snug">
-        <Link href={`/activity/${encodeURIComponent(item.activityId)}?from=matches`} className={`rounded hover:underline ${FOCUS}`}>
+        <Link href={`/activity/${encodeURIComponent(item.activityId)}?from=matches`} className={`inline-flex min-h-11 items-center rounded hover:underline ${FOCUS}`}>
           {item.name}
         </Link>
       </h2>

@@ -3,6 +3,7 @@
 // U5 Activity detail (docs/product/SCREENS.md "U5"). Data: the stored result's PlanItem + ACTIVITIES (read-only) + plan status.
 // Must render inside <Suspense>: it reads the URL (useParams / useSearchParams) and cacheComponents is on.
 import Link from "next/link";
+import { useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { Check } from "lucide-react";
 import { PlanStatusLabel } from "@/components/shell/PlanStatusLabel";
@@ -37,6 +38,7 @@ export function ActivityDetail() {
 function Detail({ id, from }: { id: string; from: string | null }) {
   const s = useDeviceStore();
   const ps = usePlanStatus();
+  const [announcement, setAnnouncement] = useState("");
   const back = backLink(from, s.mode);
   const activity = ACTIVITIES.find((a) => a.id === id);
 
@@ -69,6 +71,7 @@ function Detail({ id, from }: { id: string; from: string | null }) {
 
   return (
     <div className="space-y-8">
+      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</p>
       <Link href={back.href} className={`${QUIET_LINK} print:hidden`}>
         <span aria-hidden="true">←&nbsp;</span>
         {back.label}
@@ -140,7 +143,10 @@ function Detail({ id, from }: { id: string; from: string | null }) {
           )}
           {item && ps.unavailable && <p className="text-lg">Get me there isn&apos;t available on this server.</p>}
           {showToggle && (
-            <button type="button" aria-pressed={inWeek} onClick={() => s.toggleWeek(id)} className={`${SECONDARY} min-h-14 w-full sm:w-auto`}>
+            <button type="button" aria-pressed={inWeek} onClick={() => {
+              s.toggleWeek(id);
+              setAnnouncement(`${inWeek ? "Removed" : "Added"} ${activity.name} ${inWeek ? "from" : "to"} your week.`);
+            }} className={`${SECONDARY} min-h-14 w-full sm:w-auto`}>
               {inWeek && <Check className="size-5 shrink-0 text-green-700 dark:text-green-400" aria-hidden="true" />}
               {inWeek ? "In my week" : "Add to my week"}
             </button>
