@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { CheckIn, Grant, Person } from "@/domain/caregiver/contract";
+import type { CheckIn, Grant, Person, ProfileProposal } from "@/domain/caregiver/contract";
 import { MAYA_PROFILE } from "@/domain/caregiver/fixtures";
 import { adminClient } from "./server";
 import { createSupabaseCaregiverStore } from "./caregiver-store";
@@ -164,7 +164,7 @@ describe.skipIf(!live)("caregiver persistence (real local DB)", () => {
     vi.resetModules();
     const fresh = (await import("./caregiver-store")).createSupabaseCaregiverStore();
     expect(fresh.kind).toBe("durable");
-    expect(await fresh.getPerson(p.personId)).toEqual(p);
+    expect(await fresh.getPerson(p.personId)).toEqual({ ...p, profileVersion: 1 });
     expect(await fresh.listGrantsForUser(u.id)).toEqual([expect.objectContaining({ personId: p.personId, scopes: ALL })]);
     expect(await fresh.listCheckins(p.personId)).toHaveLength(1);
     expect(await fresh.listAckedItemIds(p.personId, u.id)).toEqual(["i"]);
@@ -178,5 +178,82 @@ describe.skipIf(!live)("caregiver persistence (real local DB)", () => {
     expect(await store.getPerson("not-a-uuid")).toBeNull();
     expect(await store.getGrant(randomUUID(), "cg-dana")).toBeNull();
     await expect(store.upsertGrant(grant(randomUUID(), "cg-dana", ["view"], "cg-dana"))).rejects.toMatchObject({ status: 400 });
+  });
+
+  describe("person profiles", () => {
+    const proposal = (personId: string, by: string, baseVersion: number, changes: ProfileProposal["changes"]): ProfileProposal => ({
+      proposalId: randomUUID(), personId, baseVersion, changes, evidence: "said so", source: "caregiver", proposedBy: by, status: "proposed", createdAt: now(),
+    });
+
+    it("createPerson records v1; concurrent confirms + append on the same base → exactly one wins, the rest stale", async () => {
+      const u = await newUser();
+      const p = await newPerson(u.id);
+      expect(await store.listVersions(p.personId)).toEqual([expect.objectContaining({ version: 1, source: "create", profile: MAYA_PROFILE })]);
+      const props = [3, 4, 5].map((n) => proposal(p.personId, u.id, 1, { budgetPerWeek: n }));
+      for (const pr of props) expect(await store.createProposal(pr)).toMatchObject({ proposalId: pr.proposalId });
+      const res = await Promise.all([
+        ...props.map((pr) => store.decideProposal({ personId: p.personId, proposalId: pr.proposalId, decision: "confirmed", expectedVersion: 1, decidedBy: u.id, at: now() })),
+        store.appendVersion({ personId: p.personId, expectedVersion: 1, profile: { ...MAYA_PROFILE, budgetPerWeek: 99 }, source: "revert", createdBy: u.id, at: now() }),
+      ]);
+      expect(res.filter((r) => typeof r === "object")).toHaveLength(1);
+      expect(res.filter((r) => r === "stale")).toHaveLength(3);
+      const versions = await store.listVersions(p.personId);
+      expect(versions.map((v) => v.version)).toEqual([1, 2]);
+      const person = await store.getPerson(p.personId);
+      expect(person).toMatchObject({ profileVersion: 2, profile: versions[1].profile });
+      const statuses = (await store.listProposals(p.personId)).map((x) => x.status).sort();
+      expect(statuses.filter((s) => s === "proposed")).toEqual([]);
+      expect(statuses.filter((s) => s === "confirmed").length).toBeLessThanOrEqual(1);
+      expect(await store.createProposal(proposal(p.personId, u.id, 1, { budgetPerWeek: 1 }))).toBe("stale");
+    });
+
+    it("version_conflict keeps the proposal open; reject; not_pending; unique(person_id, version)", async () => {
+      const u = await newUser();
+      const p = await newPerson(u.id);
+      const pr = proposal(p.personId, u.id, 1, { maxTravelMin: 45 });
+      await store.createProposal(pr);
+      expect(await store.decideProposal({ personId: p.personId, proposalId: pr.proposalId, decision: "confirmed", expectedVersion: 7, decidedBy: u.id, at: now() })).toBe("version_conflict");
+      expect(await store.getProposal(pr.proposalId)).toMatchObject({ status: "proposed" });
+      const ok = await store.decideProposal({ personId: p.personId, proposalId: pr.proposalId, decision: "confirmed", expectedVersion: 1, decidedBy: u.id, at: now() });
+      expect(ok).toMatchObject({ proposal: { status: "confirmed", decidedBy: u.id }, version: { version: 2, proposalId: pr.proposalId, profile: { ...MAYA_PROFILE, maxTravelMin: 45 } } });
+      expect(await store.decideProposal({ personId: p.personId, proposalId: pr.proposalId, decision: "rejected", decidedBy: u.id, at: now() })).toBe("not_pending");
+      const pr2 = proposal(p.personId, u.id, 2, { noisy: true } as never);
+      await expect(store.createProposal(pr2)).rejects.toThrow(); // unknown field rejected by the contract schema
+      const pr3 = proposal(p.personId, u.id, 2, { hearingImpaired: true });
+      await store.createProposal(pr3);
+      expect(await store.decideProposal({ personId: p.personId, proposalId: pr3.proposalId, decision: "rejected", decidedBy: u.id, at: now() })).toMatchObject({ proposal: { status: "rejected" } });
+      expect(await store.decideProposal({ personId: randomUUID(), proposalId: pr3.proposalId, decision: "rejected", decidedBy: u.id, at: now() })).toBe("not_found");
+      const dup = await adminClient().from("person_profile_versions").insert({ person_id: p.personId, version: 2, profile: MAYA_PROFILE, source: "revert", created_by: u.id });
+      expect(dup.error?.code).toBe("23505");
+    });
+
+    it("RLS: self and grantee read versions/proposals; stranger and revoked read nothing; no client writes or RPCs", async () => {
+      const [mgr, viewer, self, stranger] = await Promise.all([newUser(), newUser(), newUser(), newUser()]);
+      const p = await newPerson(mgr.id, { selfUserId: self.id });
+      await store.upsertGrant(grant(p.personId, viewer.id, ["view"], mgr.id));
+      await store.createProposal(proposal(p.personId, mgr.id, 1, { budgetPerWeek: 12 }));
+      const read = async (c: SupabaseClient) => {
+        const [v, pr] = await Promise.all([
+          c.from("person_profile_versions").select("version").eq("person_id", p.personId),
+          c.from("profile_proposals").select("proposal_id").eq("person_id", p.personId),
+        ]);
+        return [v.data?.length ?? 0, pr.data?.length ?? 0];
+      };
+      expect(await read(await signedIn(self))).toEqual([1, 1]);
+      expect(await read(await signedIn(viewer))).toEqual([1, 1]);
+      expect(await read(await signedIn(stranger))).toEqual([0, 0]);
+      await store.revokeGrant(p.personId, viewer.id, now());
+      expect(await read(await signedIn(viewer))).toEqual([0, 0]);
+      const c = await signedIn(mgr);
+      expect((await c.from("profile_proposals").update({ status: "confirmed" }).eq("person_id", p.personId).select()).data ?? []).toEqual([]);
+      expect((await c.from("person_profile_versions").insert({ person_id: p.personId, version: 9, profile: {}, source: "revert", created_by: mgr.id })).error).not.toBeNull();
+      for (const [fn, args] of [
+        ["caregiver_append_version", { p_person: p.personId, p_expected: 1, p_profile: {}, p_source: "revert", p_by: mgr.id, p_at: now(), p_proposal: null }],
+        ["caregiver_create_proposal", { p: proposal(p.personId, mgr.id, 1, { budgetPerWeek: 1 }) }],
+        ["caregiver_decide_proposal", { p_person: p.personId, p_proposal: randomUUID(), p_decision: "rejected", p_expected: 1, p_by: mgr.id, p_at: now() }],
+        ["caregiver_append_profile", { p_person: p.personId, p_profile: {}, p_source: "revert", p_by: mgr.id, p_at: now(), p_proposal: null }],
+      ] as const) expect((await c.rpc(fn, args)).error, fn).not.toBeNull();
+      expect((await store.listVersions(p.personId)).map((v) => v.version)).toEqual([1]);
+    });
   });
 });
