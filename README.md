@@ -45,6 +45,14 @@ npm run build -- --webpack
 npm run demo:check
 ```
 
+### Live demo checklist
+
+- Start the production server with demo events on: `DAYBRIDGE_DEMO_EVENTS=1 npx next start -p 3000` (PowerShell: `$env:DAYBRIDGE_DEMO_EVENTS='1'; npx next start -p 3000`). Without the flag `/events` returns 403 in production.
+- Run `npm run demo:check` against it once before presenting.
+- **Uber/Lyft buttons: tap them on a phone with the app installed.** They open the app with the destination filled in and the pickup set to the phone's location. On desktop, Uber redirects to a generic web page and drops the destination; say "opens the Uber app" rather than expecting a prefilled page. Nothing is booked either way.
+- Sign the demo browser into Google so calendar links skip the sign-in screen.
+- **Analyze** calls live providers when keys are set (about 2 s); on unreliable venue Wi-Fi, use the demo profiles.
+
 The demo smoke check expects the application to be running; see `scripts/demo-smoke.mjs` for its behavior. The Webpack build option can be useful when local Turbopack worker permissions interfere with builds.
 
 ## How it works

@@ -96,6 +96,8 @@ Only for the features you want. None are needed for the mock demo.
 4. **Supabase project URL, secret key, publishable key** → `SUPABASE_*` /
    `NEXT_PUBLIC_SUPABASE_*` (experimental, PR #23).
 
+**`supabase db push` hangs or can't connect:** the direct host `db.<ref>.supabase.co` is IPv6-only, so IPv4-only networks can't reach it, and Supabase CLI v2.98 guesses the pooler host `aws-0-<region>`, while newer projects live on `aws-1-<region>`. Fix: after `npx supabase link --project-ref <ref>`, edit the gitignored `supabase/.temp/pooler-url` to `aws-1-us-east-1.pooler.supabase.com`, or pass the **Session pooler** string from Dashboard → Connect with `npx supabase db push --db-url "<string>"`. In Git Bash use forward-slash paths (`cd /c/Users/...`); backslashes are stripped.
+
 ## Dev tooling (not app config)
 
 `scripts/demo-smoke.mjs` reads `BASE_URL` (default `http://localhost:3000`) and
