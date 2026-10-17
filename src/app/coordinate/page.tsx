@@ -1,7 +1,8 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertTriangle, ArrowRight, Ban, Calendar, Check, CircleX, Clock, Hand, LoaderCircle, MessageCircle, RotateCcw, Send, Sparkles, ThumbsUp, Users,
 } from "lucide-react";
@@ -45,7 +46,8 @@ const DEP_MARK: Record<Dependency["status"], { mark: string; cls: string; word: 
 
 function contactName(plan: CoordinationPlan, id: string): string {
   if (id === "paratransit") return "Paratransit service";
-  return plan.contacts.find((c) => c.id === id)?.name ?? id;
+  const contact = plan.contacts.find((c) => c.id === id);
+  return contact ? `Sample contact (${contact.name})` : "Sample contact";
 }
 
 function statusWord(a: ActionRequest): string {
@@ -104,7 +106,7 @@ const ACTOR_WORD: Record<CoordinationEvent["actor"], string> = {
   demo: "Demo reply (simulated)",
 };
 
-// Plain-language line for one timeline event. Unknown types fall back to a readable version of the type.
+// Plain-language timeline text; never expose unknown event codes.
 function eventText(plan: CoordinationPlan, e: CoordinationEvent): string {
   const a = eventAction(plan, e);
   const who = a ? contactName(plan, a.scope.recipientId) : "Someone";
@@ -136,10 +138,7 @@ function eventText(plan: CoordinationPlan, e: CoordinationEvent): string {
     case "feedback.preference_proposed": return "DayBridge suggested a preference change";
     case "preference.updated": return "You confirmed a preference change";
     case "preference.rejected": return "You turned down a preference change";
-    default: {
-      const t = e.type.replace(/^command\./, "").replace(/[._]/g, " ");
-      return t.charAt(0).toUpperCase() + t.slice(1);
-    }
+    default: return "Plan updated";
   }
 }
 
@@ -246,10 +245,32 @@ function storedProfile(): unknown {
   }
 }
 
+function BackToMatches() {
+  const router = useRouter();
+  return (
+    <Link href="/" className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 font-medium text-primary underline underline-offset-4"
+      onNavigate={(event) => {
+        if (window.history.length > 1) {
+          event.preventDefault();
+          router.back();
+        }
+      }}>
+      ← Back to my matches
+    </Link>
+  );
+}
+
+// Contacts supplied by this demo are fixtures, not people entered by the user.
+function sampleContactText(plan: CoordinationPlan, text: string): string {
+  return plan.contacts.reduce((copy, contact) =>
+    copy.replaceAll(contact.name, `Sample contact (${contact.name})`), text);
+}
+
 export default function CoordinatePage() {
   return (
     <Suspense fallback={
       <main className="mx-auto w-full max-w-3xl p-6 text-base md:text-lg">
+        <BackToMatches />
         <div className="flex items-center gap-3 py-16 text-muted-foreground" role="status">
           <LoaderCircle className="size-6 animate-spin" aria-hidden="true" />
           Loading…
@@ -382,9 +403,10 @@ function CoordinateInner() {
   if (!plan) {
     return (
       <main className="mx-auto w-full max-w-3xl p-6 text-base md:text-lg">
+        <BackToMatches />
         <div className="flex items-center gap-3 py-16 text-muted-foreground" role="status">
           <LoaderCircle className="size-6 animate-spin" aria-hidden="true" />
-          {error ?? "Setting up the coordination demo…"}
+          {error ? "That didn’t go through — try again or go back to your matches." : "Setting up the coordination demo…"}
         </div>
         <Button size="lg" onClick={loadDemo} disabled={busy}>Try again</Button>
       </main>
@@ -420,7 +442,8 @@ function CoordinateInner() {
   })();
 
   return (
-    <main className="mx-auto w-full max-w-3xl space-y-4 p-4 text-base md:p-6 md:text-lg">
+    <main className="mx-auto w-full min-w-0 max-w-3xl space-y-4 break-words p-4 text-base md:p-6 md:text-lg">
+      <BackToMatches />
       <header className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="flex items-center gap-2 text-2xl font-semibold">
           <Hand className="size-6 text-primary" aria-hidden="true" />
@@ -434,7 +457,7 @@ function CoordinateInner() {
             </span>
           )}
           <Badge variant="secondary" className="h-auto min-h-6 whitespace-normal px-3 py-1 text-sm">
-            Simulated providers: no real messages or bookings are sent
+            Demo: nothing is really sent
           </Badge>
         </div>
       </header>
@@ -450,7 +473,7 @@ function CoordinateInner() {
             </div>
           </div>
           {plan.version > 1 && (
-            <Badge key={plan.version} variant="outline" className="db-pop h-7 px-3 text-sm">Plan update {plan.version}</Badge>
+            <Badge key={plan.version} variant="outline" className="db-pop h-7 px-3 text-sm">Updated plan</Badge>
           )}
         </div>
         <StepTracker state={plan.state} />
@@ -460,13 +483,13 @@ function CoordinateInner() {
         {narrative.nextStep && (
           <p key={narrative.nextStep} className="db-fade-up flex items-start gap-2 rounded-lg bg-background/70 p-3 text-sm font-medium text-foreground ring-1 ring-border md:text-base">
             <ArrowRight className="mt-0.5 size-4 shrink-0 text-primary md:mt-1" aria-hidden="true" />
-            <span><span className="sr-only">Next step: </span>{narrative.nextStep}</span>
+            <span><span className="sr-only">Next step: </span>{sampleContactText(plan, narrative.nextStep)}</span>
           </p>
         )}
       </section>
 
-      {notice && <p className="rounded-md bg-muted p-2 text-sm md:text-base">{notice}</p>}
-      {error && <p role="alert" className="rounded-md bg-destructive/10 p-2 text-sm text-destructive md:text-base">{error}</p>}
+      {notice && <p className="rounded-md bg-muted p-2 text-sm md:text-base">That didn’t go through — try the other option.</p>}
+      {error && <p role="alert" className="rounded-md bg-destructive/10 p-2 text-sm text-destructive md:text-base">That didn’t go through — try the other option.</p>}
 
       {plan.state === "NEEDS_REPLAN" && failureHeadline && (
         <section
@@ -500,7 +523,7 @@ function CoordinateInner() {
                 <p className="mb-2 font-medium">Try instead:</p>
                 <div className="flex flex-wrap gap-2">
                   {plan.alternatives.map((alt) => (
-                    <Button key={alt.activityId} variant="outline" size="lg" disabled={busy}
+                    <Button key={alt.activityId} variant="outline" size="lg" className="h-auto min-h-11 max-w-full whitespace-normal" disabled={busy}
                       onClick={() => command({ type: "choose_alternative", activityId: alt.activityId })}>
                       {alt.name} ({alt.when})
                     </Button>
@@ -519,7 +542,7 @@ function CoordinateInner() {
             <CardDescription className="text-sm md:text-base">
               {plan.interventions.length > 0
                 ? "Nothing is sent to anyone until you approve it below."
-                : "This one already fits — no rides or invites needed. Accept to lock it in."}
+                : "You can go on your own — no rides or invites needed. Confirm your plan below."}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -529,12 +552,12 @@ function CoordinateInner() {
                   {i.kind === "ride" && <Calendar className="mt-1 size-4 shrink-0 text-primary" aria-hidden="true" />}
                   {i.kind === "invite" && <Users className="mt-1 size-4 shrink-0 text-primary" aria-hidden="true" />}
                   {i.kind === "user_step" && <Check className="mt-1 size-4 shrink-0 text-primary" aria-hidden="true" />}
-                  {i.description}
+                  {sampleContactText(plan, i.description)}
                 </p>
               ))}
             </div>
-            <Button size="lg" className="mt-2" disabled={busy} onClick={() => command({ type: "accept_proposal" })}>
-              Accept plan
+            <Button size="lg" className="mt-2 min-h-11 w-full sm:w-auto" disabled={busy} onClick={() => command({ type: "accept_proposal" })}>
+              {plan.interventions.length === 0 ? "Confirm my plan" : "Accept plan"}
             </Button>
           </CardContent>
         </Card>
@@ -554,7 +577,7 @@ function CoordinateInner() {
               >
                 <p className="flex items-center gap-2 font-semibold">
                   <Sparkles className="size-5 shrink-0" aria-hidden="true" />
-                  New plan: {a.description}
+                  New plan: {sampleContactText(plan, a.description)}
                 </p>
                 <p className="mt-0.5 text-sm md:text-base">Replaces what fell through · needs your OK before anyone is contacted</p>
               </div>
@@ -562,7 +585,7 @@ function CoordinateInner() {
             <div className="db-stagger space-y-3">
               {plan.interventions.filter((i) => !newOptions.some((a) => a.id === i.actionId)).map((i) => (
                 <p key={i.id} className="flex items-start gap-2">
-                  <Check className="mt-1 size-4 shrink-0 text-primary" aria-hidden="true" />{i.description}
+                  <Check className="mt-1 size-4 shrink-0 text-primary" aria-hidden="true" />{sampleContactText(plan, i.description)}
                 </p>
               ))}
             </div>
@@ -571,7 +594,7 @@ function CoordinateInner() {
                 <p className="mb-2 font-medium">Or try instead:</p>
                 <div className="flex flex-wrap gap-2">
                   {plan.alternatives.map((alt) => (
-                    <Button key={alt.activityId} variant="outline" size="lg" disabled={busy}
+                    <Button key={alt.activityId} variant="outline" size="lg" className="h-auto min-h-11 max-w-full whitespace-normal" disabled={busy}
                       onClick={() => command({ type: "choose_alternative", activityId: alt.activityId })}>
                       {alt.name} ({alt.when})
                     </Button>
@@ -602,7 +625,7 @@ function CoordinateInner() {
                   className={`rounded-xl border p-3 ${approved ? "db-flash-ok border-green-400 bg-green-50 dark:border-green-800 dark:bg-green-950/30" : ""}`}
                 >
                   <p className="font-semibold">{contactName(plan, a.scope.recipientId)} — {a.scope.kind === "ride" ? "ask for a ride" : "invite"}</p>
-                  <p className="mt-0.5 text-sm text-muted-foreground md:text-base">{a.description}</p>
+                  <p className="mt-0.5 text-sm text-muted-foreground md:text-base">{sampleContactText(plan, a.description)}</p>
                   <p className="mt-1 text-sm md:text-base">When: {a.scope.when}</p>
                   <p className="mt-1 text-sm md:text-base">
                     Shares: {a.scope.sharedFields.map((f) => FIELD_LABELS[f] ?? f).join(", ")}
@@ -663,7 +686,7 @@ function CoordinateInner() {
                       ? <span className="flex w-5 justify-center"><PulseDot /></span>
                       : <span className={`w-5 text-center ${mark.cls}`} aria-hidden="true">{mark.mark}</span>}
                     <span className="min-w-0 flex-1">
-                      <span className={old ? "line-through" : ""}>{d.label}</span>
+                      <span className={old ? "line-through" : ""}>{sampleContactText(plan, d.label)}</span>
                       {d.status === "requested" && who && (
                         <span className="block text-sm text-amber-800 dark:text-amber-200">Waiting for {who}…</span>
                       )}
@@ -735,7 +758,7 @@ function CoordinateInner() {
         </Card>
       )}
 
-      {current.some((a) => a.providerRequestId) && (
+      {plan.state !== "CANCELLED" && plan.state !== "COMPLETED" && current.some((a) => a.providerRequestId) && (
         <Card className="db-fade-up border-dashed">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-xl"><Sparkles className="size-5 text-primary" aria-hidden="true" />Demo: simulate replies</CardTitle>
@@ -748,12 +771,14 @@ function CoordinateInner() {
               const inviteName = invite ? contactName(plan, invite.scope.recipientId) : "";
               return (
                 <>
-                  <Button variant="outline" size="lg" disabled={busy || !invite} onClick={() => simulate("invite.accepted", invite!.providerRequestId!)}>
-                    {inviteName} accepts (simulated)
-                  </Button>
-                  <Button variant="outline" size="lg" disabled={busy || !invite} onClick={() => simulate("invite.declined", invite!.providerRequestId!)}>
-                    {inviteName} declines (simulated)
-                  </Button>
+                  {invite && <>
+                    <Button variant="outline" size="lg" className="h-auto min-h-11 max-w-full whitespace-normal" disabled={busy || !invite} onClick={() => simulate("invite.accepted", invite!.providerRequestId!)}>
+                      {inviteName} accepts (simulated)
+                    </Button>
+                    <Button variant="outline" size="lg" className="h-auto min-h-11 max-w-full whitespace-normal" disabled={busy || !invite} onClick={() => simulate("invite.declined", invite!.providerRequestId!)}>
+                      {inviteName} declines (simulated)
+                    </Button>
+                  </>}
                   <Button variant="outline" size="lg" disabled={busy || !ride} onClick={() => simulate("ride.confirmed", ride!.providerRequestId!)}>
                     Ride confirmed (simulated)
                   </Button>
@@ -794,7 +819,7 @@ function CoordinateInner() {
                       <span className="block text-xs text-muted-foreground md:text-sm">
                         {formatTime(e.at)}{formatTime(e.at) ? " · " : ""}{ACTOR_WORD[e.actor]}
                         {outcome && ` · ${outcome}`}
-                        {e.reason && ` — ${e.reason}`}
+                        {(e.reason || e.outcome === "rejected") && " — That didn’t go through — try the other option."}
                       </span>
                     </span>
                   </li>
@@ -806,7 +831,9 @@ function CoordinateInner() {
       )}
 
       <footer className="flex flex-wrap gap-2 pb-6 print:hidden">
-        <Button variant="outline" size="lg" disabled={busy} onClick={() => command({ type: "cancel" })}>Cancel plan</Button>
+        {plan.state !== "CANCELLED" && plan.state !== "COMPLETED" && (
+          <Button variant="outline" size="lg" disabled={busy} onClick={() => command({ type: "cancel" })}>Cancel plan</Button>
+        )}
         <Button variant="ghost" size="lg" disabled={busy} onClick={loadDemo}>
           <RotateCcw className="size-4" aria-hidden="true" />Restart demo
         </Button>
