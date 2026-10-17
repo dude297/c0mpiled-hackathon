@@ -14,8 +14,10 @@ const clamp1 = (v: number) => Math.max(-1, Math.min(1, v));
  * MediaPipe names blendshapes from the person's own point of view (ARKit style): "Left" is the
  * person's left eye; "In" = toward the nose, "Out" = toward the ear. Someone facing the screen who
  * looks at the screen's right is looking to THEIR right: left eye moves in, right eye moves out.
- * That holds no matter how the preview is mirrored. `swap` flips the result if a device reports
- * the opposite convention (exposed in the UI as "Swap sides").
+ * That holds no matter how the preview is mirrored (detection runs on the raw, un-mirrored frame).
+ * Verified against @mediapipe/tasks-vision 0.10.14 on real photos: a person looking toward their
+ * own left gave eyeLookOutLeft 0.83 / eyeLookInRight 0.82, and the mirrored photo flipped them.
+ * `swap` flips the result as a manual escape hatch (exposed in the UI as "Swap sides").
  */
 export function gazeFromBlendshapes(shapes: readonly Blendshape[], swap = false): number {
   const s = (name: string) => shapes.find((b) => b.categoryName === name)?.score ?? 0;
@@ -64,3 +66,34 @@ export const MODE_CONFIG: Record<HandsFreeMode, { threshold: number; hysteresis:
 
 export const CALIBRATION_MS = 2000;
 export const REARM_MS = 400;
+
+export type Calibration = { faceMs: number; lastT: number | null; gaze: number[]; tilt: number[] };
+export type CalibrationStep = { calib: Calibration; secondsLeft: number; base: { gaze: number; tilt: number } | null };
+
+export const initialCalibration = (): Calibration => ({ faceMs: 0, lastT: null, gaze: [], tilt: [] });
+
+/**
+ * "Look at the middle" baseline. Only time with a face in view counts toward CALIBRATION_MS, so a
+ * face found late still gets a full 2 s of samples and the countdown never sits at 0 while waiting.
+ * A single gap between frames counts for at most 100 ms (a hidden tab or a stall can't skip ahead).
+ * Returns the median baseline once done, else null.
+ */
+export function stepCalibration(
+  c: Calibration,
+  t: number,
+  sample: { gaze: number; tilt: number } | null,
+): CalibrationStep {
+  const left = (ms: number) => Math.max(1, Math.ceil((CALIBRATION_MS - ms) / 1000));
+  if (!sample) {
+    const calib = { ...c, lastT: null };
+    return { calib, secondsLeft: left(c.faceMs), base: null };
+  }
+  const faceMs = c.faceMs + (c.lastT === null ? 0 : Math.min(100, Math.max(0, t - c.lastT)));
+  const calib = { faceMs, lastT: t, gaze: [...c.gaze, sample.gaze], tilt: [...c.tilt, sample.tilt] };
+  const done = faceMs >= CALIBRATION_MS && calib.gaze.length >= 10;
+  return {
+    calib,
+    secondsLeft: left(faceMs),
+    base: done ? { gaze: median(calib.gaze), tilt: median(calib.tilt) } : null,
+  };
+}

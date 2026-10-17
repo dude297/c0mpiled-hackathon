@@ -3,10 +3,12 @@ import { initialDwell, stepDwell, type DwellState } from "./dwell";
 import {
   classifyZone,
   gazeFromBlendshapes,
+  initialCalibration,
   median,
   MODE_CONFIG,
   REARM_MS,
   rollFromEyeCorners,
+  stepCalibration,
   type Zone,
 } from "./signals";
 
@@ -18,6 +20,14 @@ describe("gazeFromBlendshapes", () => {
   });
   it("looking at the screen's left is negative", () => {
     expect(gazeFromBlendshapes(shapes({ eyeLookOutLeft: 0.5, eyeLookInRight: 0.5 }))).toBeCloseTo(-0.5);
+  });
+  it("matches real MediaPipe 0.10.14 output (subject's point of view)", () => {
+    // Recorded from FaceLandmarker on real photos. Person looking toward THEIR right (irises toward
+    // the raw image's left) = the screen's right for someone facing the screen.
+    const theirRight = shapes({ eyeLookInLeft: 0.321, eyeLookOutLeft: 0.01, eyeLookInRight: 0.02, eyeLookOutRight: 0.322 });
+    const theirLeft = shapes({ eyeLookInLeft: 0.001, eyeLookOutLeft: 0.826, eyeLookInRight: 0.816, eyeLookOutRight: 0.003 });
+    expect(gazeFromBlendshapes(theirRight)).toBeGreaterThan(0.25);
+    expect(gazeFromBlendshapes(theirLeft)).toBeLessThan(-0.25);
   });
   it("straight ahead / missing shapes is 0, swap flips sign, result is clamped", () => {
     expect(gazeFromBlendshapes([])).toBe(0);
@@ -143,5 +153,50 @@ describe("stepDwell", () => {
     const r = run([...frames("center", 0, 400), ...frames("right", 500, 1800), [null, 1900], ...frames("right", 2000, 3000)]);
     expect(r.fired).toEqual([]);
     expect(r.last.progress).toBeCloseTo(1000 / 1500);
+  });
+});
+
+describe("stepCalibration", () => {
+  const feed = (samples: [number, { gaze: number; tilt: number } | null][]) => {
+    let c = initialCalibration();
+    let last = stepCalibration(c, 0, null);
+    for (const [t, s] of samples) {
+      last = stepCalibration(c, t, s);
+      c = last.calib;
+    }
+    return last;
+  };
+  const ticks = (from: number, to: number, s: { gaze: number; tilt: number } | null, every = 33) => {
+    const out: [number, { gaze: number; tilt: number } | null][] = [];
+    for (let t = from; t <= to; t += every) out.push([t, s]);
+    return out;
+  };
+
+  it("does not count time with no face, and never shows 0 while waiting", () => {
+    const r = feed(ticks(0, 5000, null));
+    expect(r.base).toBeNull();
+    expect(r.secondsLeft).toBe(2);
+  });
+  it("a face found late still gets a full 2 s of samples", () => {
+    const r1 = feed([...ticks(0, 1900, null), ...ticks(2000, 2300, { gaze: 0.1, tilt: 2 })]);
+    expect(r1.base).toBeNull();
+    expect(r1.secondsLeft).toBeGreaterThanOrEqual(1);
+    const r2 = feed([...ticks(0, 1900, null), ...ticks(2000, 4100, { gaze: 0.1, tilt: 2 })]);
+    expect(r2.base).toEqual({ gaze: 0.1, tilt: 2 });
+  });
+  it("a long stall counts for at most 100 ms", () => {
+    const r = feed([[0, { gaze: 0, tilt: 0 }], [5000, { gaze: 0, tilt: 0 }]]);
+    expect(r.calib.faceMs).toBe(100);
+    expect(r.base).toBeNull();
+  });
+});
+
+describe("dwell after a card changed some other way", () => {
+  it("a fresh unarmed state cannot fire until the person returns to center", () => {
+    // Half-held right dwell, then the card changes by tap: component swaps in initialDwell().
+    const half = run([...frames("center", 0, 400), ...frames("right", 500, 1500)]);
+    expect(half.fired).toEqual([]);
+    const after = run(frames("right", 1600, 4000), 1500, initialDwell());
+    expect(after.fired).toEqual([]);
   });
 });

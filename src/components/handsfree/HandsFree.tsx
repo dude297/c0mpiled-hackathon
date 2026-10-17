@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { initialDwell, stepDwell, type DwellState } from "@/lib/handsfree/dwell";
 import {
-  CALIBRATION_MS,
   classifyZone,
   gazeFromBlendshapes,
-  median,
+  initialCalibration,
   MODE_CONFIG,
   REARM_MS,
   rollFromEyeCorners,
+  stepCalibration,
   type Blendshape,
   type HandsFreeMode,
   type Point,
@@ -51,7 +51,8 @@ async function withInfoFilter<T>(fn: () => Promise<T>): Promise<T> {
 }
 
 function loadLandmarker(): Promise<Landmarker> {
-  landmarkerPromise ??= withInfoFilter(async () => {
+  if (landmarkerPromise) return landmarkerPromise;
+  const load: Promise<Landmarker> = withInfoFilter(async () => {
     const vision = (await import(/* webpackIgnore: true */ /* turbopackIgnore: true */ MP_MODULE_URL)) as VisionModule;
     const fileset = await vision.FilesetResolver.forVisionTasks(MP_WASM_URL);
     const create = (delegate: "GPU" | "CPU") =>
@@ -63,10 +64,17 @@ function loadLandmarker(): Promise<Landmarker> {
       });
     return create("GPU").catch(() => create("CPU"));
   }).catch((error) => {
-    landmarkerPromise = null; // allow a retry on the next Start
+    forgetLandmarker(load); // allow a retry on the next Start
     throw error;
   });
-  return landmarkerPromise;
+  landmarkerPromise = load;
+  return load;
+}
+
+// Drop a failed or hung load so "Try again" fetches fresh. Only clears it if it's still the current
+// one, so a late failure of an abandoned load can't wipe out a newer retry.
+function forgetLandmarker(load: Promise<Landmarker>) {
+  if (landmarkerPromise === load) landmarkerPromise = null;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -80,6 +88,34 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 const STILL_WORKS = "The Yes and No buttons still work.";
+
+// One screen-reader live region on <body>, outside this component, so an announcement survives
+// HandsFree unmounting (answering the last interest card moves the deck on in the same update).
+const ANNOUNCER_ID = "handsfree-announcer";
+let srTimer: ReturnType<typeof setTimeout> | undefined;
+
+function ensureAnnouncer(): HTMLElement {
+  let el = document.getElementById(ANNOUNCER_ID);
+  if (!el) {
+    el = document.createElement("div");
+    el.id = ANNOUNCER_ID;
+    el.setAttribute("aria-live", "assertive");
+    el.setAttribute("aria-atomic", "true");
+    el.className = "sr-only";
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function srAnnounce(text: string) {
+  if (typeof document === "undefined") return;
+  const el = ensureAnnouncer();
+  clearTimeout(srTimer); // the newest message replaces one that hasn't been spoken yet
+  el.textContent = "";
+  srTimer = setTimeout(() => (el.textContent = text), 50); // clear-then-set so repeats are re-read
+}
+
+const OFF_NOTICE = "Hands-free is off now. The next questions use tapping.";
 
 function cameraMessage(error: unknown): string {
   const name = error instanceof Error ? error.name : "";
@@ -135,6 +171,7 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
   const onAnswerRef = useRef(onAnswer);
   const labelRef = useRef(label);
   const announceTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const lastAnswer = useRef({ text: "", at: 0 });
 
   useEffect(() => {
     onAnswerRef.current = onAnswer;
@@ -160,11 +197,26 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
-  useEffect(() => stopCamera, [stopCamera]);
+  // On unmount (e.g. the deck moved past the interest cards): stop the camera and, if it was on,
+  // say so — together with the answer that just happened, so neither gets cut off.
+  const shutdown = useCallback(() => {
+    const wasOn = streamRef.current !== null;
+    stopCamera();
+    if (!wasOn) return;
+    const recent = performance.now() - lastAnswer.current.at < 1500 ? `${lastAnswer.current.text}. ` : "";
+    srAnnounce(recent + OFF_NOTICE);
+  }, [stopCamera]);
+
+  useEffect(() => {
+    ensureAnnouncer(); // must exist before its text changes, or screen readers may miss the first one
+    return shutdown;
+  }, [shutdown]);
   useEffect(() => () => clearTimeout(announceTimer.current), []);
 
   const answer = (liked: boolean) => {
     const text = `${liked ? "Liked" : "Skipped"} ${labelRef.current}`;
+    lastAnswer.current = { text, at: performance.now() };
+    srAnnounce(text);
     setAnnounce(text);
     clearTimeout(announceTimer.current);
     announceTimer.current = setTimeout(() => setAnnounce(""), 2500);
@@ -225,14 +277,16 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
       await video.play();
       landmarker = await withTimeout(modelLoad, LOAD_TIMEOUT_MS);
     } catch {
+      forgetLandmarker(modelLoad); // a hung load must not be reused by "Try again"
       if (run === runRef.current)
         fail(`Face tracking couldn't load. Check your internet connection and press Start again. ${STILL_WORKS}`);
       return;
     }
     if (run !== runRef.current) return;
 
-    const calib = { start: performance.now(), gaze: [] as number[], tilt: [] as number[] };
-    const base = { gaze: 0, tilt: 0 };
+    let calib = initialCalibration();
+    let base = { gaze: 0, tilt: 0 };
+    let dwellLabel = labelRef.current;
     let lastVideoTime = -1;
     let lastFace: boolean | null = null;
     let lastCalibLeft = -1;
@@ -266,24 +320,29 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
       const tilt = face ? rollFromEyeCorners(points![33], points![263], aspect) : 0;
 
       if (phaseRef.current === "calibrating") {
-        if (face) {
-          calib.gaze.push(gaze);
-          calib.tilt.push(tilt);
+        // Only face-in-view time counts, so the baseline is a full 2 s of real samples.
+        const c = stepCalibration(calib, now, face ? { gaze, tilt } : null);
+        calib = c.calib;
+        if (c.secondsLeft !== lastCalibLeft) {
+          lastCalibLeft = c.secondsLeft;
+          setCalibLeft(c.secondsLeft);
         }
-        const left = Math.max(0, Math.ceil((CALIBRATION_MS - (now - calib.start)) / 1000));
-        if (left !== lastCalibLeft) {
-          lastCalibLeft = left;
-          setCalibLeft(left);
-        }
-        // Wait for enough face samples so the baseline is real, not an empty-room guess.
-        if (now - calib.start >= CALIBRATION_MS && calib.gaze.length >= 10) {
-          base.gaze = median(calib.gaze);
-          base.tilt = median(calib.tilt);
+        if (c.base) {
+          base = c.base;
+          dwellLabel = labelRef.current;
           dwellRef.current = initialDwell();
           zoneRef.current = "center";
           goto("running");
         }
         return;
+      }
+
+      // The card changed some other way (Yes/No tap, swipe, arrow keys, Back): drop any half-held
+      // dwell and require a return to center, so it can't finish on the next card.
+      if (labelRef.current !== dwellLabel) {
+        dwellLabel = labelRef.current;
+        dwellRef.current = initialDwell();
+        zoneRef.current = "center";
       }
 
       const cfg = MODE_CONFIG[modeRef.current];
@@ -396,7 +455,7 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
           </div>
 
           <p className="text-base text-muted-foreground">Your camera stays on this device — nothing is recorded or sent.</p>
-          <p aria-live="assertive" className="min-h-7 text-lg font-semibold">{announce && `✓ ${announce}`}</p>
+          <p className="min-h-7 text-lg font-semibold">{announce && `✓ ${announce}`}</p>
 
           {phase === "running" && (
             <div className="flex justify-between gap-4 md:contents">
