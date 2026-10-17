@@ -261,9 +261,20 @@ function BackToMatches() {
 }
 
 // Contacts supplied by this demo are fixtures, not people entered by the user.
+// Whole words only: "Dan" must never rewrite "Line Dance".
 function sampleContactText(plan: CoordinationPlan, text: string): string {
-  return plan.contacts.reduce((copy, contact) =>
-    copy.replaceAll(contact.name, `Sample contact (${contact.name})`), text);
+  return plan.contacts.reduce((copy, contact) => {
+    const name = contact.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return copy.replace(new RegExp(`(?<![\\p{L}\\p{N}])${name}(?![\\p{L}\\p{N}])`, "gu"), () => `Sample contact (${contact.name})`);
+  }, text);
+}
+
+// Stable ref callback, so it runs once per mounted (failure-keyed) alert: the simulate buttons that caused the
+// failure sit far below it, and without this the viewport stays on the timeline while the recovery appears above.
+function revealOnMount(el: HTMLElement | null) {
+  if (!el) return;
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
 }
 
 export default function CoordinatePage() {
@@ -425,7 +436,8 @@ function CoordinateInner() {
 
   const banner = STATE_BANNER[plan.state];
   const current = plan.actions.filter((a) => a.status !== "superseded");
-  const awaiting = current.filter((a) => a.status === "proposed" || a.status === "approved");
+  // Withdrawn requests stay listed so they can be approved again (the coordinator and next-step text treat them as needing your OK).
+  const awaiting = current.filter((a) => a.status === "proposed" || a.status === "approved" || a.status === "revoked");
   const newestFirst = [...events].sort((x, y) => y.seq - x.seq);
   const canSimulate = (kind: "invite" | "ride") =>
     current.find((a) => a.scope.kind === kind && a.status === "dispatched" && a.providerRequestId);
@@ -498,12 +510,17 @@ function CoordinateInner() {
         )}
       </section>
 
-      {notice && <p className="rounded-md bg-muted p-2 text-sm md:text-base">That didn’t go through — try the other option.</p>}
-      {error && <p role="alert" className="rounded-md bg-destructive/10 p-2 text-sm text-destructive md:text-base">That didn’t go through — try the other option.</p>}
+      {notice && (
+        <p role="status" className="rounded-md bg-muted p-2 text-sm md:text-base">
+          {notice.startsWith("duplicate") ? "Already done — nothing changed." : "That didn’t go through — nothing was sent or changed."}
+        </p>
+      )}
+      {error && <p role="alert" className="rounded-md bg-destructive/10 p-2 text-sm text-destructive md:text-base">That didn’t go through — please try again.</p>}
 
       {plan.state === "NEEDS_REPLAN" && failureHeadline && (
         <section
           key={`fail-${lastFailure!.seq}`}
+          ref={revealOnMount}
           role="alert"
           className="db-flash-warn flex items-start gap-3 rounded-xl bg-destructive/10 p-4 text-destructive ring-2 ring-destructive/40"
         >
@@ -577,9 +594,18 @@ function CoordinateInner() {
         <Card className="db-fade-up ring-amber-300 dark:ring-amber-800">
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-xl"><RotateCcw className="size-5 text-amber-700 dark:text-amber-300" aria-hidden="true" />Recovery plan</CardTitle>
-            <CardDescription className="text-sm md:text-base">Confirmed steps that still hold are kept; everything else needs your approval again.</CardDescription>
+            <CardDescription className="text-sm md:text-base">
+              {plan.blockers.length > 0
+                ? "No way to get there anymore — pick another activity below, or cancel."
+                : "Confirmed steps that still hold are kept; everything else needs your approval again."}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {plan.blockers.map((b) => (
+              <p key={b.rule} className="flex items-start gap-2 font-medium text-destructive">
+                <CircleX className="mt-1 size-4 shrink-0" aria-hidden="true" />{b.detail}
+              </p>
+            ))}
             {newOptions.map((a) => (
               <div
                 key={`new-${a.id}`}
@@ -612,7 +638,10 @@ function CoordinateInner() {
                 </div>
               </div>
             )}
-            <Button size="lg" disabled={busy} onClick={() => command({ type: "accept_proposal" })}>Accept new plan</Button>
+            {/* The coordinator refuses to accept a replan that still has a hard blocker. */}
+            {plan.blockers.length === 0 && (
+              <Button size="lg" disabled={busy} onClick={() => command({ type: "accept_proposal" })}>Accept new plan</Button>
+            )}
           </CardContent>
         </Card>
       )}
@@ -661,9 +690,16 @@ function CoordinateInner() {
               );
             })}
             {plan.state === "AWAITING_APPROVAL" && current.some((a) => a.status === "approved") && (
-              <Button size="lg" className="w-full" disabled={busy} onClick={() => command({ type: "execute" })}>
-                <Send aria-hidden="true" />Send requests (simulated)
-              </Button>
+              <>
+                {/* Sending is all-or-nothing, so it waits until every request above is approved. */}
+                <Button size="lg" className="w-full" disabled={busy || approvedCount < awaiting.length} onClick={() => command({ type: "execute" })}
+                  aria-describedby={approvedCount < awaiting.length ? "send-hint" : undefined}>
+                  <Send aria-hidden="true" />Send requests (simulated)
+                </Button>
+                {approvedCount < awaiting.length && (
+                  <p id="send-hint" className="text-sm text-muted-foreground md:text-base">Approve every request above to send them — nothing goes out until all are approved.</p>
+                )}
+              </>
             )}
           </CardContent>
         </Card>
