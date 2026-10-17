@@ -1,0 +1,17 @@
+[
+  { "name": "pull_request_target", "payload": { "action": "opened", "pull_request": { "number": 3 } }, "targets": [3] },
+  { "name": "pull_request_target", "payload": { "action": "synchronize", "pull_request": { "number": 3 } }, "targets": [3] },
+  { "name": "pull_request_review", "payload": { "action": "submitted", "pull_request": { "number": 3 }, "review": { "state": "changes_requested" } }, "targets": [3] },
+  { "name": "pull_request_review_comment", "payload": { "action": "created", "pull_request": { "number": 3 } }, "targets": [3] },
+  { "name": "issue_comment", "payload": { "issue": { "number": 3, "pull_request": {} }, "comment": { "user": { "login": "reviewer" }, "body": "Please check scope." } }, "targets": [3] },
+  { "name": "issue_comment", "payload": { "issue": { "number": 3, "pull_request": {} }, "comment": { "user": { "login": "github-actions[bot]" }, "body": "status" } }, "targets": [] },
+  { "name": "issue_comment", "payload": { "issue": { "number": 3 }, "comment": { "user": { "login": "reviewer" } } }, "targets": [] },
+  { "name": "push", "payload": { "ref": "refs/heads/feat/coordination-engine", "repository": { "default_branch": "main", "full_name": "dude297/c0mpiled-hackathon" } }, "targets": [3] },
+  { "name": "push", "payload": { "ref": "refs/heads/main", "repository": { "default_branch": "main" } }, "targets": [3] },
+  { "name": "workflow_run", "payload": { "workflow_run": { "name": "DayBridge CI", "head_sha": "abc" } }, "targets": [3] },
+  { "name": "workflow_run", "payload": { "workflow_run": { "name": "DayBridge review signal", "id": 9, "head_sha": "merge-sha", "pull_requests": [{ "number": 3 }] } }, "targets": [3] },
+  { "name": "workflow_run", "payload": { "workflow_run": { "name": "DayBridge PR monitor", "head_sha": "abc" } }, "targets": [] },
+  { "name": "check_run", "payload": { "check_run": { "head_sha": "abc" } }, "targets": [3] },
+  { "name": "status", "payload": { "sha": "abc" }, "targets": [3] },
+  { "name": "schedule", "payload": {}, "targets": [3] }
+]
