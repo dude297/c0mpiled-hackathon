@@ -1,5 +1,5 @@
 // "Here's what we heard": every answer in plain words, each with a Change button, before matching.
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 import { cleanName } from '@/lib/copy';
 import type { ReviewField, ReviewRow } from '@/lib/onboarding';
@@ -27,6 +27,8 @@ export function ReviewStep({
   note?: { text: string; onChange: () => void }; // blocking problem: shown inline, See my matches stays off until fixed
 }) {
   const heading = useHeadingFocus();
+  const { fontScale } = useWindowDimensions();
+  const rowStyle = [st.row, fontScale > 1.3 && st.stackedRow];
   return (
     <View style={{ flex: 1 }}>
       <ScrollView contentContainerStyle={{ padding: space.md, gap: space.md }}>
@@ -36,7 +38,7 @@ export function ReviewStep({
         <Text style={[type.body, { color: colors.textMuted }]}>Check each answer. Tap Change to fix one.</Text>
         <NameRow name={cleanName(name)} onChange={onChangeName} busy={busy} />
         {rows.map((r) => (
-          <View key={r.id} style={st.row} accessible={false}>
+          <View key={r.id} style={rowStyle} accessible={false}>
             <View style={{ flex: 1, gap: 2 }} accessible accessibilityLabel={`${r.title}: ${r.text}`}>
               <Text style={[type.label, { color: colors.textMuted }]}>{r.title}</Text>
               <Text style={[type.heading, { color: colors.text }]}>{r.value}</Text>
@@ -53,7 +55,7 @@ export function ReviewStep({
           </View>
         ))}
         {note ? (
-          <View style={[st.row, { borderColor: colors.softBorder, backgroundColor: colors.softBg }]} accessible={false}>
+          <View style={[rowStyle, { borderColor: colors.softBorder, backgroundColor: colors.softBg }]} accessible={false}>
             <Text accessibilityLiveRegion="polite" style={[type.bodyStrong, { color: colors.soft, flex: 1 }]}>
               {note.text}
             </Text>
@@ -76,10 +78,11 @@ export function ReviewStep({
 
 // Optional name: blank is fine, and we say so — the app then talks to "you", never a stand-in name.
 function NameRow({ name, onChange, busy }: { name: string | null; onChange: () => void; busy?: boolean }) {
+  const { fontScale } = useWindowDimensions();
   const value = name ?? 'Not given';
   const note = name ? null : 'We’ll just say “you”.';
   return (
-    <View style={st.row} accessible={false}>
+    <View style={[st.row, fontScale > 1.3 && st.stackedRow]} accessible={false}>
       <View style={{ flex: 1, gap: 2 }} accessible accessibilityLabel={`Your name: ${value}.${note ? ` ${note}` : ''}`}>
         <Text style={[type.label, { color: colors.textMuted }]}>Your name</Text>
         <Text style={[type.heading, { color: colors.text }]}>{value}</Text>
@@ -102,4 +105,5 @@ const st = StyleSheet.create({
     backgroundColor: colors.surface,
   },
   change: { paddingHorizontal: space.md },
+  stackedRow: { flexDirection: 'column', alignItems: 'stretch' },
 });

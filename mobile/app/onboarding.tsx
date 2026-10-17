@@ -246,9 +246,7 @@ export default function Onboarding() {
           accessible
           accessibilityRole="progressbar"
           accessibilityLabel={`Step ${pos} of ${total}`}
-          aria-valuemin={0}
-          aria-valuemax={total}
-          aria-valuenow={pos}
+          accessibilityValue={{ min: 0, max: total, now: pos }}
           style={st.track}>
           <View style={[st.fill, { width: `${(pos / total) * 100}%` }]} />
         </View>

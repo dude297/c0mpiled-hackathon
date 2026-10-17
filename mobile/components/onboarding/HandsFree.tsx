@@ -4,7 +4,7 @@
 // Answers go through SwipeDeck's own swipe(), the same path as the No / Yes buttons, which keep working.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useRef, useState, type ComponentType, type Ref } from 'react';
-import { AccessibilityInfo, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { AccessibilityInfo, Platform, Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { useReducedMotion } from 'react-native-reanimated';
 import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } from 'react-native-webview';
 
@@ -102,12 +102,12 @@ function ModeSwitch({ mode, onMode }: { mode: Mode; onMode: (m: Mode) => void })
           <Pressable
             key={m}
             accessibilityRole="radio"
-            aria-checked={on}
+            accessibilityState={{ checked: on }}
             accessibilityLabel={m === 'look' ? 'Look to answer' : 'Tilt your head to answer'}
             onPress={() => onMode(m)}
             style={({ pressed }) => [st.segBtn, on && st.segOn, pressed && ui.pressed]}>
             <Ionicons name={icon} size={22} color={on ? colors.onTileSelected : colors.text} />
-            <Text style={[type.label, { color: on ? colors.onTileSelected : colors.text }]}>{label}</Text>
+            <Text style={[type.label, { color: on ? colors.onTileSelected : colors.text, flexShrink: 1, textAlign: 'center' }]}>{label}</Text>
           </Pressable>
         );
       })}
@@ -127,6 +127,7 @@ export function HandsFreeDeck({
   onBack: () => void;
 }) {
   const reduceMotion = useReducedMotion();
+  const { fontScale } = useWindowDimensions();
   const deckRef = useRef<SwipeDeckHandle>(null);
   const webRef = useRef<WebViewHandle>(null);
   const [mode, setMode] = useState<Mode>('look');
@@ -174,6 +175,7 @@ export function HandsFreeDeck({
     webRef.current?.injectJavaScript('window.__hf && window.__hf.stop(); true;');
     setPhase('idle');
     setProgress({ side: null, value: 0 });
+    AccessibilityInfo.announceForAccessibility('Camera off. You can still tap No or Yes.');
   };
   const pickMode = (m: Mode) => {
     setMode(m);
@@ -188,7 +190,8 @@ export function HandsFreeDeck({
     if (label) {
       const msg = `${liked ? 'Liked' : 'Passed on'} ${label}`;
       setSaid(msg);
-      AccessibilityInfo.announceForAccessibility(msg);
+      if (Platform.OS === 'ios') AccessibilityInfo.announceForAccessibilityWithOptions(msg, { queue: true });
+      else AccessibilityInfo.announceForAccessibility(msg);
     }
     onAnswer(key, liked);
   };
@@ -246,6 +249,15 @@ export function HandsFreeDeck({
   } else if (tracking)
     statusText = mode === 'look' ? 'Look toward No or Yes and hold.' : 'Tilt your head toward No or Yes and hold.';
 
+  // Android speaks the native live regions below. iOS needs an explicit announcement;
+  // only meaningful status changes are spoken, never the frame-by-frame progress value.
+  const announcement = phase === 'error' && error ? ERRORS[error] : live ? statusText : '';
+  useEffect(() => {
+    if (Platform.OS === 'ios' && announcement) {
+      AccessibilityInfo.announceForAccessibilityWithOptions(announcement, { queue: true });
+    }
+  }, [announcement]);
+
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
       <ScrollView style={st.panel} contentContainerStyle={st.panelContent}>
@@ -276,6 +288,7 @@ export function HandsFreeDeck({
                   onRenderProcessGone={pageFailed}
                   style={st.web}
                   importantForAccessibility="no-hide-descendants"
+                  accessibilityElementsHidden
                 />
                 <View style={[st.faceDot, { backgroundColor: face ? colors.like : colors.soft }]} />
               </View>
@@ -284,7 +297,7 @@ export function HandsFreeDeck({
                   <Ionicons name={face ? 'checkmark-circle' : 'scan-outline'} size={22} color={face ? colors.like : colors.soft} />
                   <Text style={[type.label, { color: colors.text, flexShrink: 1 }]}>{face ? 'Face found' : 'Looking for your face'}</Text>
                 </View>
-                <Text numberOfLines={2} style={[st.instruction, { fontWeight: '600' }]} accessibilityLiveRegion="polite">
+                <Text style={[st.instruction, { fontWeight: '600' }]} accessibilityLiveRegion="polite">
                   {statusText}
                 </Text>
                 {percent ? (
@@ -294,14 +307,14 @@ export function HandsFreeDeck({
                 ) : null}
                 {said ? (
                   // Not a live region: announceForAccessibility already speaks it (avoids a double read on TalkBack).
-                  <Text numberOfLines={1} style={[st.instruction, { color: colors.like }]}>
+                  <Text style={[st.instruction, { color: colors.like }]}>
                     {said}
                   </Text>
                 ) : null}
               </View>
             </View>
-            <View style={st.liveRow}>
-              <View style={{ flex: 1 }}>
+            <View style={[st.liveRow, fontScale > 1.3 && st.stackedRow]}>
+              <View style={fontScale > 1.3 ? { alignSelf: 'stretch' } : { flex: 1 }}>
                 <ModeSwitch mode={mode} onMode={pickMode} />
               </View>
               <PillButton variant="outline" icon="stop-circle-outline" label="Stop" onPress={stop} hint="Turns the camera off" style={st.stop} />
@@ -322,13 +335,13 @@ export function HandsFreeDeck({
               hint="Turns on the front camera for hands-free"
               style={st.bigStart}
             />
-            <Text numberOfLines={2} style={st.instruction}>
+            <Text style={st.instruction}>
               Look or tilt toward No / Yes and hold. You can also tap the buttons.
             </Text>
             <ModeSwitch mode={mode} onMode={pickMode} />
           </>
         )}
-        {!web ? <Text numberOfLines={1} style={st.privacy}>{PRIVACY}</Text> : null}
+        {!web ? <Text style={st.privacy}>{PRIVACY}</Text> : null}
       </ScrollView>
 
       <SwipeDeck
@@ -360,9 +373,10 @@ const st = StyleSheet.create({
   },
   panelContent: { padding: space.sm, gap: space.xs },
   liveRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  stackedRow: { flexDirection: 'column', alignItems: 'stretch' },
   stop: { minHeight: tap.min, paddingHorizontal: space.md },
-  instruction: { fontSize: 15, lineHeight: 19, color: colors.text },
-  privacy: { fontSize: 13, lineHeight: 16, color: colors.textMuted },
+  instruction: { ...type.body, color: colors.text },
+  privacy: { fontSize: 16, lineHeight: 22, color: colors.textMuted },
   bigStart: { minHeight: 64 },
   preview: { width: 80, height: 60, borderRadius: radius.md, overflow: 'hidden', backgroundColor: colors.text },
   web: { flex: 1, backgroundColor: colors.text },
@@ -372,6 +386,8 @@ const st = StyleSheet.create({
   segBtn: {
     flex: 1,
     minHeight: tap.min,
+    paddingHorizontal: space.sm,
+    paddingVertical: space.sm,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -382,8 +398,8 @@ const st = StyleSheet.create({
     backgroundColor: colors.tile,
   },
   segOn: { backgroundColor: colors.tileSelected, borderColor: colors.tileSelected },
-  target: { alignItems: 'center', gap: 2, paddingHorizontal: 2 },
-  targetLabel: { color: colors.text, backgroundColor: colors.surface, borderRadius: radius.pill, paddingHorizontal: space.sm, overflow: 'hidden' },
+  target: { minWidth: tap.min, minHeight: tap.min, alignItems: 'center', gap: 2, paddingHorizontal: 2 },
+  targetLabel: { color: colors.text, backgroundColor: colors.surface, borderRadius: radius.pill, paddingHorizontal: space.sm },
   targetFace: {
     width: TARGET - 16,
     height: TARGET - 16,

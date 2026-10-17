@@ -2,7 +2,7 @@
 // and flings off past 30% of the screen width or a fast flick. Every gesture has a button twin.
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useEffect, useImperativeHandle, useRef, type ReactNode, type Ref } from 'react';
-import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   Extrapolation,
@@ -32,7 +32,10 @@ const MAX_ROTATE = 12;
 
 function CardFace({ interest, compact = false }: { interest: Interest; compact?: boolean }) {
   return (
-    <View style={[st.card, compact && st.compactCard]}>
+    <ScrollView
+      style={st.cardFrame}
+      contentContainerStyle={[st.card, compact && st.compactCard]}
+      accessible={false}>
       <Text style={[type.heading, { color: colors.textMuted }, compact && st.compactPrompt]}>Would you enjoy this?</Text>
       <View style={[st.center, compact && st.compactCenter]}>
         <Text style={[st.emoji, compact && st.compactEmoji]} importantForAccessibility="no">{interest.emoji}</Text>
@@ -43,7 +46,7 @@ function CardFace({ interest, compact = false }: { interest: Interest; compact?:
         <Text style={[type.body, { color: colors.textMuted, textAlign: 'center' }]}>Swipe to answer</Text>
         <Ionicons name="arrow-forward" size={22} color={colors.textMuted} />
       </View>}
-    </View>
+    </ScrollView>
   );
 }
 
@@ -122,6 +125,7 @@ function SwipeCard({
 
   const pan = Gesture.Pan()
     .activeOffsetX([-8, 8])
+    .failOffsetY([-16, 16]) // Long or enlarged card text remains vertically scrollable.
     .onUpdate((e) => {
       if (done.get()) return;
       x.set(e.translationX);
@@ -173,20 +177,20 @@ function SwipeCard({
         style={[{ flex: 1, minHeight: 0 }, cardStyle]}
         accessible
         accessibilityLabel={`${interest.label}. Would you enjoy this?`}
-        accessibilityHint="Swipe right for yes, left for no, or use the Yes and No buttons below."
+        accessibilityHint="Use the Yes or No actions, or the Yes and No buttons below."
         accessibilityActions={[
-          { name: 'like', label: 'Yes, I would enjoy this' },
-          { name: 'nope', label: 'No thanks' },
+          { name: 'like', label: `Yes, I would enjoy ${interest.label}` },
+          { name: 'nope', label: `No, not ${interest.label}` },
         ]}
         onAccessibilityAction={(e) => {
           if (e.nativeEvent.actionName === 'like') swipe(1);
           else if (e.nativeEvent.actionName === 'nope') swipe(-1);
         }}>
         <CardFace interest={interest} compact={compact} />
-        <Animated.View style={[st.stampSpot, { left: space.lg }, likeStyle]} pointerEvents="none">
+        <Animated.View style={[st.stampSpot, { left: space.lg }, likeStyle]} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
           <Stamp like />
         </Animated.View>
-        <Animated.View style={[st.stampSpot, { right: space.lg }, nopeStyle]} pointerEvents="none">
+        <Animated.View style={[st.stampSpot, { right: space.lg }, nopeStyle]} pointerEvents="none" importantForAccessibility="no-hide-descendants" accessibilityElementsHidden>
           <Stamp like={false} />
         </Animated.View>
       </Animated.View>
@@ -273,14 +277,15 @@ const st = StyleSheet.create({
   cardArea: { flex: 1, minHeight: 0, overflow: 'hidden' },
   compactStack: { marginTop: space.sm, marginBottom: space.sm },
   compactCard: { padding: space.sm, justifyContent: 'center', gap: space.xs },
-  compactPrompt: { fontSize: 16, lineHeight: 20 },
-  compactCenter: { gap: 0, flexShrink: 1, justifyContent: 'center' },
-  compactEmoji: { fontSize: 64, lineHeight: 76, flexShrink: 1 },
-  compactTitle: { fontSize: 24, lineHeight: 28, flexShrink: 1 },
+  compactPrompt: { fontSize: 18, lineHeight: 24 },
+  compactCenter: { gap: 0, justifyContent: 'center' },
+  compactEmoji: { fontSize: 64, lineHeight: 76 },
+  compactTitle: { fontSize: 24, lineHeight: 28 },
   compactBar: { flexShrink: 0, paddingTop: space.xs },
   stack: { flex: 1, marginHorizontal: space.md, marginTop: space.sm, marginBottom: space.md },
+  cardFrame: { flex: 1, borderRadius: radius.lg, backgroundColor: colors.surface },
   card: {
-    flex: 1,
+    flexGrow: 1,
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
@@ -290,7 +295,7 @@ const st = StyleSheet.create({
     alignItems: 'center',
     ...shadow.card,
   },
-  center: { alignItems: 'center', gap: space.md },
+  center: { alignSelf: 'stretch', alignItems: 'center', gap: space.md },
   emoji: { fontSize: 104, lineHeight: 124 },
   hint: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   stampSpot: { position: 'absolute', top: space.xl },

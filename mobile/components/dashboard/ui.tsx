@@ -55,13 +55,13 @@ export function ProvenancePill({
     <Pressable
       onPress={onToggle}
       accessibilityRole="button"
-      aria-expanded={open}
+      accessibilityState={{ expanded: open }}
       accessibilityLabel={`${label}. ${info}`}
       accessibilityHint={open ? 'Hides the explanation' : 'Shows what this means'}
       hitSlop={8}
       style={({ pressed }) => [styles.pill, pressed && { opacity: 0.85 }]}>
       <Ionicons name={source === 'server' ? 'cloud-outline' : 'phone-portrait-outline'} size={20} color={colors.text} />
-      <Text style={[type.label, { color: colors.text }]}>{label}</Text>
+      <Text style={[type.label, { color: colors.text, flexShrink: 1 }]}>{label}</Text>
       <Ionicons name="information-circle-outline" size={22} color={colors.text} />
     </Pressable>
   );
@@ -117,7 +117,7 @@ export function BigButton({
         pressed && { opacity: 0.85, transform: reduce ? [] : [{ scale: 0.98 }] },
       ]}>
       {icon && <Ionicons name={icon} size={24} color={fg} />}
-      <Text style={[type.button, { color: fg }]}>{label}</Text>
+      <Text style={[type.button, { color: fg, flexShrink: 1, textAlign: 'center' }]}>{label}</Text>
     </Pressable>
   );
 }
@@ -130,7 +130,7 @@ export function Collapsible({ title, subtitle, children, initiallyOpen = false }
       <Pressable
         onPress={() => setOpen((o) => !o)}
         accessibilityRole="button"
-        aria-expanded={open}
+        accessibilityState={{ expanded: open }}
         accessibilityLabel={`${title}${subtitle ? `, ${subtitle}` : ''}`}
         accessibilityHint={open ? 'Hides this section' : 'Shows this section'}
         style={({ pressed }) => [styles.collapseHead, pressed && { opacity: 0.85 }]}>
@@ -197,8 +197,8 @@ export const styles = StyleSheet.create({
   },
   scroll: { padding: space.md, paddingBottom: space.xxl, gap: space.lg },
   pill: {
-    flexShrink: 0,
-    minHeight: 44,
+    flexShrink: 1,
+    minHeight: tap.min,
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.xs,
@@ -217,6 +217,7 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: space.sm,
     paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
     borderRadius: radius.md,
   },
   collapseHead: {
