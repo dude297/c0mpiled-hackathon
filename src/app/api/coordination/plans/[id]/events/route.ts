@@ -4,7 +4,7 @@ import { context, demoEventsEnabled, handle, parseBody } from "../../../_lib/ser
 // Simulated provider/participant callbacks (RSVPs, ride confirmations, cancellations). Demo-only.
 // The gate runs before auth so production answers 403 regardless of sign-in state.
 export async function POST(req: Request, ctx: RouteContext<"/api/coordination/plans/[id]/events">) {
-  if (!demoEventsEnabled(req)) return Response.json({ error: "Demo provider events are disabled" }, { status: 403 });
+  if (!demoEventsEnabled()) return Response.json({ error: "Demo provider events are disabled" }, { status: 403 });
   const { id } = await ctx.params;
   const c = await context(req);
   if (c instanceof Response) return c;

@@ -9,7 +9,8 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run lint && npm test"
+    "check": "npm run typecheck && npm run lint && npm test",
+    "demo:check": "node scripts/demo-smoke.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",
