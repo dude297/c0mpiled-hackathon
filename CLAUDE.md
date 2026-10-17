@@ -1,5 +1,12 @@
 @AGENTS.md
 
+<!-- DAYBRIDGE FINAL SPRINT PRIORITY -->
+## DayBridge final sprint: parallel work, verified release
+
+**Before taking new tasks, read `docs/daybridge/FINAL_SPRINT_DECISION_ADDENDUM.md` and `docs/daybridge/DECISIONS.md`.** The golden local demo is the required fallback; Supabase/auth/Vercel is an isolated experimental cloud lane, not a prerequisite for judging. PR #12 can enter the demo only if its complete golden-path checks pass. Attempt small confirm-before-apply intake in parallel and opt-in redacted read-only save/share only after privacy gates. Spawn non-overlapping subagents aggressively; protect a known-green release. No unapproved public deployment, real provider actions or cloud code merger.
+<!-- END FINAL SPRINT PRIORITY -->
+
+
 <!-- P0: CLAUDE/OPUS PARALLEL EXECUTION PRIORITY -->
 ## DayBridge Opus: Launch independent subagents aggressively
 

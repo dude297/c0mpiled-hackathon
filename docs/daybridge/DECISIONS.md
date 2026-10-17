@@ -2,6 +2,17 @@
 
 The lead's standing authorization (2026-10-17): the orchestrator (Claude Opus) may merge into `main` and approve anything that isn't a big technical decision. Big technical decisions are listed under **Needs lead decision** for review. Newest entries first.
 
+
+## Final sprint direction — current working policy (2026-10-17)
+
+Read [FINAL_SPRINT_DECISION_ADDENDUM.md](FINAL_SPRINT_DECISION_ADDENDUM.md) before triaging new work. These priorities guide implementation **without** granting public deployment authorization:
+
+- **D1 Hosted demo:** local/single-instance golden demo is the guaranteed judging path; launch Supabase + auth + serverless-safe storage as a parallel experimental moonshot. Public hosted coordination is prohibited until verified secure and explicitly approved by the lead.
+- **D2 PR #12:** conditional **GO** on a candidate branch, only with preserved Get me there/profile handoff, one-click demo escape, accessibility, clean check/build/smoke and manual browser walkthroughs. Otherwise defer; protect the golden baseline.
+- **D3 Intake/share:** implement a small confirm-before-apply natural-language intake on an isolated branch; implement **opt-in redacted read-only Save & Share** only as a secure stretch, never as unauthenticated exposure of live coordination state. If not safe, leave disabled.
+
+Opus should delegate independent lanes concurrently and maintain a last-known-good release. Existing authorization rules for mergers, credentials and deployment still apply. The earlier L1 line below describes the *original* question; this section is the current sprint execution direction.
+
 ## Needs lead decision
 | # | Decision | Options | Orchestrator recommendation | Blocks |
 |---|---|---|---|---|
