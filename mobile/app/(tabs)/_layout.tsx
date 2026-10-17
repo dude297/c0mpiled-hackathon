@@ -3,6 +3,7 @@ import { Tabs } from 'expo-router';
 import type { ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useApp } from '@/lib/store';
 import { colors } from '@/lib/theme';
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -12,6 +13,7 @@ const icon =
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const weekCount = useApp().added.size;
   return (
     <Tabs
       screenOptions={{
@@ -30,7 +32,16 @@ export default function TabLayout() {
         tabBarItemStyle: { minHeight: 64, borderRadius: 12, marginHorizontal: 4 },
       }}>
       <Tabs.Screen name="matches" options={{ title: 'Matches', tabBarAccessibilityLabel: 'Matches', tabBarIcon: icon('heart', 'heart-outline') }} />
-      <Tabs.Screen name="week" options={{ title: 'My week', tabBarAccessibilityLabel: 'My week', tabBarIcon: icon('calendar', 'calendar-outline') }} />
+      <Tabs.Screen
+        name="week"
+        options={{
+          title: 'My week',
+          tabBarAccessibilityLabel: weekCount ? `My week, ${weekCount} ${weekCount === 1 ? 'outing' : 'outings'}` : 'My week',
+          tabBarIcon: icon('calendar', 'calendar-outline'),
+          tabBarBadge: weekCount || undefined,
+          tabBarBadgeStyle: { backgroundColor: colors.like, color: colors.onPrimary, fontSize: 16, fontWeight: '700', minWidth: 26, height: 26, lineHeight: 26, borderRadius: 13 },
+        }}
+      />
       <Tabs.Screen
         name="details"
         options={{ title: 'Details', tabBarAccessibilityLabel: 'Details', tabBarIcon: icon('information-circle', 'information-circle-outline') }}
