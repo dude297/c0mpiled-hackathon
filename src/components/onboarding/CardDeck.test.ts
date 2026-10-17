@@ -1,21 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { answersToProfile } from "@/components/onboarding/CardDeck";
+import { answersToProfile, swipeDirection, undoAnswer, type Answer } from "@/components/onboarding/CardDeck";
 import { Profile, type Profile as ProfileType } from "@/lib/schema";
-
-function p(partial: Partial<Profile>): Profile {
-  return {
-    name: "Test",
-    interests: ["music"],
-    mobility: "full",
-    transport: ["drive", "walk", "bus"],
-    maxTravelMin: 30,
-    times: ["morning"],
-    budgetPerWeek: 10,
-    hearingImpaired: false,
-    prefersSmallGroups: false,
-    ...partial,
-  };
-}
 
 describe("answersToProfile", () => {
   it("maps liked interests only", () => {
@@ -96,5 +81,41 @@ describe("answersToProfile", () => {
     expect(profile.interests.length).toBeGreaterThan(0);
     expect(profile.transport.length).toBeGreaterThan(0);
     expect((profile as ProfileType).mobility).toBe("cane");
+  });
+});
+
+
+describe("swipeDirection", () => {
+  it("commits at 48px in either direction", () => {
+    expect(swipeDirection(48)).toBe(1);
+    expect(swipeDirection(-48)).toBe(-1);
+  });
+  it("snaps back below the threshold", () => {
+    for (const distance of [0, 47, -47]) expect(swipeDirection(distance)).toBeNull();
+  });
+});
+
+describe("undoAnswer", () => {
+  it("keeps an empty history empty", () => {
+    expect(undoAnswer([])).toEqual([]);
+  });
+  it("removes the last answer without changing the original history", () => {
+    const history: Answer[] = [
+      { kind: "interest", key: "music", liked: true },
+      { kind: "budget", amount: 50 },
+    ];
+    const result = undoAnswer(history);
+    expect(result).toEqual([history[0]]);
+    expect(history).toHaveLength(2);
+    expect(answersToProfile(result.filter((a): a is Answer => a !== null), "A").budgetPerWeek).toBe(10);
+  });
+  it("undoes a skipped card without removing the preceding answer", () => {
+    const answer: Answer = { kind: "interest", key: "music", liked: true };
+    expect(undoAnswer([answer, null])).toEqual([answer]);
+  });
+  it("allows an undone answer to be replaced without retaining the old value", () => {
+    const history: Answer[] = [{ kind: "travel", min: 90 }];
+    const revised = [...undoAnswer(history), { kind: "travel", min: 15 } as Answer];
+    expect(answersToProfile(revised.filter((a): a is Answer => a !== null), "A").maxTravelMin).toBe(15);
   });
 });
