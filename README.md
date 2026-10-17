@@ -6,7 +6,8 @@ This repo currently contains a running activity recommendation and barrier-analy
 
 - [Product and engineering specification](docs/daybridge/PRODUCT_ENGINEERING_SPEC.md)
 - [DayBridge quickstart and golden demo](docs/daybridge/README.md)
-- [Agent playbook and ownership](docs/daybridge/AGENT_PLAYBOOK.md)
+- [Agent playbook and protected human ownership](docs/daybridge/AGENT_PLAYBOOK.md)
+- [Copy/paste tasks for GPT Work, GLM-5.3 Flash and Claude Opus 5.5](docs/daybridge/MODEL_TASKS.md)
 - [Existing human teammate handoffs](docs/handoffs/README.md)
 
 ### Local verification
