@@ -123,6 +123,14 @@ function Row({ row, open, onToggle, profile, onSave, busy }: {
   busy: boolean;
 }) {
   const panelId = useId();
+  const changeButton = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
+  useEffect(() => {
+    if (!open && returnFocus.current) {
+      returnFocus.current = false;
+      changeButton.current?.focus();
+    }
+  }, [open]);
   return (
     <li className="py-4">
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
@@ -131,6 +139,7 @@ function Row({ row, open, onToggle, profile, onSave, busy }: {
           <p className="font-medium">{row.value}</p>
         </div>
         <button
+          ref={changeButton}
           type="button"
           aria-expanded={open}
           aria-controls={panelId}
@@ -143,7 +152,21 @@ function Row({ row, open, onToggle, profile, onSave, busy }: {
       </div>
       {open && (
         <div id={panelId}>
-          <Editor field={row.field} label={row.label} profile={profile} onSave={onSave} onCancel={onToggle} busy={busy} />
+          <Editor
+            field={row.field}
+            label={row.label}
+            profile={profile}
+            onSave={(next) => {
+              // Editor calls this only after its existing validation has passed.
+              returnFocus.current = true;
+              onSave(next);
+            }}
+            onCancel={() => {
+              returnFocus.current = true;
+              onToggle();
+            }}
+            busy={busy}
+          />
         </div>
       )}
     </li>
@@ -163,6 +186,7 @@ function Editor({ field, label, profile, onSave, onCancel, busy }: {
 }) {
   const [draft, setDraft] = useState<Profile>(profile);
   const first = useRef<HTMLDivElement>(null);
+  const problemId = useId();
   useEffect(() => {
     first.current?.querySelector<HTMLElement>("input")?.focus();
   }, []);
@@ -178,6 +202,8 @@ function Editor({ field, label, profile, onSave, onCancel, busy }: {
           <input
             type="checkbox"
             className={BOX}
+            aria-describedby={problem ? problemId : undefined}
+            aria-invalid={draft[k].length === 0 || undefined}
             checked={(draft[k] as readonly string[]).includes(o.key)}
             onChange={() => set(k, toggle(draft[k] as readonly string[], o.key) as Profile[typeof k])}
           />
@@ -258,7 +284,7 @@ function Editor({ field, label, profile, onSave, onCancel, busy }: {
       }}
     >
       <div ref={first}>{control}</div>
-      {problem && <p className="text-base text-foreground/85">{problem}</p>}
+      {problem && <p id={problemId} className="text-base text-foreground/85">{problem}</p>}
       {/* Thumb-reachable on phones: the open row's Save sticks to the bottom of the screen. */}
       <div className="sticky bottom-0 -mx-4 flex items-center gap-3 border-t bg-background px-4 py-3 sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
         <button type="submit" disabled={!!problem || busy} className={`${PRIMARY_BTN} flex-1 sm:flex-none`}>

@@ -31,15 +31,15 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
     <Link
       href={item.href}
       aria-current={active ? "page" : undefined}
-      // Below 768px the calendar is icon-only: aria-label names it, title gives the tooltip. Desktop always shows the word.
+      // Keep the Calendar word on phones too; its icon alone is easy to miss or misinterpret.
       aria-label={item.icon ? item.label : undefined}
       title={item.icon ? item.label : undefined}
-      className={`inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg border-b-2 px-3 text-lg ${FOCUS} ${
+      className={`inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-lg border-b-2 px-1 text-base md:px-3 md:text-lg ${FOCUS} ${
         active ? "border-foreground font-semibold text-foreground" : "border-transparent text-foreground/80 hover:bg-muted hover:text-foreground"
       }`}
     >
-      {item.icon && <CalendarDays className="size-6 shrink-0" aria-hidden="true" />}
-      <span className={item.icon ? "hidden md:inline" : undefined}>{item.label}</span>
+      {item.icon && <CalendarDays className="hidden size-6 shrink-0 md:block" aria-hidden="true" />}
+      <span>{item.label}</span>
     </Link>
   );
 }

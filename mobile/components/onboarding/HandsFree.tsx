@@ -1,4 +1,4 @@
-// Hands-free interest cards: look toward ✕ / ❤️ (hold 1.5 s) or tilt your head toward it (0.8 s).
+// Hands-free interest cards: look or turn toward a screen half (1.2 s), or tilt (0.8 s).
 // Runs in Expo Go: the camera + MediaPipe Face Landmarker live in a small WebView tile
 // (lib/handsfreePage.ts) that posts progress / answer messages; everything you see here is native.
 // Answers go through SwipeDeck's own swipe(), the same path as the No / Yes buttons, which keep working.
@@ -11,7 +11,7 @@ import { WebView as RNWebView, type WebViewMessageEvent, type WebViewProps } fro
 import type { Mode } from '@/lib/handsfree';
 import { buildHandsFreeHtml, HANDSFREE_BASE_URL, parsePageMessage, type PageError } from '@/lib/handsfreePage';
 import { INTEREST_META } from '@/lib/onboarding';
-import { colors, radius, space, tap, type } from '@/lib/theme';
+import { colors, radius, shadow, space, tap, type } from '@/lib/theme';
 
 import { SwipeDeck, type SwipeDeckHandle } from './SwipeDeck';
 import { PillButton, s as ui } from './ui';
@@ -35,56 +35,47 @@ const ERRORS: Record<PageError | 'timeout', string> = {
 };
 const START_TIMEOUT_MS = 15_000; // no word from the camera page for this long while starting → show the timeout
 
-// Progress ring from plain Views (no SVG dependency): two clipped half-rings rotated into view.
-function Ring({ size, width, progress, color, track }: { size: number; width: number; progress: number; color: string; track: string }) {
-  const deg = Math.max(0, Math.min(1, progress)) * 360;
-  const half = size / 2;
-  const ring = { position: 'absolute' as const, width: size, height: size, borderRadius: half, borderWidth: width, borderColor: color };
+// Each entire screen-side half is an answer target. The fill rises from the bottom as the
+// dwell progresses; the question sits above both halves and never intercepts their taps.
+function SplitCard({ interest, mode, side, progress, onAnswer }: {
+  interest: Interest;
+  mode: Mode;
+  side: Side | null;
+  progress: number;
+  onAnswer: (liked: boolean) => void;
+}) {
   return (
-    <View style={{ width: size, height: size }} pointerEvents="none">
-      <View style={[ring, { borderColor: track }]} />
-      {/* 0–180°: a left half-ring, clipped to the right half, rotated clockwise into view */}
-      <View style={{ position: 'absolute', left: half, width: half, height: size, overflow: 'hidden' }}>
-        <View style={{ position: 'absolute', left: -half, width: size, height: size, transform: [{ rotate: `${Math.min(deg, 180)}deg` }] }}>
-          <View style={{ position: 'absolute', left: 0, width: half, height: size, overflow: 'hidden' }}>
-            <View style={ring} />
-          </View>
-        </View>
+    <View style={st.splitCard}>
+      <View style={st.halves}>
+        {(['left', 'right'] as const).map((half) => {
+          const yes = half === 'right';
+          const color = yes ? colors.like : colors.hard;
+          const label = `${mode === 'look' ? 'Look or turn' : 'Tilt'} ${half} = ${yes ? 'Yes ❤️' : 'No ✕'}`;
+          return (
+            <Pressable
+              key={half}
+              accessibilityRole="button"
+              accessibilityLabel={`${label}. ${interest.label}`}
+              onPress={() => onAnswer(yes)}
+              style={({ pressed }) => [st.half, yes && st.rightHalf, pressed && ui.pressed]}>
+              <View
+                pointerEvents="none"
+                style={[st.halfFill, {
+                  height: `${(side === half ? progress : 0) * 100}%`,
+                  backgroundColor: yes ? '#b8e1c7' : '#f6bdb7',
+                }]}
+              />
+              <Text style={[st.halfLabel, { color }]}>{label}</Text>
+            </Pressable>
+          );
+        })}
       </View>
-      {/* 180–360°: a right half-ring, clipped to the left half */}
-      <View style={{ position: 'absolute', left: 0, width: half, height: size, overflow: 'hidden' }}>
-        <View style={{ position: 'absolute', left: 0, width: size, height: size, transform: [{ rotate: `${Math.max(deg - 180, 0)}deg` }] }}>
-          <View style={{ position: 'absolute', left: half, width: half, height: size, overflow: 'hidden' }}>
-            <View style={[ring, { left: -half }]} />
-          </View>
-        </View>
+      <View pointerEvents="none" style={st.question}>
+        <Text style={st.questionPrompt}>Would you enjoy this?</Text>
+        <Text style={st.questionEmoji} importantForAccessibility="no">{interest.emoji}</Text>
+        <Text style={st.questionTitle}>{interest.label}</Text>
       </View>
     </View>
-  );
-}
-
-const TARGET = 68;
-
-function Target({ side, progress, active, label, onPress }: { side: Side; progress: number; active: boolean; label?: string; onPress: () => void }) {
-  const yes = side === 'right';
-  const color = yes ? colors.like : colors.hard;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={yes ? `Yes, I'd enjoy ${label ?? 'this'}` : `No, not ${label ?? 'this'}`}
-      onPress={onPress}
-      hitSlop={8}
-      style={({ pressed }) => [st.target, pressed && ui.pressed]}>
-      <View style={{ width: TARGET, height: TARGET, alignItems: 'center', justifyContent: 'center' }}>
-        <View style={StyleSheet.absoluteFill}>
-          <Ring size={TARGET} width={7} progress={active ? progress : 0} color={color} track={colors.border} />
-        </View>
-        <View style={[st.targetFace, active && progress > 0 && { backgroundColor: yes ? '#e3f1e8' : colors.hardBg }]}>
-          <Ionicons name={yes ? 'heart' : 'close'} size={34} color={color} />
-        </View>
-      </View>
-      <Text style={[type.label, st.targetLabel]}>{yes ? 'Yes' : 'No'}</Text>
-    </Pressable>
   );
 }
 
@@ -181,7 +172,7 @@ export function HandsFreeDeck({
     webRef.current?.injectJavaScript(`window.__hf && window.__hf.setMode(${JSON.stringify(m)}); true;`);
   };
 
-  // Every answer lands here — gaze/tilt, the ✕/❤️ targets, the No/Yes bar and a finger swipe —
+  // Every answer lands here — gaze/yaw/tilt, the split halves, the No/Yes bar and a finger swipe —
   // so each one is announced ("Liked Gardening") before it's recorded.
   const recordAnswer = (key: Interest['key'], liked: boolean) => {
     const label = INTEREST_META.find((i) => i.key === key)?.label;
@@ -220,18 +211,9 @@ export function HandsFreeDeck({
     setPhase('error');
   };
 
-  // Reduced motion: the ring steps in quarters instead of sweeping smoothly.
+  // Reduced motion: the fill steps in quarters instead of rising smoothly.
   const shown = reduceMotion ? Math.floor(progress.value * 4) / 4 : progress.value;
   const tracking = phase === 'tracking';
-  const target = (side: Side) => (
-    <Target
-      side={side}
-      label={top?.label}
-      active={tracking && progress.side === side}
-      progress={shown}
-      onPress={() => answer(side === 'right')}
-    />
-  );
 
   // statusText is a live region, so it only changes when the step changes; the calibration
   // percent (updates ~5×/s) sits in a separate, non-live Text so TalkBack doesn't repeat it.
@@ -244,7 +226,7 @@ export function HandsFreeDeck({
     statusText = 'Look at the middle of the screen…';
     percent = `${Math.round(calib * 100)}%`;
   } else if (tracking)
-    statusText = mode === 'look' ? 'Look toward No or Yes and hold.' : 'Tilt your head toward No or Yes and hold.';
+    statusText = mode === 'look' ? 'Hold a look or turn for 1.2s, then return to the middle.' : 'Tilt your head toward No or Yes and hold.';
 
   return (
     <View style={{ flex: 1, minHeight: 0 }}>
@@ -323,7 +305,7 @@ export function HandsFreeDeck({
               style={st.bigStart}
             />
             <Text numberOfLines={2} style={st.instruction}>
-              Look or tilt toward No / Yes and hold. You can also tap the buttons.
+              Look, turn or tilt left for No, right for Yes. You can also tap either half.
             </Text>
             <ModeSwitch mode={mode} onMode={pickMode} />
           </>
@@ -339,8 +321,15 @@ export function HandsFreeDeck({
         canBack
         onAnswer={recordAnswer}
         onBack={onBack}
-        left={live ? target('left') : null}
-        right={live ? target('right') : null}
+        cardContent={top ? (
+          <SplitCard
+            interest={top}
+            mode={mode}
+            side={tracking ? progress.side : null}
+            progress={shown}
+            onAnswer={answer}
+          />
+        ) : null}
       />
     </View>
   );
@@ -382,14 +371,22 @@ const st = StyleSheet.create({
     backgroundColor: colors.tile,
   },
   segOn: { backgroundColor: colors.tileSelected, borderColor: colors.tileSelected },
-  target: { alignItems: 'center', gap: 2, paddingHorizontal: 2 },
-  targetLabel: { color: colors.text, backgroundColor: colors.surface, borderRadius: radius.pill, paddingHorizontal: space.sm, overflow: 'hidden' },
-  targetFace: {
-    width: TARGET - 16,
-    height: TARGET - 16,
-    borderRadius: (TARGET - 16) / 2,
+  splitCard: {
+    flex: 1,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
     backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
+    overflow: 'hidden',
+    ...shadow.card,
   },
+  halves: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, flexDirection: 'row' },
+  half: { flex: 1, justifyContent: 'flex-end', alignItems: 'center', padding: space.sm },
+  rightHalf: { borderLeftWidth: 1, borderLeftColor: colors.border },
+  halfFill: { position: 'absolute', bottom: 0, left: 0, right: 0 },
+  halfLabel: { fontSize: 22, lineHeight: 28, fontWeight: '700', textAlign: 'center', marginBottom: space.sm },
+  question: { alignItems: 'center', padding: space.sm, gap: space.xs },
+  questionPrompt: { fontSize: 16, lineHeight: 20, color: colors.textMuted },
+  questionEmoji: { fontSize: 48, lineHeight: 56 },
+  questionTitle: { fontSize: 24, lineHeight: 28, fontWeight: '700', textAlign: 'center', color: colors.text },
 });

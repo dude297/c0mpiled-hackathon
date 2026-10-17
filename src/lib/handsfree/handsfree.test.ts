@@ -152,7 +152,67 @@ describe("stepDwell", () => {
   it("losing the face resets progress", () => {
     const r = run([...frames("center", 0, 400), ...frames("right", 500, 1800), [null, 1900], ...frames("right", 2000, 3000)]);
     expect(r.fired).toEqual([]);
-    expect(r.last.progress).toBeCloseTo(1000 / 1500);
+    expect(r.last.progress).toBe(0);
+    expect(r.state.armed).toBe(false);
+  });
+
+  it("requires center again after a lost face, even if the returning face keeps looking at a target", () => {
+    const r = run([
+      ...frames("center", 0, 400), ...frames("right", 500, 1800), [null, 1900],
+      ...frames("right", 2000, 4000), ...frames("center", 4100, 4500),
+      ...frames("left", 4600, 6100),
+    ]);
+    expect(r.fired).toEqual(["left@6100"]);
+  });
+
+  it("does not turn a stalled camera or suspended tab into an answer", () => {
+    const r = run([...frames("center", 0, 400), ...frames("right", 500, 1200), ["right", 5000]]);
+    expect(r.fired).toEqual([]);
+    expect(r.last.progress).toBe(0);
+    expect(r.state.armed).toBe(false);
+  });
+
+  for (const mode of ["look", "tilt"] as const) {
+    const { dwellMs } = MODE_CONFIG[mode];
+
+    it(`${mode}: stays paused after a tracking gap until center and a fresh full dwell`, () => {
+      const r = run([
+        ...frames("center", 0, 400), ...frames("right", 500, 1000),
+        ...frames("right", 3000, 5000), // tracking returns, but center is still required
+        ...frames("center", 5100, 5500),
+        ...frames("left", 5600, 5600 + dwellMs),
+      ], dwellMs);
+      expect(r.fired).toEqual([`left@${5600 + dwellMs}`]);
+    });
+
+    it(`${mode}: preserves deliberate answers on a lower-frame-rate device`, () => {
+      const r = run([
+        ...frames("center", 0, 400, 200),
+        ...frames("right", 600, 2400, 200),
+      ], dwellMs);
+      expect(r.fired).toEqual([`right@${600 + Math.ceil(dwellMs / 200) * 200}`]);
+    });
+  }
+
+  it("does not count a gap between two center frames as time spent rearming", () => {
+    const r = run([["center", 0], ["center", 5000], ["right", 5100], ...frames("right", 5200, 7000)]);
+    expect(r.fired).toEqual([]);
+  });
+
+  it("rejects invalid and backwards timestamps without keeping a partial answer", () => {
+    const half = run([...frames("center", 0, 400), ...frames("right", 500, 1200)]);
+    for (const t of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, 100]) {
+      const step = stepDwell(half.state, "right", t, 1500, REARM_MS);
+      expect(step.fired).toBeNull();
+      expect(step.progress).toBe(0);
+      expect(step.state.armed).toBe(false);
+      // A bad timestamp must not poison future tracking or remove the center requirement.
+      const continued = run([
+        ...frames("right", 1300, 3000), ...frames("center", 3100, 3500),
+        ...frames("left", 3600, 5100),
+      ], 1500, step.state);
+      expect(continued.fired).toEqual(["left@5100"]);
+    }
   });
 });
 
