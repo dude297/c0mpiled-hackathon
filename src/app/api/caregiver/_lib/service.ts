@@ -14,9 +14,15 @@ import { CoordinationError } from "@/domain/coordination/coordinator";
 import type { CoordinationEvent, CoordinationPlan } from "@/lib/schema";
 import { coordinator, demoEventsEnabled, parseBody } from "../../coordination/_lib/service";
 import { headerCallerResolver, type CallerResolver } from "./caller";
+import { supabaseCallerResolver } from "@/lib/supabase/caller";
+import { createSupabaseCaregiverStore } from "@/lib/supabase/caregiver-store";
+import { supabaseConfigured } from "@/lib/supabase/server";
 
 // Swappable ports: the cloud lane replaces these with Supabase-backed implementations.
-export const ports: { store: CaregiverStore; caller: CallerResolver } = { store: memoryCaregiverStore, caller: headerCallerResolver };
+// Supabase configured → durable store + verified session ALWAYS (x-daybridge-user is never read).
+export const ports: { store: CaregiverStore; caller: CallerResolver } = supabaseConfigured()
+  ? { store: createSupabaseCaregiverStore(), caller: supabaseCallerResolver }
+  : { store: memoryCaregiverStore, caller: headerCallerResolver };
 
 export const CAREGIVER_HOSTED_DISABLED = "Caregiver dashboard needs sign-in and storage; available in the local demo";
 
