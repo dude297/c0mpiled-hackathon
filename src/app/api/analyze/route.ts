@@ -1,5 +1,6 @@
 import { runScenario } from "@/domain/engine";
 import { getAiAdapter, mockAdapter } from "@/lib/ai/adapter";
+import { enrichResult } from "@/lib/integrations/places";
 import { ScenarioInput, type AnalysisResult } from "@/lib/schema";
 
 export async function POST(req: Request) {
@@ -18,6 +19,9 @@ export async function POST(req: Request) {
     return mockAdapter.explain(parsed.data, output);
   });
 
-  const result: AnalysisResult = { ...output, explanation, dataSource: ai.name };
-  return Response.json(result);
+  const base: AnalysisResult = { ...output, explanation, dataSource: ai.name };
+  // Additive enrichment: venue data, weather, extra evidence. All fail soft.
+  const { venueByItem, weather, evidence } = await enrichResult(base);
+  const result: AnalysisResult = { ...base, evidence };
+  return Response.json({ ...result, venueByItem, weather });
 }

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Ban, Calendar, Check, ChevronDown, CircleX, LoaderCircle, MapPin, Printer, ShieldCheck, Sparkles, Users } from "lucide-react";
+import { Ban, Calendar, CalendarPlus, Check, ChevronDown, CircleX, CloudRain, LoaderCircle, MapPin, Printer, ShieldCheck, Sparkles, Sun, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Interest, Mobility, TimeSlot, Transport, type AnalysisResult, type Profile } from "@/lib/schema";
+import { calendarLink } from "@/lib/integrations/calendar";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
@@ -143,8 +144,15 @@ export function ProfilePanel(props: {
   );
 }
 
-export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult | null; loading: boolean; onSave: () => Promise<void> }) {
+export function PlanPanel({ result, loading, onSave }: {
+  result: AnalysisResult | null;
+  loading: boolean;
+  onSave: () => Promise<void>;
+}) {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "error">("idle");
+  // Additive enrichments from the API; both optional.
+  type Enriched = { venueByItem?: Record<string, { address: string; stepFree: boolean | null }>; weather?: { summary: string; outdoorConcern: boolean } | null };
+  const extra = result as (AnalysisResult & Enriched) | null;
   async function handleSave() {
     try {
       setSaveState("saving");
@@ -198,28 +206,51 @@ export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult 
               ))}
             </div>
             <ul className="grid gap-3">
-              {result.plan.map((i) => (
-                <li key={i.activityId} className="rounded-xl border bg-card p-4 shadow-sm">
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                    <p className="text-lg font-semibold md:text-xl">{i.name}</p>
-                    <p className="text-sm text-muted-foreground md:text-base">
-                      <b className="text-foreground">${i.costPerWeek}</b>/week
+              {result.plan.map((i) => {
+                const venue = extra?.venueByItem?.[i.activityId];
+                const day = i.when.split(" ")[0];
+                const cal = calendarLink(i);
+                return (
+                  <li key={i.activityId} className="rounded-xl border bg-card p-4 shadow-sm">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                      <p className="text-lg font-semibold md:text-xl">{i.name}</p>
+                      <p className="text-sm text-muted-foreground md:text-base">
+                        <b className="text-foreground">${i.costPerWeek}</b>/week
+                      </p>
+                    </div>
+                    <p className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground md:text-base">
+                      <span className="inline-flex items-center gap-1.5"><Calendar className="size-4" aria-hidden="true" />{i.when}</span>
+                      <span className="inline-flex items-center gap-1.5"><MapPin className="size-4" aria-hidden="true" />{i.travel}</span>
                     </p>
-                  </div>
-                  <p className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground md:text-base">
-                    <span className="inline-flex items-center gap-1.5"><Calendar className="size-4" aria-hidden="true" />{i.when}</span>
-                    <span className="inline-flex items-center gap-1.5"><MapPin className="size-4" aria-hidden="true" />{i.travel}</span>
-                  </p>
-                  {i.barriers.filter((b) => b.severity === "soft").map((b) => (
-                    <p key={b.rule} className="mt-2 rounded-md bg-amber-100 p-2 text-sm dark:bg-amber-950/40 md:text-base">
-                      <span className="font-medium text-amber-800 dark:text-amber-300">{b.detail}</span>
-                      <span className="text-amber-800/80 dark:text-amber-300/80"> → </span>
-                      {b.mitigation}
-                    </p>
-                  ))}
-                </li>
-              ))}
+                    {venue?.address && <p className="mt-1 text-sm text-muted-foreground md:text-base">{venue.address}</p>}
+                    {i.barriers.filter((b) => b.severity === "soft").map((b) => (
+                      <p key={b.rule} className="mt-2 rounded-md bg-amber-100 p-2 text-sm dark:bg-amber-950/40 md:text-base">
+                        <span className="font-medium text-amber-800 dark:text-amber-300">{b.detail}</span>
+                        <span className="text-amber-800/80 dark:text-amber-300/80"> → </span>
+                        {b.mitigation}
+                      </p>
+                    ))}
+                    <a
+                      href={cal}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 md:text-base print:hidden"
+                    >
+                      <CalendarPlus className="size-4" aria-hidden="true" />
+                      Add {day} to Google Calendar
+                    </a>
+                  </li>
+                );
+              })}
             </ul>
+            {extra?.weather && (
+              <p className={`flex items-start gap-2 rounded-md p-3 text-sm md:text-base ${extra.weather.outdoorConcern ? "bg-amber-100 dark:bg-amber-950/40" : "bg-muted"}`}>
+                {extra.weather.outdoorConcern
+                  ? <CloudRain className="mt-0.5 size-5 shrink-0 text-amber-800 dark:text-amber-300" aria-hidden="true" />
+                  : <Sun className="mt-0.5 size-5 shrink-0" aria-hidden="true" />}
+                {extra.weather.summary}
+              </p>
+            )}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="max-w-md text-base text-muted-foreground md:text-lg">{result.explanation}</p>
               <div className="flex items-center gap-2 print:hidden">
