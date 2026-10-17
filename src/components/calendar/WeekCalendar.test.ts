@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseWhen, placeOnWeek, weekSummary } from "@/components/calendar/WeekCalendar";
+import { newlyAdded, parseWhen, placeOnWeek, weekSummary } from "@/components/calendar/WeekCalendar";
 import type { PlanItem } from "@/lib/schema";
 
 const item = (activityId: string, when: string): PlanItem => ({
@@ -59,4 +59,9 @@ describe("weekSummary", () => {
   it("says nothing added for an empty week", () => expect(weekSummary([])).toBe("Nothing added yet"));
   it("uses Free for a $0 week, like the match cards", () => expect(weekSummary([priced("a", 0)])).toBe("1 outing · Free"));
   it("sums weekly cost and pluralises", () => expect(weekSummary([priced("a", 2), priced("b", 3.5)])).toBe("2 outings · $5.50/week"));
+});
+
+describe("newlyAdded", () => {
+  it("returns only ids not seen before", () => expect([...newlyAdded(new Set(["a"]), ["a", "b"])]).toEqual(["b"]));
+  it("is empty after a removal", () => expect(newlyAdded(new Set(["a", "b"]), ["a"]).size).toBe(0));
 });

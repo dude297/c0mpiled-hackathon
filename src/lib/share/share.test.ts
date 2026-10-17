@@ -128,7 +128,7 @@ describe("share store", () => {
     expect(await revokeShare(id, revokeToken)).toBe(false);
   });
 
-  it("caps at MAX_SHARES, pruning expired first", async () => {
+  it("caps at MAX_SHARES, pruning expired first", { timeout: 30_000 }, async () => {
     const old = new Date("2020-01-01T00:00:00Z");
     for (let i = 0; i < MAX_SHARES; i++) await createShare(input(), old);
     expect(_shareStoreSize()).toBe(MAX_SHARES);

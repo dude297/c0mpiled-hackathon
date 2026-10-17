@@ -3,11 +3,12 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, Heart, LoaderCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { HandsFree } from "@/components/handsfree/HandsFree";
 import type { Profile } from "@/lib/schema";
 
 // Swipe-card onboarding: produces the same Profile as the manual form.
 // Dislike on an interest card only removes it from the running set — never blocks.
-// Walking aid and transport are asked directly and required; a review step shows every answer before analyze.
+// Walking aid, transport, hearing and group size are asked directly and required; a review step shows every answer before analyze.
 
 export const INTEREST_META = [
   { key: "music", emoji: "🎵", label: "Music & singing" },
@@ -46,11 +47,40 @@ export const TRANSPORT_OPTIONS: readonly { key: Profile["transport"][number]; em
   { key: "walk", emoji: "🚶", label: "I walk there" },
 ];
 
+// Asked directly — hearingImpaired and prefersSmallGroups only ever come from this answer.
+// "Neither" is exclusive, so "both false" is an explicit answer, never a default.
+export type ComfortKey = "hearing" | "smallGroups" | "neither";
+export const COMFORT_OPTIONS: readonly { key: ComfortKey; label: string }[] = [
+  { key: "hearing", label: "Noisy rooms are hard for me to hear in" },
+  { key: "smallGroups", label: "I prefer small groups" },
+  { key: "neither", label: "Neither of these" },
+];
+export const COMFORT_NEITHER: ComfortKey = "neither";
+
+export function comfortFromKeys(keys: readonly ComfortKey[]): Extract<Answer, { kind: "comfort" }> {
+  return { kind: "comfort", hearing: keys.includes("hearing"), smallGroups: keys.includes("smallGroups") };
+}
+
+export function comfortToKeys(answer: { hearing: boolean; smallGroups: boolean }): ComfortKey[] {
+  const keys: ComfortKey[] = [];
+  if (answer.hearing) keys.push("hearing");
+  if (answer.smallGroups) keys.push("smallGroups");
+  return keys.length ? keys : [COMFORT_NEITHER];
+}
+
+// Multi-select toggle with one exclusive option: picking it clears the rest, picking another clears it.
+export function toggleChoice<K extends string>(prev: readonly K[], key: K, exclusive?: K): K[] {
+  if (prev.includes(key)) return prev.filter((k) => k !== key);
+  if (key === exclusive) return [key];
+  return [...prev.filter((k) => k !== exclusive), key];
+}
+
 export type Answer =
   | { kind: "interest"; key: Profile["interests"][number]; liked: boolean }
   | { kind: "travel"; min: number }
   | { kind: "mobility"; key: Profile["mobility"] }
   | { kind: "transport"; modes: Profile["transport"] }
+  | { kind: "comfort"; hearing: boolean; smallGroups: boolean }
   | { kind: "times"; keys: Profile["times"][number][] }
   | { kind: "budget"; amount: number };
 
@@ -59,6 +89,7 @@ type CardDef =
   | { type: "travel" }
   | { type: "mobility" }
   | { type: "transport" }
+  | { type: "comfort" }
   | { type: "times" }
   | { type: "budget" };
 
@@ -76,6 +107,7 @@ function buildCards(): CardDef[] {
     { type: "travel" },
     { type: "mobility" },
     { type: "transport" },
+    { type: "comfort" },
     { type: "budget" },
   ];
 }
@@ -92,7 +124,7 @@ const DEFAULT_TIMES: Profile["times"] = ["morning", "afternoon"];
 const DEFAULT_TRAVEL_MIN = 30;
 const DEFAULT_BUDGET = 10;
 
-export type RequiredField = "mobility" | "transport";
+export type RequiredField = "mobility" | "transport" | "comfort";
 export type DefaultedField = "interests" | "times" | "travel" | "budget";
 export type ProfileResult =
   | { ok: true; profile: Profile; defaults: DefaultedField[] }
@@ -109,6 +141,8 @@ function collect(answers: readonly Answer[]) {
     a.kind === "mobility" && WALKING_AID_OPTIONS.some((o) => o.key === a.key));
   const transportAnswer = answers.find((a): a is Extract<Answer, { kind: "transport" }> => a.kind === "transport");
   const transport = TRANSPORT_OPTIONS.filter((o) => transportAnswer?.modes.includes(o.key)).map((o) => o.key);
+  const comfort = answers.find((a): a is Extract<Answer, { kind: "comfort" }> =>
+    a.kind === "comfort" && typeof a.hearing === "boolean" && typeof a.smallGroups === "boolean");
   return {
     interests: liked.length ? liked : null,
     times: times.size ? TIME_OPTIONS.filter((o) => times.has(o.key)).map((o) => o.key) : null,
@@ -116,13 +150,24 @@ function collect(answers: readonly Answer[]) {
     budget: budget?.amount ?? null,
     mobility: mobility?.key ?? null,
     transport: transport.length ? transport : null,
+    comfort: comfort ? { hearing: comfort.hearing, smallGroups: comfort.smallGroups } : null,
   };
 }
 
+const MISSING_LABEL: Record<RequiredField, string> = {
+  mobility: "walking aid",
+  transport: "how you get places",
+  comfort: "anything else that helps",
+};
+
 export function answersToProfile(answers: readonly Answer[], name: string): ProfileResult {
   const c = collect(answers);
-  if (!c.mobility || !c.transport) {
-    return { ok: false, missing: [...(c.mobility ? [] : ["mobility" as const]), ...(c.transport ? [] : ["transport" as const])] };
+  if (!c.mobility || !c.transport || !c.comfort) {
+    const missing: RequiredField[] = [];
+    if (!c.mobility) missing.push("mobility");
+    if (!c.transport) missing.push("transport");
+    if (!c.comfort) missing.push("comfort");
+    return { ok: false, missing };
   }
   const defaults: DefaultedField[] = [];
   if (!c.interests) defaults.push("interests");
@@ -140,13 +185,13 @@ export function answersToProfile(answers: readonly Answer[], name: string): Prof
       maxTravelMin: c.travelMin ?? DEFAULT_TRAVEL_MIN,
       times: c.times ?? DEFAULT_TIMES,
       budgetPerWeek: c.budget ?? DEFAULT_BUDGET,
-      hearingImpaired: false,
-      prefersSmallGroups: false,
+      hearingImpaired: c.comfort.hearing,
+      prefersSmallGroups: c.comfort.smallGroups,
     },
   };
 }
 
-export type ReviewField = DefaultedField | RequiredField;
+export type ReviewField = DefaultedField | "mobility" | "transport" | "hearing" | "groupSize";
 export type ReviewRow = { field: ReviewField; label: string; value: string; isDefault: boolean };
 
 // Plain-words summary for the "Here's what we heard" step. Defaults are flagged, never presented as answers.
@@ -163,6 +208,8 @@ export function reviewRows(answers: readonly Answer[]): ReviewRow[] {
     { field: "travel", label: "How far", value: travelText(c.travelMin ?? DEFAULT_TRAVEL_MIN), isDefault: c.travelMin === null },
     { field: "mobility", label: "Walking aid", value: c.mobility ? labelOf(WALKING_AID_OPTIONS, [c.mobility]) : "Not answered yet", isDefault: false },
     { field: "transport", label: "How you get places", value: c.transport ? labelOf(TRANSPORT_OPTIONS, c.transport) : "Not answered yet", isDefault: false },
+    { field: "hearing", label: "Hearing", value: c.comfort ? (c.comfort.hearing ? "Noisy rooms are hard to hear in" : "No trouble hearing") : "Not answered yet", isDefault: false },
+    { field: "groupSize", label: "Group size", value: c.comfort ? (c.comfort.smallGroups ? "Prefers small groups" : "Any size is fine") : "Not answered yet", isDefault: false },
     { field: "budget", label: "Weekly budget", value: budgetText(c.budget ?? DEFAULT_BUDGET), isDefault: c.budget === null },
   ];
 }
@@ -192,6 +239,27 @@ export function pickedToHistory(picked: readonly InterestKey[], answeredCount: n
     key: m.key,
     liked: picked.includes(m.key),
   }));
+}
+
+export type AnswerMode = "swipe" | "easy" | "hands";
+
+export const ANSWER_MODES: readonly { key: AnswerMode; label: string; detail: string }[] = [
+  { key: "swipe", label: "Swipe cards", detail: "One idea at a time; swipe or tap Yes/No." },
+  { key: "easy", label: "Easier view (big tiles)", detail: "See every idea at once." },
+  { key: "hands", label: "Hands-free (eye tracker)", detail: "Look or tilt your head toward No or Yes; camera stays on this device." },
+];
+
+// Keep the existing grid/card conversion in one place. Swipe and hands-free share
+// the same answers and cursor; later required answers must never be rewritten.
+export function changeAnswerMode(
+  from: AnswerMode,
+  to: AnswerMode,
+  history: readonly (Answer | null)[],
+  picked: readonly InterestKey[],
+): { history: (Answer | null)[]; picked: InterestKey[] } {
+  if (history.length >= INTEREST_COUNT || from === to) return { history: [...history], picked: [...picked] };
+  if (from === "easy") return { history: pickedToHistory(picked, history.length), picked: [...picked] };
+  return { history: [...history], picked: to === "easy" ? likedInterests(history) : [...picked] };
 }
 
 // Change "What you enjoy" from the review: new interest picks, every later answer kept.
@@ -355,6 +423,46 @@ function InterestGrid({ picked, onToggle, onClear, onContinue, disabled }: {
   );
 }
 
+function ModePicker({ mode, onContinue, disabled }: {
+  mode: AnswerMode;
+  onContinue: (mode: AnswerMode) => void;
+  disabled: boolean;
+}) {
+  const id = useId();
+  const [selected, setSelected] = useState(mode);
+  return (
+    <section aria-labelledby={`${id}-heading`} className="rounded-xl border-2 bg-card p-5 shadow-sm">
+      <h2 id={`${id}-heading`} tabIndex={-1} data-step-focus className={`text-2xl font-semibold ${RING}`}>
+        How would you like to choose?
+      </h2>
+      <p className="mb-4 mt-2 text-lg text-muted-foreground">First, choose a mode. You can change it while choosing your interests.</p>
+      <div role="radiogroup" aria-labelledby={`${id}-heading`} className="space-y-3">
+        {ANSWER_MODES.map((option) => (
+          <label key={option.key} className="flex min-h-14 cursor-pointer items-center gap-4 rounded-xl border-2 bg-background p-4 hover:bg-accent has-[:checked]:border-foreground has-[:checked]:bg-accent has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-solid has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-foreground">
+            <input
+              type="radio"
+              name={id}
+              value={option.key}
+              checked={selected === option.key}
+              onChange={() => setSelected(option.key)}
+              disabled={disabled}
+              aria-describedby={`${id}-${option.key}-detail`}
+              className="size-6 shrink-0 accent-foreground"
+            />
+            <span>
+              <span className="block text-xl font-semibold">{option.label}</span>
+              <span id={`${id}-${option.key}-detail`} className="mt-1 block text-lg text-muted-foreground">{option.detail}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+      <Button size="lg" className={`mt-4 min-h-14 w-full rounded-xl text-lg ${RING}`} onClick={() => onContinue(selected)} disabled={disabled}>
+        Continue
+      </Button>
+    </section>
+  );
+}
+
 export function CardDeck({
   onComplete,
   initialName = "",
@@ -368,7 +476,9 @@ export function CardDeck({
 }) {
   const cards = useMemo(() => buildCards(), []);
   const [history, setHistory] = useState<(Answer | null)[]>([]);
-  const [bigButtons, setBigButtons] = useState(false);
+  const [answerMode, setAnswerMode] = useState<AnswerMode>("swipe");
+  const [choosingMode, setChoosingMode] = useState(true);
+  const bigButtons = answerMode === "easy";
   const [picked, setPicked] = useState<InterestKey[]>([]);
   // Card index being changed from the review step; null = normal forward flow.
   const [editing, setEditing] = useState<number | null>(null);
@@ -379,14 +489,14 @@ export function CardDeck({
   const [name, setName] = useState(initialName);
   const lastRecordAt = useRef(-Infinity);
   const rootRef = useRef<HTMLDivElement>(null);
-  // Set by user-driven step changes only, so first mount and view toggles never steal focus.
+  // Set by user-driven step changes only, so first mount never steals focus.
   const moveFocus = useRef(false);
 
   useEffect(() => {
     if (!moveFocus.current) return;
     moveFocus.current = false;
     rootRef.current?.querySelector<HTMLElement>("[data-step-focus]")?.focus();
-  }, [history, editing]);
+  }, [history, editing, choosingMode]);
 
   const changeStep = (next: (Answer | null)[] | ((prev: (Answer | null)[]) => (Answer | null)[])) => {
     moveFocus.current = true;
@@ -421,24 +531,48 @@ export function CardDeck({
       changeStep([]);
     } else changeStep(undoAnswer);
   };
-  const toggleView = () => {
-    if (editing === null && index < INTEREST_COUNT) {
-      if (bigButtons) setHistory(pickedToHistory(picked, index));
-      else setPicked(likedInterests(history));
-    }
-    setBigButtons((value) => !value);
+  const chooseMode = (next: AnswerMode) => {
+    const converted = changeAnswerMode(answerMode, next, history, picked);
+    setHistory(converted.history);
+    setPicked(converted.picked);
+    setAnswerMode(next);
   };
 
   const swipeCard = (dir: 1 | -1, interest: CardDef & { type: "interest" }) => {
     record({ kind: "interest", key: interest.interest.key, liked: dir > 0 });
   };
 
+  const demos = onDemo && index === 0 && editing === null && (
+    <div className="mb-3 grid grid-cols-2 gap-2">
+      <Button size="lg" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("margaret")} disabled={loading}>Demo: Margaret</Button>
+      <Button size="lg" variant="outline" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("harold")} disabled={loading}>Demo: Harold</Button>
+    </div>
+  );
+
+  if (choosingMode) {
+    return (
+      <div ref={rootRef} className="mx-auto w-full max-w-xl p-4 text-base md:text-lg">
+        {demos}
+        <ModePicker
+          mode={answerMode}
+          disabled={loading}
+          onContinue={(next) => {
+            if (!guard()) return;
+            chooseMode(next);
+            moveFocus.current = true;
+            setChoosingMode(false);
+          }}
+        />
+      </div>
+    );
+  }
+
   if (editing === null && index >= cards.length) {
     const result = answersToProfile(answers, name);
     const cardFor = (field: ReviewField) =>
-      field === "interests" ? 0 : cards.findIndex((c) => c.type === field);
+      field === "interests" ? 0 : cards.findIndex((c) => c.type === (field === "hearing" || field === "groupSize" ? "comfort" : field));
     return (
-      <div ref={rootRef} className="mx-auto w-full max-w-md rounded-xl border bg-card p-6 text-base md:text-lg">
+      <div ref={rootRef} className="db-fade-up mx-auto w-full max-w-md rounded-xl border bg-card p-6 text-base md:text-lg">
         <h2 tabIndex={-1} data-step-focus className="mb-1 text-2xl font-semibold outline-none">Here&apos;s what we heard</h2>
         <p className="mb-4 text-muted-foreground">Check your answers. Tap Change to fix anything.</p>
         <dl className="divide-y">
@@ -466,7 +600,7 @@ export function CardDeck({
         </dl>
         {!result.ok && (
           <p className="mt-3 font-medium text-destructive" role="alert">
-            Please answer {result.missing.map((m) => (m === "mobility" ? "walking aid" : "how you get places")).join(" and ")} first.
+            Please answer {result.missing.map((m) => MISSING_LABEL[m]).join(" and ")} first.
           </p>
         )}
         <p className="mt-4 flex items-center gap-2 text-muted-foreground" aria-live="polite">
@@ -490,8 +624,10 @@ export function CardDeck({
             disabled={loading}
             className={`min-h-11 rounded-xl px-3 text-base underline ${RING}`}
             onClick={() => {
+              if (!guard()) return;
               changeStep([]);
               setPicked([]);
+              setChoosingMode(true);
             }}
           >
             Start over
@@ -512,21 +648,22 @@ export function CardDeck({
 
   return (
     <div ref={rootRef} className={`mx-auto w-full min-w-0 ${showGrid ? "max-w-3xl" : "max-w-md"} overflow-x-clip p-4 text-base md:text-lg`}>
-      {onDemo && index === 0 && !showGrid && (
-        <div className="mb-3 grid grid-cols-2 gap-2">
-          <Button size="lg" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("margaret")} disabled={loading}>Demo: Margaret</Button>
-          <Button size="lg" variant="outline" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={() => onDemo("harold")} disabled={loading}>Demo: Harold</Button>
+      {demos}
+      {card.type === "interest" && editing === null && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="font-semibold">{ANSWER_MODES.find((mode) => mode.key === answerMode)?.label}</p>
+          <button type="button" className={`min-h-11 rounded-lg px-2 text-base underline underline-offset-4 ${RING}`} disabled={loading} onClick={() => {
+            if (!guard()) return;
+            moveFocus.current = true;
+            setChoosingMode(true);
+          }}>Change mode</button>
         </div>
       )}
-      <Button
-        size="lg"
-        variant={bigButtons ? "default" : "outline"}
-        aria-pressed={bigButtons}
-        onClick={toggleView}
-        className={`mb-3 min-h-14 w-full rounded-xl text-lg ${RING}`}
-      >
-        {bigButtons && <Check aria-hidden="true" />} Easier view (big tiles): {bigButtons ? "on" : "off"}
-      </Button>
+      {/* Outside the keyed card: a camera session lasts across interest cards.
+          Leaving the interest step or changing mode unmounts it and stops it. */}
+      {!showGrid && card.type === "interest" && answerMode === "hands" && (
+        <HandsFree label={card.interest.label} onAnswer={(liked) => swipeCard(liked ? 1 : -1, card)} />
+      )}
       <div className="mb-3">
         <Button size="lg" variant="outline" className={RING} onClick={back} disabled={editing === null && (index === 0 || showGrid || loading)}>
           <ArrowLeft aria-hidden="true" /> {editing !== null ? "Back to review" : "Back"}
@@ -538,7 +675,7 @@ export function CardDeck({
         <>
           <p className="mb-2 font-medium" aria-live="polite">{bigButtons ? "Step" : "Card"} {step + 1} of {stepCount}</p>
           <div role="progressbar" aria-label="Cards completed" aria-valuemin={0} aria-valuemax={stepCount} aria-valuenow={step} className="mb-4 h-3 overflow-hidden rounded-full bg-muted">
-            <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
+            <div className="db-progress h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
           </div>
         </>
       )}
@@ -554,12 +691,14 @@ export function CardDeck({
         />
       </label>
 
+      {/* Re-keyed per step so each new card fades up once; focus still moves via data-step-focus after commit. */}
+      <div key={showGrid ? "grid" : `card-${at}`} className="db-fade-up">
       {showGrid && (
         <InterestGrid
           picked={picked}
           disabled={loading}
-          onToggle={(key) => setPicked((prev) => toggleKey(prev, key))}
-          onClear={() => setPicked([])}
+          onToggle={(key) => { if (!locked()) setPicked((prev) => toggleKey(prev, key)); }}
+          onClear={() => { if (!locked()) setPicked([]); }}
           onContinue={() => {
             if (!guard()) return;
             if (editing !== null) {
@@ -670,6 +809,22 @@ export function CardDeck({
         />
       )}
 
+      {card.type === "comfort" && (
+        <ChoiceCard
+          key={at}
+          multi
+          exclusive={COMFORT_NEITHER}
+          heading="Anything else that helps?"
+          helper="Pick any that apply."
+          options={COMFORT_OPTIONS}
+          initial={current?.kind === "comfort" ? comfortToKeys(current) : []}
+          disabled={loading}
+          locked={locked}
+          bigButtons={bigButtons}
+          onDone={(keys) => record(comfortFromKeys(keys))}
+        />
+      )}
+
       {card.type === "budget" && (
         <div className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 tabIndex={-1} data-step-focus className="mb-1 text-xl font-semibold outline-none">What&apos;s a comfortable weekly budget?</h2>
@@ -691,13 +846,16 @@ export function CardDeck({
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }
 
 // Required question: native radios (single) or checkboxes (multi); Continue stays disabled until something is picked.
-function ChoiceCard<K extends string>({ multi, heading, helper, options, initial, disabled, locked, bigButtons, onDone }: {
+function ChoiceCard<K extends string>({ multi, exclusive, heading, helper, options, initial, disabled, locked, bigButtons, onDone }: {
   multi: boolean;
+  // Multi only: an option that clears the others when picked (and is cleared by any other pick).
+  exclusive?: K;
   heading: string;
   helper: string;
   options: readonly { key: K; label: string; emoji?: string }[];
@@ -727,7 +885,7 @@ function ChoiceCard<K extends string>({ multi, heading, helper, options, initial
               disabled={disabled}
               onChange={() => {
                 if (locked()) return;
-                setSelected((prev) => (multi ? (prev.includes(o.key) ? prev.filter((k) => k !== o.key) : [...prev, o.key]) : [o.key]));
+                setSelected((prev) => (multi ? toggleChoice(prev, o.key, exclusive) : [o.key]));
               }}
               className="size-6 shrink-0 accent-foreground outline-none"
             />

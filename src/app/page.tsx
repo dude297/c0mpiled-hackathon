@@ -8,6 +8,8 @@ import { ShareControl } from "@/components/share/ShareControl";
 import { WeekCalendar, weekSummary } from "@/components/calendar/WeekCalendar";
 import { MatchFeed, hardBarriers, toggleInSet } from "@/components/feed/MatchFeed";
 import { CardDeck } from "@/components/onboarding/CardDeck";
+import { Hero } from "@/components/hero/Hero";
+import { PlanStages } from "@/components/hero/PlanStages";
 import { DiscoveryFeed } from "@/components/discovery/DiscoveryFeed";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +34,7 @@ export default function Home() {
   const reqId = useRef(0);
   const focusNext = useRef<"tab" | "summary" | null>(null);
   const summaryRef = useRef<HTMLHeadingElement>(null);
+  const deckRef = useRef<HTMLDivElement>(null);
 
   // Move focus once the element we want exists (after a run finishes rendering).
   useEffect(() => {
@@ -92,23 +95,34 @@ export default function Home() {
     </>
   );
 
+  // Hero "Start": bring the deck into view and put keyboard/screen-reader focus on its current card.
+  function startDeck() {
+    const deck = deckRef.current;
+    if (!deck) return;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    deck.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+    deck.querySelector<HTMLElement>("[data-step-focus]")?.focus({ preventScroll: true });
+  }
+
   if (mode === "onboarding") {
     return withLive(
-      <div className="mx-auto w-full max-w-6xl p-6">
-        <header className="mb-6 text-center">
-          <h1 className="text-3xl font-semibold">DayBridge</h1>
-          <p className="text-muted-foreground">
-            Find the social activities you&apos;ll actually love — and can actually get to.
-          </p>
-        </header>
-        <CardDeck
-          onComplete={(p) => {
-            setProfile(p);
-            run(p);
-          }}
-          loading={loading}
-          onDemo={demo}
-        />
+      <div className="mx-auto w-full max-w-6xl p-4 md:p-6">
+        <Hero onStart={startDeck} onDemo={() => demo("margaret")} loading={loading} />
+        <div ref={deckRef} className="scroll-mt-4">
+          <CardDeck
+            onComplete={(p) => {
+              setProfile(p);
+              run(p);
+            }}
+            loading={loading}
+            onDemo={demo}
+          />
+        </div>
+        {(loading || error) && (
+          <div className="mx-auto mt-4 max-w-3xl">
+            <PlanStages loading={loading} result={null} error={error} />
+          </div>
+        )}
         {error && <p className="mx-auto max-w-md text-center text-destructive">{error}</p>}
         <div className="pt-6 text-center">
           <button
@@ -150,7 +164,9 @@ export default function Home() {
             <p className="text-xl font-semibold">Building {profile.name}&apos;s week…</p>
             <p className="text-muted-foreground">Checking times, travel, cost and access for every activity.</p>
           </div>
-        ) : error ? (
+        ) : null}
+        {(loading || error) && <PlanStages loading={loading} result={null} error={error} />}
+        {loading ? null : error ? (
           <div role="alert" className="rounded-2xl border border-destructive/30 bg-destructive/5 p-6">
             <p className="flex items-center gap-2 text-xl font-semibold text-destructive">
               <CircleX className="size-6 shrink-0" aria-hidden="true" />
@@ -183,6 +199,7 @@ export default function Home() {
 
   return withLive(
     <DashboardShell>
+      <PlanStages loading={loading} result={result} error={error} />
       <section aria-label="Plan summary" className="rounded-2xl border bg-card p-4 shadow-sm md:p-5">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
@@ -205,7 +222,8 @@ export default function Home() {
           ))}
         </div>
         <p className="mt-3 rounded-lg bg-primary/10 px-3 py-2 text-lg font-semibold md:text-xl">
-          In your week: {weekSummary(addedItems)}
+          In your week:{" "}
+          <span key={addedItems.length} className="db-pop inline-block">{weekSummary(addedItems)}</span>
         </p>
         <div className="mt-4 flex flex-wrap items-center gap-2 print:hidden">
           <Button variant="outline" size="lg" className={FOCUS} onClick={() => window.print()}>
@@ -251,6 +269,7 @@ export default function Home() {
       </div>
 
       <div role="tabpanel" id="dash-panel" aria-labelledby={`tab-${tab}`} tabIndex={0} className={`flex flex-col gap-4 rounded-xl outline-none print:hidden ${FOCUS}`}>
+        <div key={tab} className="db-fade-up flex flex-col gap-4">
         {tab === "matches" && <MatchFeed result={result} added={added} onToggle={(id) => setAdded((s) => toggleInSet(s, id))} />}
         {tab === "week" &&
           (addedItems.length ? (
@@ -263,6 +282,7 @@ export default function Home() {
             </div>
           ))}
         {tab === "details" && details}
+        </div>
       </div>
 
       {/* Separate from the personalized plan: public listings, not checked for fit. */}
