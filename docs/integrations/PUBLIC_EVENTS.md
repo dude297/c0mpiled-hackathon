@@ -55,3 +55,11 @@ Every coordinate-backed event now includes `mapLink` and `directionsLink`, const
 UI owner: use `mapLink` for **Open in Google Maps**, and `directionsLink` for **Get directions**. These open another service when the user clicks; they do not verify accessibility, travel time or a booking. Existing Google Places and fare estimation remain optional and are not required for this event discovery path.
 
 Official URL documentation: https://developers.google.com/maps/documentation/urls/get-started
+
+## Uber / Lyft handoffs
+
+Coordinate-backed live event candidates now include `uberLink` and `lyftLink`. They use the source venue's location rather than a Google lookup. No API token or fare request is needed. Links contain only the public destination coordinates and venue label. Pickup is omitted; the user selects/reviews it in the provider app. Unknown coordinates produce null links.
+
+UI labels: **Open Uber** / **Open Lyft**, with **Opens the service — choose pickup and confirm there; not booked**. Use `rel="noreferrer noopener"` for external links. Do not display a fare, confirmed transport, or READY state from opening these links. Existing key-gated fare estimates for the fixed demo route remain separate and must not be attached to these user-pickup handoffs.
+
+Uber documents destination deep links at https://developer.uber.com/docs/riders/ride-requests/tutorials/deep-links/introduction . Query construction is covered by offline tests. Actual destination-prefill behavior in Uber/Lyft on physical devices is not yet verified (in particular the Lyft web handoff); the user must review the destination, pickup and price in the provider service. No live provider request or booking occurred during this change.

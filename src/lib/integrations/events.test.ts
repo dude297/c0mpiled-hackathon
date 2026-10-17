@@ -10,11 +10,16 @@ it("normalizes source events without inventing feasibility", () => {
   expect(directions.searchParams.get("destination")).toBe("37.87,-122.26");
   expect(directions.searchParams.has("origin")).toBe(false);
   expect(directions.searchParams.has("key")).toBe(false);
+  const uber = new URL(event.uberLink!); const lyft = new URL(event.lyftLink!);
+  expect(uber.searchParams.get("dropoff[latitude]")).toBe("37.87");
+  expect(lyft.searchParams.get("destination[longitude]")).toBe("-122.26");
+  expect([...uber.searchParams.keys()].some((key) => key.startsWith("pickup"))).toBe(false);
+  expect([...lyft.searchParams.keys()].some((key) => key.startsWith("pickup"))).toBe(false);
   expect(event).toMatchObject({ name: "Arts & Community", startsAt: "2026-10-18T17:00:00.000Z", proximity: "local", accessibility: "unknown", cost: "unknown", eligibility: "check-source", verified: false });
 });
 it("keeps today's all-day events and unknown locations honestly labeled", () => {
   const result = parsePublicEvents({ data: [{ ...entry, is_all_day: 1, date_iso: "2026-10-17T00:00:00-07:00", location_latitude: null, location_longitude: null }] }, now);
-  expect(result?.[0]).toMatchObject({ allDay: true, proximity: "unknown", mapLink: null, directionsLink: null });
+  expect(result?.[0]).toMatchObject({ allDay: true, proximity: "unknown", mapLink: null, directionsLink: null, uberLink: null, lyftLink: null });
 });
 it.each([
   { is_canceled: 1 }, { is_online: 1 }, { date_iso: "2026-10-16T10:00:00-07:00" },

@@ -1,3 +1,4 @@
+import { rideLinks } from "./ride-links";
 import { mapLinks } from "./maps";
 import { isLocalCoordinate } from "./places";
 
@@ -6,6 +7,7 @@ export const EVENTS_FEED_URL = "https://events.berkeley.edu/live/json/events/max
 export type EventCandidate = {
   id: string; name: string; url: string; startsAt: string; endsAt: string | null;
   mapLink: string | null; directionsLink: string | null;
+  uberLink: string | null; lyftLink: string | null;
   allDay: boolean; location: string | null; proximity: "local" | "unknown";
   tags: string[]; source: "uc-berkeley"; verified: false; checkedAt: string;
   accessibility: "unknown"; cost: "unknown"; eligibility: "check-source";
@@ -47,8 +49,9 @@ export function parsePublicEvents(payload: unknown, now = new Date()): EventCand
     if (entry.is_online) continue; // This endpoint serves in-person social discovery.
     const tags = Array.isArray(entry.tags) ? entry.tags.filter((tag: unknown): tag is string => typeof tag === "string").slice(0, 20).map(plain) : [];
     const links = hasCoordinates ? mapLinks(lat, lon) : null;
+    const rides = hasCoordinates ? rideLinks(lat, lon, plain(location ?? name)) : null;
     const id = `uc-berkeley:${entry.id}:${startsAt}`;
-    events.set(id, { id, mapLink: links?.mapLink ?? null, directionsLink: links?.directionsLink ?? null, name: plain(name), url: url.href, startsAt, endsAt, allDay,
+    events.set(id, { id, uberLink: rides?.uberLink ?? null, lyftLink: rides?.lyftLink ?? null, mapLink: links?.mapLink ?? null, directionsLink: links?.directionsLink ?? null, name: plain(name), url: url.href, startsAt, endsAt, allDay,
       location: location ? plain(location) : null, proximity: hasCoordinates ? "local" : "unknown", tags,
       source: "uc-berkeley", verified: false, checkedAt: now.toISOString(),
       accessibility: "unknown", cost: "unknown", eligibility: "check-source" });
