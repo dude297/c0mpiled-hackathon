@@ -88,6 +88,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 const STILL_WORKS = "The Yes and No buttons still work.";
+const FOCUS = "focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-2 focus-visible:outline-foreground";
 
 // One screen-reader live region on <body>, outside this component, so an announcement survives
 // HandsFree unmounting (answering the last interest card moves the deck on in the same update).
@@ -120,11 +121,11 @@ const OFF_NOTICE = "Hands-free is off now. The next questions use tapping.";
 function cameraMessage(error: unknown): string {
   const name = error instanceof Error ? error.name : "";
   if (name === "NotAllowedError" || name === "SecurityError")
-    return `Camera permission is turned off. To use hands-free, allow the camera (look for the camera icon next to the web address), then press Start again. ${STILL_WORKS}`;
+    return `Camera permission is turned off. To use hands-free, allow the camera (look for the camera icon next to the web address), then press Turn on camera again. ${STILL_WORKS}`;
   if (name === "NotFoundError" || name === "OverconstrainedError")
     return `We couldn't find a camera on this device. ${STILL_WORKS}`;
   if (name === "NotReadableError" || name === "AbortError")
-    return `Your camera is busy in another app. Close that app, then press Start again. ${STILL_WORKS}`;
+    return `Your camera is busy in another app. Close that app, then press Turn on camera again. ${STILL_WORKS}`;
   return `The camera couldn't start. ${STILL_WORKS}`;
 }
 
@@ -148,7 +149,6 @@ const MODE_HELP: Record<HandsFreeMode, string> = {
 };
 
 export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => void; label: string }) {
-  const [open, setOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
   const [mode, setMode] = useState<HandsFreeMode>("look");
@@ -279,7 +279,7 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
     } catch {
       forgetLandmarker(modelLoad); // a hung load must not be reused by "Try again"
       if (run === runRef.current)
-        fail(`Face tracking couldn't load. Check your internet connection and press Start again. ${STILL_WORKS}`);
+        fail(`Face tracking couldn't load. Check your internet connection and press Turn on camera again. ${STILL_WORKS}`);
       return;
     }
     if (run !== runRef.current) return;
@@ -385,87 +385,69 @@ export function HandsFree({ onAnswer, label }: { onAnswer: (liked: boolean) => v
     const p = view.side === side ? view.progress : 0;
     return reducedMotion ? Math.floor(p * 4) / 4 : p; // stepped fill when motion is reduced
   };
-  const segBtn = "min-h-14 flex-1 rounded-xl border-2 px-4 text-lg font-semibold";
+  const segBtn = `min-h-14 flex-1 rounded-xl border-2 px-4 text-lg font-semibold ${FOCUS}`;
 
   return (
-    <div className="mb-4">
-      <button
-        type="button"
-        aria-pressed={open}
-        onClick={() => {
-          if (open) stop();
-          setOpen(!open);
-        }}
-        className={`min-h-14 w-full rounded-xl border-2 px-4 text-lg font-semibold ${open ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"}`}
-      >
-        Hands-free (camera): {open ? "on" : "off"}
-      </button>
+    <section aria-label="Hands-free answers" className="mb-4 space-y-3 rounded-xl border-2 bg-card p-4">
+      <p className="text-lg font-medium">Hands-free works on the interest cards.</p>
+      <p className="text-base text-muted-foreground">Your camera stays on this device — nothing is recorded or sent.</p>
 
-      {open && (
-        <section aria-label="Hands-free answers" className="mt-3 space-y-3 rounded-xl border bg-card p-4">
-          <p className="text-lg font-medium">Hands-free works on the interest cards.</p>
-
-          <div className="flex gap-2" role="group" aria-label="Hands-free style">
-            <button type="button" aria-pressed={mode === "look"} onClick={() => pickMode("look")}
-              className={`${segBtn} ${mode === "look" ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"}`}>
-              👀 Look
-            </button>
-            <button type="button" aria-pressed={mode === "tilt"} onClick={() => pickMode("tilt")}
-              className={`${segBtn} ${mode === "tilt" ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"}`}>
-              ↔️ Tilt head
-            </button>
-          </div>
-          <p className="text-lg">{MODE_HELP[mode]}</p>
-
-          <div className={active ? "flex items-center gap-3" : "hidden"}>
-            <video
-              ref={videoRef}
-              muted
-              playsInline
-              aria-hidden="true"
-              className="h-24 w-32 shrink-0 rounded-lg bg-muted object-cover -scale-x-100"
-            />
-            <p className="text-lg font-medium" aria-live="polite">
-              <span aria-hidden="true" className={`mr-2 inline-block size-4 rounded-full align-middle ${faceFound ? "bg-green-700" : "bg-amber-500"}`} />
-              {phase === "starting" && "Starting the camera…"}
-              {phase === "calibrating" && (faceFound ? `Look at the middle of the screen… ${calibLeft}` : "Looking for your face — sit facing the screen.")}
-              {phase === "running" && (faceFound ? "Face found. Ready." : "I can't see your face — sit facing the screen.")}
-            </p>
-          </div>
-
-          {phase === "error" && (
-            <p role="alert" className="rounded-lg border-2 border-destructive bg-destructive/10 p-3 text-lg">{error}</p>
-          )}
-
-          <div className="flex flex-wrap gap-2">
-            {active ? (
-              <button type="button" onClick={stop} className="min-h-14 rounded-xl border-2 border-border bg-background px-6 text-lg font-semibold">
-                Stop hands-free
-              </button>
-            ) : (
-              <button type="button" onClick={start} className="min-h-14 rounded-xl bg-primary px-6 text-lg font-semibold text-primary-foreground">
-                {phase === "error" ? "Try again" : "Start hands-free"}
-              </button>
-            )}
-            {phase === "running" && (
-              <button type="button" aria-pressed={swap} onClick={toggleSwap} className="min-h-14 rounded-xl border-2 border-border bg-background px-4 text-lg">
-                Swap sides
-              </button>
-            )}
-          </div>
-
-          <p className="text-base text-muted-foreground">Your camera stays on this device — nothing is recorded or sent.</p>
-          <p className="min-h-7 text-lg font-semibold">{announce && `✓ ${announce}`}</p>
-
-          {phase === "running" && (
-            <div className="flex justify-between gap-4 md:contents">
-              <Target side="left" progress={ring("left")} reducedMotion={reducedMotion} label={label} onPress={() => answer(false)} />
-              <Target side="right" progress={ring("right")} reducedMotion={reducedMotion} label={label} onPress={() => answer(true)} />
-            </div>
-          )}
-        </section>
+      {active ? (
+        <button type="button" onClick={stop} className={`min-h-14 w-full rounded-xl border-2 border-border bg-background px-6 text-lg font-semibold ${FOCUS}`}>
+          Stop hands-free
+        </button>
+      ) : (
+        <button type="button" data-step-focus onClick={start} className={`min-h-14 w-full rounded-xl bg-primary px-6 text-xl font-semibold text-primary-foreground ${FOCUS}`}>
+          Turn on camera
+        </button>
       )}
-    </div>
+
+      <div className="flex gap-2" role="group" aria-label="Hands-free style">
+        <button type="button" aria-pressed={mode === "look"} onClick={() => pickMode("look")}
+          className={`${segBtn} ${mode === "look" ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"}`}>
+          👀 Look
+        </button>
+        <button type="button" aria-pressed={mode === "tilt"} onClick={() => pickMode("tilt")}
+          className={`${segBtn} ${mode === "tilt" ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"}`}>
+          ↔️ Tilt head
+        </button>
+      </div>
+      <p className="text-lg">{MODE_HELP[mode]}</p>
+
+      <div className={active ? "flex items-center gap-3" : "hidden"}>
+        <video
+          ref={videoRef}
+          muted
+          playsInline
+          aria-hidden="true"
+          className="h-24 w-32 shrink-0 rounded-lg bg-muted object-cover -scale-x-100"
+        />
+        <p className="text-lg font-medium" aria-live="polite">
+          <span aria-hidden="true" className={`mr-2 inline-block size-4 rounded-full align-middle ${faceFound ? "bg-green-700" : "bg-amber-500"}`} />
+          {phase === "starting" && "Starting the camera…"}
+          {phase === "calibrating" && (faceFound ? `Look at the middle of the screen… ${calibLeft}` : "Looking for your face — sit facing the screen.")}
+          {phase === "running" && (faceFound ? "Face found. Ready." : "I can't see your face — sit facing the screen.")}
+        </p>
+      </div>
+
+      {phase === "error" && (
+        <p role="alert" className="rounded-lg border-2 border-destructive bg-destructive/10 p-3 text-lg">{error}</p>
+      )}
+
+      {phase === "running" && (
+        <button type="button" aria-pressed={swap} onClick={toggleSwap} className={`min-h-14 rounded-xl border-2 border-border bg-background px-4 text-lg ${FOCUS}`}>
+          Swap sides
+        </button>
+      )}
+      <p className="min-h-7 text-lg font-semibold">{announce && `✓ ${announce}`}</p>
+
+      {phase === "running" && (
+        <div className="flex justify-between gap-4 md:contents">
+          <Target side="left" progress={ring("left")} reducedMotion={reducedMotion} label={label} onPress={() => answer(false)} />
+          <Target side="right" progress={ring("right")} reducedMotion={reducedMotion} label={label} onPress={() => answer(true)} />
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -485,7 +467,7 @@ function Target({ side, progress, reducedMotion, label, onPress }: {
       type="button"
       onClick={onPress}
       aria-label={yes ? `Yes, I'd enjoy ${label}` : `No, skip ${label}`}
-      className={`relative grid size-28 shrink-0 place-items-center rounded-full border-2 bg-background shadow-lg md:fixed md:top-1/2 md:z-40 md:-translate-y-1/2 ${yes ? "border-green-800 md:right-4" : "border-red-800 md:left-4"}`}
+      className={`relative grid size-28 shrink-0 place-items-center rounded-full border-2 bg-background shadow-lg md:fixed md:top-1/2 md:z-40 md:-translate-y-1/2 ${FOCUS} ${yes ? "border-green-800 md:right-4" : "border-red-800 md:left-4"}`}
     >
       <svg viewBox="0 0 120 120" className="absolute inset-0 size-full -rotate-90" aria-hidden="true">
         <circle cx="60" cy="60" r={R} fill="none" strokeWidth="10" className="stroke-muted" />
