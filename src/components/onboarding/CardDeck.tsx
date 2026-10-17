@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Check, Heart, LoaderCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Profile } from "@/lib/schema";
 
 // Swipe-card onboarding: produces the same Profile as the manual form.
 // Dislike on an interest card only removes it from the running set — never blocks.
+// Walking aid and transport are asked directly and required; a review step shows every answer before analyze.
 
 export const INTEREST_META = [
   { key: "music", emoji: "🎵", label: "Music & singing" },
@@ -29,16 +30,27 @@ export const TRAVEL_BUCKETS = [
   { label: "Distance is no big deal", detail: "an hour or more", min: 90 },
 ] as const;
 
-export const STAIR_OPTIONS = [
-  { key: "fine", label: "No big deal", detail: "Stairs are fine" },
-  { key: "hassle", label: "A hassle", detail: "I can, but prefer not to" },
-  { key: "avoid", label: "Hard for me", detail: "I'd rather avoid them" },
-] as const;
+// Asked directly — mobility and transport are never inferred from any other answer.
+export const WALKING_AID_OPTIONS: readonly { key: Profile["mobility"]; label: string }[] = [
+  { key: "full", label: "No, I walk on my own" },
+  { key: "cane", label: "A cane" },
+  { key: "walker", label: "A walker" },
+  { key: "wheelchair", label: "A wheelchair" },
+];
+
+export const TRANSPORT_OPTIONS: readonly { key: Profile["transport"][number]; emoji: string; label: string }[] = [
+  { key: "drive", emoji: "🚗", label: "I drive myself" },
+  { key: "bus", emoji: "🚌", label: "Bus or train" },
+  { key: "paratransit", emoji: "🚐", label: "Senior shuttle (paratransit)" },
+  { key: "family", emoji: "👨‍👩‍👧", label: "Family or friends drive me" },
+  { key: "walk", emoji: "🚶", label: "I walk there" },
+];
 
 export type Answer =
   | { kind: "interest"; key: Profile["interests"][number]; liked: boolean }
   | { kind: "travel"; min: number }
-  | { kind: "mobility"; key: (typeof STAIR_OPTIONS)[number]["key"] }
+  | { kind: "mobility"; key: Profile["mobility"] }
+  | { kind: "transport"; modes: Profile["transport"] }
   | { kind: "times"; keys: Profile["times"][number][] }
   | { kind: "budget"; amount: number };
 
@@ -46,6 +58,7 @@ type CardDef =
   | { type: "interest"; interest: (typeof INTEREST_META)[number] }
   | { type: "travel" }
   | { type: "mobility" }
+  | { type: "transport" }
   | { type: "times" }
   | { type: "budget" };
 
@@ -62,6 +75,7 @@ function buildCards(): CardDef[] {
     { type: "times" },
     { type: "travel" },
     { type: "mobility" },
+    { type: "transport" },
     { type: "budget" },
   ];
 }
@@ -73,30 +87,89 @@ const BUDGET_OPTIONS = [
   { amount: 50, label: "Whatever's worth it", detail: "up to $50 a week" },
 ] as const;
 
-export function answersToProfile(answers: Answer[], name: string): Profile {
-  const likedInterests = answers
-    .filter((a): a is Extract<Answer, { kind: "interest" }> => a.kind === "interest" && a.liked)
-    .map((a) => a.key);
+const DEFAULT_INTERESTS: Profile["interests"] = ["learning"];
+const DEFAULT_TIMES: Profile["times"] = ["morning", "afternoon"];
+const DEFAULT_TRAVEL_MIN = 30;
+const DEFAULT_BUDGET = 10;
+
+export type RequiredField = "mobility" | "transport";
+export type DefaultedField = "interests" | "times" | "travel" | "budget";
+export type ProfileResult =
+  | { ok: true; profile: Profile; defaults: DefaultedField[] }
+  | { ok: false; missing: RequiredField[] };
+
+// Reads each field from its own explicit answer. Unknown mobility keys count as unanswered, never guessed.
+function collect(answers: readonly Answer[]) {
+  const liked = answers.flatMap((a) => (a.kind === "interest" && a.liked ? [a.key] : []));
   const times = new Set<Profile["times"][number]>();
   for (const a of answers) if (a.kind === "times") a.keys.forEach((k) => times.add(k));
   const travel = answers.find((a): a is Extract<Answer, { kind: "travel" }> => a.kind === "travel");
-  const mobility = answers.find((a): a is Extract<Answer, { kind: "mobility" }> => a.kind === "mobility");
   const budget = answers.find((a): a is Extract<Answer, { kind: "budget" }> => a.kind === "budget");
-
-  const mobilityValue: Profile["mobility"] =
-    mobility?.key === "avoid" ? "walker" : mobility?.key === "hassle" ? "cane" : "full";
-
+  const mobility = answers.find((a): a is Extract<Answer, { kind: "mobility" }> =>
+    a.kind === "mobility" && WALKING_AID_OPTIONS.some((o) => o.key === a.key));
+  const transportAnswer = answers.find((a): a is Extract<Answer, { kind: "transport" }> => a.kind === "transport");
+  const transport = TRANSPORT_OPTIONS.filter((o) => transportAnswer?.modes.includes(o.key)).map((o) => o.key);
   return {
-    name: name.trim() || "Friend",
-    interests: likedInterests.length ? likedInterests : ["learning"],
-    mobility: mobilityValue,
-    transport: mobilityValue === "full" ? ["drive", "walk", "bus"] : ["bus", "paratransit", "family"],
-    maxTravelMin: travel?.min ?? 30,
-    times: times.size ? [...times] : ["morning", "afternoon"],
-    budgetPerWeek: budget?.amount ?? 10,
-    hearingImpaired: false,
-    prefersSmallGroups: false,
+    interests: liked.length ? liked : null,
+    times: times.size ? TIME_OPTIONS.filter((o) => times.has(o.key)).map((o) => o.key) : null,
+    travelMin: travel?.min ?? null,
+    budget: budget?.amount ?? null,
+    mobility: mobility?.key ?? null,
+    transport: transport.length ? transport : null,
   };
+}
+
+export function answersToProfile(answers: readonly Answer[], name: string): ProfileResult {
+  const c = collect(answers);
+  if (!c.mobility || !c.transport) {
+    return { ok: false, missing: [...(c.mobility ? [] : ["mobility" as const]), ...(c.transport ? [] : ["transport" as const])] };
+  }
+  const defaults: DefaultedField[] = [];
+  if (!c.interests) defaults.push("interests");
+  if (!c.times) defaults.push("times");
+  if (c.travelMin === null) defaults.push("travel");
+  if (c.budget === null) defaults.push("budget");
+  return {
+    ok: true,
+    defaults,
+    profile: {
+      name: name.trim() || "Friend",
+      interests: c.interests ?? DEFAULT_INTERESTS,
+      mobility: c.mobility,
+      transport: c.transport,
+      maxTravelMin: c.travelMin ?? DEFAULT_TRAVEL_MIN,
+      times: c.times ?? DEFAULT_TIMES,
+      budgetPerWeek: c.budget ?? DEFAULT_BUDGET,
+      hearingImpaired: false,
+      prefersSmallGroups: false,
+    },
+  };
+}
+
+export type ReviewField = DefaultedField | RequiredField;
+export type ReviewRow = { field: ReviewField; label: string; value: string; isDefault: boolean };
+
+// Plain-words summary for the "Here's what we heard" step. Defaults are flagged, never presented as answers.
+export function reviewRows(answers: readonly Answer[]): ReviewRow[] {
+  const c = collect(answers);
+  const labelOf = <K extends string>(opts: readonly { key: K; label: string }[], keys: readonly K[]) =>
+    opts.filter((o) => keys.includes(o.key)).map((o) => o.label).join(", ");
+  const travelBucket = (min: number) => TRAVEL_BUCKETS.find((b) => b.min === min);
+  const travelText = (min: number) => { const b = travelBucket(min); return b ? `${b.label} (${b.detail})` : `About ${min} minutes`; };
+  const budgetText = (amount: number) => { const b = BUDGET_OPTIONS.find((o) => o.amount === amount); return b ? `${b.label} (${b.detail})` : `Up to $${amount} a week`; };
+  return [
+    { field: "interests", label: "What you enjoy", value: labelOf(INTEREST_META, c.interests ?? DEFAULT_INTERESTS), isDefault: !c.interests },
+    { field: "times", label: "When you're free", value: labelOf(TIME_OPTIONS, c.times ?? DEFAULT_TIMES), isDefault: !c.times },
+    { field: "travel", label: "How far", value: travelText(c.travelMin ?? DEFAULT_TRAVEL_MIN), isDefault: c.travelMin === null },
+    { field: "mobility", label: "Walking aid", value: c.mobility ? labelOf(WALKING_AID_OPTIONS, [c.mobility]) : "Not answered yet", isDefault: false },
+    { field: "transport", label: "How you get places", value: c.transport ? labelOf(TRANSPORT_OPTIONS, c.transport) : "Not answered yet", isDefault: false },
+    { field: "budget", label: "Weekly budget", value: budgetText(c.budget ?? DEFAULT_BUDGET), isDefault: c.budget === null },
+  ];
+}
+
+// Change from the review step: swap one card's answer, keep every other answer as it was.
+export function replaceAnswer(history: readonly (Answer | null)[], index: number, answer: Answer | null): (Answer | null)[] {
+  return history.map((a, i) => (i === index ? answer : a));
 }
 
 type InterestKey = Profile["interests"][number];
@@ -121,12 +194,25 @@ export function pickedToHistory(picked: readonly InterestKey[], answeredCount: n
   }));
 }
 
+// Change "What you enjoy" from the review: new interest picks, every later answer kept.
+export function replaceInterests(history: readonly (Answer | null)[], picked: readonly InterestKey[]): (Answer | null)[] {
+  return [...pickedToHistory(picked, INTEREST_COUNT), ...history.slice(INTEREST_COUNT)];
+}
+
 // Fast double-taps land on the next card's button (same spot), so ignore answers
 // arriving within this window of the previous one.
 export const ANSWER_LOCKOUT_MS = 350;
 
 export function isLockedOut(lastAt: number, now: number): boolean {
   return now - lastAt < ANSWER_LOCKOUT_MS;
+}
+
+// Claims the next answer slot, or returns false inside the lockout window.
+function takeTurn(lastAt: { current: number }): boolean {
+  const now = Date.now();
+  if (isLockedOut(lastAt.current, now)) return false;
+  lastAt.current = now;
+  return true;
 }
 
 // Strong focus ring (outline-solid overrides the shadcn Button's outline-none).
@@ -279,8 +365,11 @@ export function CardDeck({
   const [history, setHistory] = useState<(Answer | null)[]>([]);
   const [bigButtons, setBigButtons] = useState(false);
   const [picked, setPicked] = useState<InterestKey[]>([]);
+  // Card index being changed from the review step; null = normal forward flow.
+  const [editing, setEditing] = useState<number | null>(null);
   const index = history.length;
-  const showGrid = bigButtons && index < INTEREST_COUNT;
+  const at = editing ?? index;
+  const showGrid = editing !== null ? editing < INTEREST_COUNT : bigButtons && index < INTEREST_COUNT;
   const answers = history.filter((answer): answer is Answer => answer !== null);
   const [name, setName] = useState(initialName);
   const lastRecordAt = useRef(-Infinity);
@@ -292,27 +381,40 @@ export function CardDeck({
     if (!moveFocus.current) return;
     moveFocus.current = false;
     rootRef.current?.querySelector<HTMLElement>("[data-step-focus]")?.focus();
-  }, [history]);
+  }, [history, editing]);
 
   const changeStep = (next: (Answer | null)[] | ((prev: (Answer | null)[]) => (Answer | null)[])) => {
     moveFocus.current = true;
     setHistory(next);
   };
+  // Double-tap lockout shared by every step-changing control.
+  const guard = () => !loading && takeTurn(lastRecordAt);
   const record = (answer: Answer | null) => {
-    const now = Date.now();
-    if (loading || isLockedOut(lastRecordAt.current, now)) return;
-    lastRecordAt.current = now;
-    changeStep((prev) => [...prev, answer]);
+    if (!guard()) return;
+    if (editing !== null) {
+      const target = editing;
+      changeStep((prev) => replaceAnswer(prev, target, answer));
+      setEditing(null);
+    } else changeStep((prev) => [...prev, answer]);
+  };
+  const startEdit = (cardIndex: number) => {
+    if (!guard()) return;
+    if (cardIndex < INTEREST_COUNT) setPicked(likedInterests(history));
+    moveFocus.current = true;
+    setEditing(cardIndex);
   };
   const back = () => {
-    if (bigButtons && index === INTEREST_COUNT) {
+    if (editing !== null) {
+      moveFocus.current = true;
+      setEditing(null);
+    } else if (bigButtons && index === INTEREST_COUNT) {
       // Easier view: Back from the times card reopens the grid with picks kept.
       setPicked(likedInterests(history));
       changeStep([]);
     } else changeStep(undoAnswer);
   };
   const toggleView = () => {
-    if (index < INTEREST_COUNT) {
+    if (editing === null && index < INTEREST_COUNT) {
       if (bigButtons) setHistory(pickedToHistory(picked, index));
       else setPicked(likedInterests(history));
     }
@@ -323,37 +425,76 @@ export function CardDeck({
     record({ kind: "interest", key: interest.interest.key, liked: dir > 0 });
   };
 
-  if (index >= cards.length) {
+  if (editing === null && index >= cards.length) {
+    const result = answersToProfile(answers, name);
+    const cardFor = (field: ReviewField) =>
+      field === "interests" ? 0 : cards.findIndex((c) => c.type === field);
     return (
-      <div ref={rootRef} className="mx-auto flex w-full max-w-md flex-col items-center gap-4 rounded-xl border bg-card p-6 text-center text-base md:text-lg">
-        <div className="text-5xl" aria-hidden="true">🎉</div>
-        <h2 tabIndex={-1} data-step-focus className="text-xl font-semibold outline-none">All set!</h2>
-        <p className="flex items-center gap-2 text-muted-foreground" aria-live="polite">
+      <div ref={rootRef} className="mx-auto w-full max-w-md rounded-xl border bg-card p-6 text-base md:text-lg">
+        <h2 tabIndex={-1} data-step-focus className="mb-1 text-2xl font-semibold outline-none">Here&apos;s what we heard</h2>
+        <p className="mb-4 text-muted-foreground">Check your answers. Tap Change to fix anything.</p>
+        <dl className="divide-y">
+          {reviewRows(answers).map((row) => (
+            <div key={row.field} className="flex items-center gap-3 py-3">
+              <div className="min-w-0 flex-1">
+                <dt className="font-medium text-muted-foreground">{row.label}</dt>
+                <dd className="text-lg font-semibold break-words md:text-xl">
+                  {row.value}
+                  {row.isDefault && <span className="ml-1 font-normal text-muted-foreground">(default)</span>}
+                </dd>
+              </div>
+              <Button
+                size="lg"
+                variant="outline"
+                className={`min-h-14 shrink-0 rounded-xl px-4 text-lg ${RING}`}
+                aria-label={`Change ${row.label.toLowerCase()}`}
+                onClick={() => startEdit(cardFor(row.field))}
+                disabled={loading}
+              >
+                Change
+              </Button>
+            </div>
+          ))}
+        </dl>
+        {!result.ok && (
+          <p className="mt-3 font-medium text-destructive" role="alert">
+            Please answer {result.missing.map((m) => (m === "mobility" ? "walking aid" : "how you get places")).join(" and ")} first.
+          </p>
+        )}
+        <p className="mt-4 flex items-center gap-2 text-muted-foreground" aria-live="polite">
           {loading ? (
             <><LoaderCircle aria-hidden="true" className="size-5 animate-spin motion-reduce:animate-none" /> Finding matches…</>
           ) : (
             <>Ready to see {name.trim() ? `${name.trim()}'s` : "your"} matches?</>
           )}
         </p>
-        <Button size="lg" className={RING} onClick={() => onComplete(answersToProfile(answers, name))} disabled={loading}>
-          See my matches
-        </Button>
-        <Button size="lg" variant="outline" className={RING} onClick={back} disabled={loading}><ArrowLeft aria-hidden="true" /> Back</Button>
-        <button
-          disabled={loading}
-          className={`min-h-11 rounded-xl px-3 text-base underline ${RING}`}
-          onClick={() => {
-            changeStep([]);
-            setPicked([]);
-          }}
-        >
-          Start over
-        </button>
+        <div className="mt-3 flex flex-col gap-3">
+          <Button
+            size="lg"
+            className={`min-h-14 rounded-xl text-lg ${RING}`}
+            onClick={() => { if (result.ok && guard()) onComplete(result.profile); }}
+            disabled={loading || !result.ok}
+          >
+            See my matches
+          </Button>
+          <Button size="lg" variant="outline" className={`min-h-14 rounded-xl text-lg ${RING}`} onClick={back} disabled={loading}><ArrowLeft aria-hidden="true" /> Back</Button>
+          <button
+            disabled={loading}
+            className={`min-h-11 rounded-xl px-3 text-base underline ${RING}`}
+            onClick={() => {
+              changeStep([]);
+              setPicked([]);
+            }}
+          >
+            Start over
+          </button>
+        </div>
       </div>
     );
   }
 
-  const card = cards[index];
+  const card = cards[at];
+  const current = editing !== null ? history[editing] : null;
   // In the easier view the 10 interest cards collapse into one grid step.
   const stepCount = bigButtons ? cards.length - INTEREST_COUNT + 1 : cards.length;
   const step = bigButtons ? Math.max(0, index - INTEREST_COUNT + 1) : index;
@@ -379,14 +520,20 @@ export function CardDeck({
         {bigButtons && <Check aria-hidden="true" />} Easier view (big tiles): {bigButtons ? "on" : "off"}
       </Button>
       <div className="mb-3">
-        <Button size="lg" variant="outline" className={RING} onClick={back} disabled={index === 0 || showGrid || loading}>
-          <ArrowLeft aria-hidden="true" /> Back
+        <Button size="lg" variant="outline" className={RING} onClick={back} disabled={editing === null && (index === 0 || showGrid || loading)}>
+          <ArrowLeft aria-hidden="true" /> {editing !== null ? "Back to review" : "Back"}
         </Button>
       </div>
-      <p className="mb-2 font-medium" aria-live="polite">{bigButtons ? "Step" : "Card"} {step + 1} of {stepCount}</p>
-      <div role="progressbar" aria-label="Cards completed" aria-valuemin={0} aria-valuemax={stepCount} aria-valuenow={step} className="mb-4 h-3 overflow-hidden rounded-full bg-muted">
-        <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
-      </div>
+      {editing !== null ? (
+        <p className="mb-4 font-medium" aria-live="polite">Changing one answer — the rest stay as they are.</p>
+      ) : (
+        <>
+          <p className="mb-2 font-medium" aria-live="polite">{bigButtons ? "Step" : "Card"} {step + 1} of {stepCount}</p>
+          <div role="progressbar" aria-label="Cards completed" aria-valuemin={0} aria-valuemax={stepCount} aria-valuenow={step} className="mb-4 h-3 overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
+          </div>
+        </>
+      )}
 
       <label className="mb-4 block">
         <span className="mb-1 block text-base md:text-lg font-medium">First, what should we call you?</span>
@@ -406,10 +553,11 @@ export function CardDeck({
           onToggle={(key) => setPicked((prev) => toggleKey(prev, key))}
           onClear={() => setPicked([])}
           onContinue={() => {
-            const now = Date.now();
-            if (loading || isLockedOut(lastRecordAt.current, now)) return;
-            lastRecordAt.current = now;
-            changeStep(pickedToHistory(picked, INTEREST_COUNT));
+            if (!guard()) return;
+            if (editing !== null) {
+              changeStep((prev) => replaceInterests(prev, picked));
+              setEditing(null);
+            } else changeStep(pickedToHistory(picked, INTEREST_COUNT));
           }}
         />
       )}
@@ -451,7 +599,13 @@ export function CardDeck({
       {card.type === "times" && (
         <div className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 tabIndex={-1} data-step-focus className="mb-4 text-xl font-semibold outline-none">When are you usually free?</h2>
-          <TimeChoices onPick={(keys) => record({ kind: "times", keys })} disabled={loading} bigButtons={bigButtons} />
+          <TimeChoices
+            key={at}
+            initial={current?.kind === "times" ? current.keys : []}
+            onPick={(keys) => record({ kind: "times", keys })}
+            disabled={loading}
+            bigButtons={bigButtons}
+          />
           <SkipRow onSkip={() => record(null)} />
         </div>
       )}
@@ -479,27 +633,31 @@ export function CardDeck({
       )}
 
       {card.type === "mobility" && (
-        <div className="rounded-xl border bg-card p-6 shadow-sm">
-          <h2 tabIndex={-1} data-step-focus className="mb-1 text-xl font-semibold outline-none">What about stairs?</h2>
-          <p className="mb-4 text-base md:text-lg text-muted-foreground">
-            Just so we can match you with places you&apos;ll find easy to get into.
-          </p>
-          <div className="space-y-2">
-            {STAIR_OPTIONS.map((s) => (
-              <button
-                disabled={loading}
-                key={s.key}
-                className={option}
-                onClick={() => {
-                  record({ kind: "mobility", key: s.key });
-                }}
-              >
-                <span className="font-medium">{s.label}</span>
-                <span className={optionDetail}>{s.detail}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+        <ChoiceCard
+          key={at}
+          multi={false}
+          heading="Do you use anything to help you walk?"
+          helper="Pick one."
+          options={WALKING_AID_OPTIONS}
+          initial={current?.kind === "mobility" ? [current.key] : []}
+          disabled={loading}
+          bigButtons={bigButtons}
+          onDone={([key]) => record({ kind: "mobility", key })}
+        />
+      )}
+
+      {card.type === "transport" && (
+        <ChoiceCard
+          key={at}
+          multi
+          heading="How do you usually get places?"
+          helper="Pick all that apply. We'll only plan trips you can actually make."
+          options={TRANSPORT_OPTIONS}
+          initial={current?.kind === "transport" ? current.modes : []}
+          disabled={loading}
+          bigButtons={bigButtons}
+          onDone={(modes) => record({ kind: "transport", modes })}
+        />
       )}
 
       {card.type === "budget" && (
@@ -527,13 +685,67 @@ export function CardDeck({
   );
 }
 
-function TimeChoices({ onPick, disabled, bigButtons }: {
+// Required question: native radios (single) or checkboxes (multi); Continue stays disabled until something is picked.
+function ChoiceCard<K extends string>({ multi, heading, helper, options, initial, disabled, bigButtons, onDone }: {
+  multi: boolean;
+  heading: string;
+  helper: string;
+  options: readonly { key: K; label: string; emoji?: string }[];
+  initial: readonly K[];
+  disabled: boolean;
+  bigButtons: boolean;
+  onDone: (keys: [K, ...K[]]) => void;
+}) {
+  const [selected, setSelected] = useState<K[]>([...initial]);
+  const headingId = useId();
+  const choice = `flex w-full cursor-pointer items-center gap-4 rounded-xl border-2 bg-background text-left font-medium hover:bg-accent has-[:checked]:border-foreground has-[:checked]:bg-accent has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-solid has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-foreground ${bigButtons ? "min-h-20 px-5 py-4 text-xl md:text-2xl" : "min-h-14 px-4 py-3 text-lg"}`;
+  const ordered = options.filter((o) => selected.includes(o.key)).map((o) => o.key);
+  return (
+    <div className="rounded-xl border bg-card p-6 shadow-sm">
+      <h2 id={headingId} tabIndex={-1} data-step-focus className="mb-1 text-xl font-semibold outline-none">{heading}</h2>
+      <p className="mb-4 text-base md:text-lg text-muted-foreground">{helper}</p>
+      <div role={multi ? "group" : "radiogroup"} aria-labelledby={headingId} aria-required="true" className="space-y-2">
+        {options.map((o) => (
+          <label key={o.key} className={choice}>
+            <input
+              type={multi ? "checkbox" : "radio"}
+              name={headingId}
+              value={o.key}
+              checked={selected.includes(o.key)}
+              disabled={disabled}
+              onChange={() =>
+                setSelected((prev) => (multi ? (prev.includes(o.key) ? prev.filter((k) => k !== o.key) : [...prev, o.key]) : [o.key]))
+              }
+              className="size-6 shrink-0 accent-foreground outline-none"
+            />
+            {o.emoji && <span aria-hidden="true" className="text-2xl">{o.emoji}</span>}
+            <span>{o.label}</span>
+          </label>
+        ))}
+      </div>
+      {ordered.length === 0 && (
+        <p className="mt-3 text-base text-muted-foreground">{multi ? "Pick at least one to continue." : "Pick one to continue."}</p>
+      )}
+      <Button
+        size="lg"
+        className={`mt-4 w-full rounded-xl ${bigButtons ? "min-h-20 text-xl md:text-2xl" : "min-h-14 text-lg"} ${RING}`}
+        disabled={disabled || ordered.length === 0}
+        onClick={() => { if (ordered.length) onDone(ordered as [K, ...K[]]); }}
+      >
+        Continue
+      </Button>
+    </div>
+  );
+}
+
+function TimeChoices({ initial, onPick, disabled, bigButtons }: {
+  initial: readonly Profile["times"][number][];
   onPick: (keys: Profile["times"][number][]) => void;
   disabled: boolean;
   bigButtons: boolean;
 }) {
   const size = bigButtons ? "min-h-20 text-xl md:text-2xl" : "min-h-14 text-base md:text-lg";
-  const [selected, setSelected] = useState<Profile["times"][number][]>([]);
+  const [selected, setSelected] = useState<Profile["times"][number][]>([...initial]);
   return (
     <div className="space-y-3">
       {TIME_OPTIONS.map((option) => (
