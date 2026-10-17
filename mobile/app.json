@@ -47,6 +47,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "owner": "sparsh9gs-team",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "2a05e56a-99a8-40b9-bec1-3421b250593d"
+      }
     }
   }
 }
