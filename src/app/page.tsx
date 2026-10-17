@@ -14,6 +14,10 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   async function run(p: Profile = profile) {
+    // integration: /coordinate reads this so "Get me there" plans for the same person (session-only, no PII leaves the browser).
+    try {
+      sessionStorage.setItem("daybridge:profile", JSON.stringify(p));
+    } catch {}
     setLoading(true);
     setError(null);
     try {

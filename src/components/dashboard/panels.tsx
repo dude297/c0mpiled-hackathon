@@ -1,13 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Ban, Calendar, CalendarPlus, Car, Check, ChevronDown, CircleX, CloudRain, LoaderCircle, MapPin, Printer, ShieldCheck, Sparkles, Sun, Users } from "lucide-react";
+import { Ban, Calendar, Check, ChevronDown, CircleX, Hand, LoaderCircle, MapPin, Printer, ShieldCheck, Sparkles, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Interest, Mobility, TimeSlot, Transport, type AnalysisResult, type Profile } from "@/lib/schema";
-import { calendarLink } from "@/lib/integrations/calendar";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   return (
@@ -144,19 +143,8 @@ export function ProfilePanel(props: {
   );
 }
 
-export function PlanPanel({ result, loading, onSave }: {
-  result: AnalysisResult | null;
-  loading: boolean;
-  onSave: () => Promise<void>;
-}) {
+export function PlanPanel({ result, loading, onSave }: { result: AnalysisResult | null; loading: boolean; onSave: () => Promise<void> }) {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "error">("idle");
-  // Additive enrichments from the API; all optional.
-  type Enriched = {
-    venueByItem?: Record<string, { address: string; stepFree: boolean | null } | null>;
-    weather?: { summary: string; outdoorConcern: boolean } | null;
-    rideshareByItem?: Record<string, { uberLink: string; lyftLink: string; estimate?: { fareLow: number; fareHigh: number } | null } | null>;
-  };
-  const extra = result as (AnalysisResult & Enriched) | null;
   async function handleSave() {
     try {
       setSaveState("saving");
@@ -180,7 +168,7 @@ export function PlanPanel({ result, loading, onSave }: {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-base md:text-lg">
-        {loading && !result ? (
+        {loading ? (
           <div className="flex items-center gap-3 py-8 text-muted-foreground" role="status" aria-live="polite">
             <LoaderCircle className="size-6 animate-spin" aria-hidden="true" />
             Building the plan…
@@ -189,7 +177,7 @@ export function PlanPanel({ result, loading, onSave }: {
           <div className="rounded-xl border-2 border-dashed p-8 text-center">
             <p className="text-lg font-semibold">No plan yet</p>
             <p className="mt-1 text-base text-muted-foreground">
-              Pick a demo above and hit Build plan — it takes one click.
+              Open the profile below, pick a demo, and hit Build plan — it takes one click.
             </p>
           </div>
         ) : result.plan.length === 0 ? (
@@ -210,83 +198,35 @@ export function PlanPanel({ result, loading, onSave }: {
               ))}
             </div>
             <ul className="grid gap-3">
-              {result.plan.map((i) => {
-                const venue = extra?.venueByItem?.[i.activityId];
-                const ride = extra?.rideshareByItem?.[i.activityId];
-                const day = i.when.split(" ")[0];
-                const cal = calendarLink(i);
-                return (
-                  <li key={i.activityId} className="rounded-xl border bg-card p-4 shadow-sm">
-                    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
-                      <p className="text-lg font-semibold md:text-xl">{i.name}</p>
-                      <p className="text-sm text-muted-foreground md:text-base">
-                        <b className="text-foreground">${i.costPerWeek}</b>/week
-                      </p>
-                    </div>
-                    <p className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground md:text-base">
-                      <span className="inline-flex items-center gap-1.5"><Calendar className="size-4" aria-hidden="true" />{i.when}</span>
-                      <span className="inline-flex items-center gap-1.5"><MapPin className="size-4" aria-hidden="true" />{i.travel}</span>
+              {result.plan.map((i) => (
+                <li key={i.activityId} className="rounded-xl border bg-card p-4 shadow-sm">
+                  <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                    <p className="text-lg font-semibold md:text-xl">{i.name}</p>
+                    <p className="text-sm text-muted-foreground md:text-base">
+                      <b className="text-foreground">${i.costPerWeek}</b>/week
                     </p>
-                    {venue?.address && (
-                      <p className="mt-1 text-sm text-muted-foreground md:text-base">
-                        {venue.address} <span className="font-medium">· via Google</span>
-                      </p>
-                    )}
-                    {i.barriers.filter((b) => b.severity === "soft").map((b) => (
-                      <p key={b.rule} className="mt-2 rounded-md bg-amber-100 p-2 text-sm dark:bg-amber-950/40 md:text-base">
-                        <span className="font-medium text-amber-800 dark:text-amber-300">{b.detail}</span>
-                        <span className="text-amber-800/80 dark:text-amber-300/80"> → </span>
-                        {b.mitigation}
-                      </p>
-                    ))}
-                    {ride && (
-                      <div className="mt-3 flex flex-wrap items-center gap-2 print:hidden">
-                        <a
-                          href={ride.uberLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 md:text-base"
-                        >
-                          <Car className="size-4" aria-hidden="true" />
-                          Ride with Uber
-                        </a>
-                        <a
-                          href={ride.lyftLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 md:text-base"
-                        >
-                          <Car className="size-4" aria-hidden="true" />
-                          Ride with Lyft
-                        </a>
-                        {ride.estimate && (
-                          <span className="text-sm text-muted-foreground md:text-base">
-                            est. ${ride.estimate.fareLow}–${ride.estimate.fareHigh} each way
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    <a
-                      href={cal}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 md:text-base print:hidden"
-                    >
-                      <CalendarPlus className="size-4" aria-hidden="true" />
-                      Add {day} to Google Calendar
-                    </a>
-                  </li>
-                );
-              })}
+                  </div>
+                  <p className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground md:text-base">
+                    <span className="inline-flex items-center gap-1.5"><Calendar className="size-4" aria-hidden="true" />{i.when}</span>
+                    <span className="inline-flex items-center gap-1.5"><MapPin className="size-4" aria-hidden="true" />{i.travel}</span>
+                  </p>
+                  {i.barriers.filter((b) => b.severity === "soft").map((b) => (
+                    <p key={b.rule} className="mt-2 rounded-md bg-amber-100 p-2 text-sm dark:bg-amber-950/40 md:text-base">
+                      <span className="font-medium text-amber-800 dark:text-amber-300">{b.detail}</span>
+                      <span className="text-amber-800/80 dark:text-amber-300/80"> → </span>
+                      {b.mitigation}
+                    </p>
+                  ))}
+                  <a
+                    href={`/coordinate?activityId=${i.activityId}`}
+                    className="mt-3 inline-flex min-h-11 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80 focus-visible:ring-3 focus-visible:ring-ring/50 md:text-base print:hidden"
+                  >
+                    <Hand className="size-4" aria-hidden="true" />
+                    Get me there →
+                  </a>
+                </li>
+              ))}
             </ul>
-            {extra?.weather && (
-              <p className={`flex items-start gap-2 rounded-md p-3 text-sm md:text-base ${extra.weather.outdoorConcern ? "bg-amber-100 dark:bg-amber-950/40" : "bg-muted"}`}>
-                {extra.weather.outdoorConcern
-                  ? <CloudRain className="mt-0.5 size-5 shrink-0 text-amber-800 dark:text-amber-300" aria-hidden="true" />
-                  : <Sun className="mt-0.5 size-5 shrink-0" aria-hidden="true" />}
-                {extra.weather.summary}
-              </p>
-            )}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="max-w-md text-base text-muted-foreground md:text-lg">{result.explanation}</p>
               <div className="flex items-center gap-2 print:hidden">
@@ -424,6 +364,8 @@ export function IntakeSlot({ onIntake }: { onIntake: (text: string) => Promise<v
   );
 }
 
+// Kept as the lead's /api/plans slot: the plan panel's inline Save & share is wired to
+// savePlan in page.tsx; this component is available for /plan/[id] pages once they exist.
 export function SaveShareSlot({ onSave }: { onSave: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
