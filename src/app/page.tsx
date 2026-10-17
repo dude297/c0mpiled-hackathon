@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { BlockedPanel, DashboardShell, EvidencePanel, PlanPanel, ProfilePanel } from "@/components/dashboard/panels";
+import { CardDeck } from "@/components/onboarding/CardDeck";
 import { DEMO_PROFILES } from "@/domain/activities";
 import type { AnalysisResult, Profile } from "@/lib/schema";
 
@@ -10,6 +11,7 @@ export default function Home() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<"onboarding" | "dashboard">("onboarding");
 
   async function run(p: Profile = profile) {
     setLoading(true);
@@ -23,8 +25,10 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Request failed");
       setResult(data);
+      setMode("dashboard");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Request failed");
+      setMode("dashboard");
     } finally {
       setLoading(false);
     }
@@ -33,7 +37,34 @@ export default function Home() {
   function demo(key: string) {
     const p = DEMO_PROFILES[key];
     setProfile(p);
+    setMode("dashboard");
     run(p);
+  }
+
+  if (mode === "onboarding") {
+    return (
+      <div className="mx-auto w-full max-w-6xl p-6">
+        <header className="mb-6 text-center">
+          <h1 className="text-3xl font-semibold">DayBridge</h1>
+          <p className="text-muted-foreground">
+            Find the social activities you&apos;ll actually love — and can actually get to.
+          </p>
+        </header>
+        <CardDeck
+          onComplete={(p) => {
+            setProfile(p);
+            run(p);
+          }}
+          loading={loading}
+        />
+        {error && <p className="mx-auto max-w-md text-center text-destructive">{error}</p>}
+        <div className="pt-6 text-center">
+          <button className="text-sm text-muted-foreground underline" onClick={() => setMode("dashboard")}>
+            Or use the classic form
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (

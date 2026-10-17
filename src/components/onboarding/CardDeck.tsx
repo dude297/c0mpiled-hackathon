@@ -194,7 +194,7 @@ export function CardDeck({
   initialName?: string;
   loading?: boolean;
 }) {
-  const cards = useMemo(buildCards, []);
+  const cards = useMemo(() => buildCards(), []);
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [name, setName] = useState(initialName);
