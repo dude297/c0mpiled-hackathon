@@ -13,7 +13,8 @@ it("normalizes source events without inventing feasibility", () => {
   const uber = new URL(event.uberLink!); const lyft = new URL(event.lyftLink!);
   expect(uber.searchParams.get("dropoff[latitude]")).toBe("37.87");
   expect(lyft.searchParams.get("destination[longitude]")).toBe("-122.26");
-  expect([...uber.searchParams.keys()].some((key) => key.startsWith("pickup"))).toBe(false);
+  expect(uber.searchParams.get("pickup")).toBe("my_location");
+  expect([...uber.searchParams.keys()].some((key) => key.startsWith("pickup["))).toBe(false);
   expect([...lyft.searchParams.keys()].some((key) => key.startsWith("pickup"))).toBe(false);
   expect(event).toMatchObject({ name: "Arts & Community", startsAt: "2026-10-18T17:00:00.000Z", proximity: "local", accessibility: "unknown", cost: "unknown", eligibility: "check-source", verified: false });
 });

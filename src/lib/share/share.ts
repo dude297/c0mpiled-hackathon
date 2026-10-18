@@ -9,7 +9,9 @@ import { AnalysisResult } from "@/lib/schema";
 
 export const ShareInput = z
   .object({
-    result: AnalysisResult,
+    // Enrichment (venues/weather/rides) is never shared, so strip it instead of validating it:
+    // the live enrichment path emits nulls/legacy shapes that would otherwise 400 the share.
+    result: AnalysisResult.omit({ venueByItem: true, weather: true, rideshareByItem: true, enrichment: true }),
     consent: z.literal(true),
     firstNameOnly: z.boolean().optional(),
     expiresInDays: z.number().int().min(1).max(30).optional(),
