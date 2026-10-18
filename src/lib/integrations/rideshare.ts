@@ -1,4 +1,5 @@
 import type { PlanItem } from "@/lib/schema";
+import { rideLinks } from "./ride-links";
 
 // Rideshare integration for plan items.
 // Tier 1 (always on): deep links that open the Uber/Lyft app with the destination
@@ -13,35 +14,9 @@ export type RideshareInfo = {
   estimate?: { fareLow: number; fareHigh: number; currency: string; source: "uber" } | null;
 } | null;
 
-// Berkeley Civic Center as the demo pickup. Honest labeling: the pickup is a fixed demo
-// point, not the user's home, and a deep link is a handoff to tap — not a booking.
+// Fixed demo point used ONLY as the fare-estimate start; deep links never carry it
+// (pickup is chosen in the provider app — see ride-links.ts).
 const DEFAULT_ORIGIN = { lat: 37.8715, lon: -122.273 };
-const ORIGIN_LABEL = "Berkeley Civic Center (demo)";
-
-function uberDeepLink(name: string, lat: number, lon: number): string {
-  const params = new URLSearchParams({
-    action: "setPickup",
-    "pickup[latitude]": String(DEFAULT_ORIGIN.lat),
-    "pickup[longitude]": String(DEFAULT_ORIGIN.lon),
-    "pickup[nickname]": ORIGIN_LABEL,
-    "dropoff[latitude]": String(lat),
-    "dropoff[longitude]": String(lon),
-    "dropoff[nickname]": name,
-  });
-  return `https://m.uber.com/ul/?${params.toString()}`;
-}
-
-function lyftDeepLink(name: string, lat: number, lon: number): string {
-  const params = new URLSearchParams({
-    "destination[latitude]": String(lat),
-    "destination[longitude]": String(lon),
-    "destination[address]": name,
-    // Lyft's documented deep-link keys; a JSON-array "pickup" is ignored by the app.
-    "pickup[latitude]": String(DEFAULT_ORIGIN.lat),
-    "pickup[longitude]": String(DEFAULT_ORIGIN.lon),
-  });
-  return `https://lyft.com/ride?id=lyft&${params.toString()}`;
-}
 
 type VenueCoords = { lat: number; lon: number } | null;
 
@@ -101,8 +76,7 @@ export async function rideshareFor(item: PlanItem, coords: VenueCoords, venueNam
   const label = venueName || item.name;
   const estimate = await uberEstimate(lat, lon, signal);
   return {
-    uberLink: uberDeepLink(label, lat, lon),
-    lyftLink: lyftDeepLink(label, lat, lon),
+    ...rideLinks(lat, lon, label)!, // coords validated above
     estimate,
   };
 }
