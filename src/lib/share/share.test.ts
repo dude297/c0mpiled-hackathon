@@ -134,3 +134,10 @@ describe("share store", () => {
     expect(_shareStoreSize()).toBe(MAX_SHARES);
   });
 });
+
+it("accepts a live-enriched result with null venue/ride entries (DAYBRIDGE_ENRICH=1) and strips them", () => {
+  const result = { ...resultFor(DEMO_PROFILES.margaret), venueByItem: { x: null }, weather: null, rideshareByItem: { x: null } };
+  const parsed = ShareInput.safeParse({ result, consent: true });
+  expect(parsed.success).toBe(true);
+  expect(parsed.data?.result).not.toHaveProperty("venueByItem");
+});
