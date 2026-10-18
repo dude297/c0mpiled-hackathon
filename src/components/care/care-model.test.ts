@@ -154,6 +154,6 @@ describe("C1 markup", () => {
   it("no saved answers: one Set up action to onboarding", () => {
     const html = renderToStaticMarkup(createElement(SetUp, { name: "Margaret" }));
     expect(html).toContain("Set up Margaret");
-    expect(html).toContain('href="/"');
+    expect(html).toContain('href="/demo"');
   });
 });

@@ -248,7 +248,7 @@ function storedProfile(activityId: string | null) {
 function BackToMatches() {
   const router = useRouter();
   return (
-    <Link href="/" className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 font-medium text-primary underline underline-offset-4"
+    <Link href="/demo" className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 font-medium text-primary underline underline-offset-4"
       onNavigate={(event) => {
         if (window.history.length > 1) {
           event.preventDefault();
@@ -415,7 +415,7 @@ function CoordinateInner() {
           <section className="space-y-4 py-10">
             <h1 className="text-2xl font-semibold">We couldn&apos;t find the plan you came from.</h1>
             <div className="flex flex-wrap items-center gap-3">
-              <Link href="/" className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 font-medium text-primary underline underline-offset-4">Start over</Link>
+              <Link href="/demo" className="inline-flex min-h-11 items-center rounded-lg px-3 py-2 font-medium text-primary underline underline-offset-4">Start over</Link>
               <Button size="lg" onClick={() => void loadPlan(true)} disabled={busy}>Use the Maya demo</Button>
             </div>
           </section>

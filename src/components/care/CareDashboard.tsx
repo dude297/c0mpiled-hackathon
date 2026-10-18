@@ -56,7 +56,7 @@ export function SetUp({ name }: { name: string }) {
     <section className="max-w-[65ch] space-y-4">
       <h1 className="text-[2.25rem] font-semibold leading-tight">Caregiver view</h1>
       <p>{known ? `${name} has no saved answers on this browser yet.` : "No answers are saved on this browser yet."}</p>
-      <Link href="/" className={PRIMARY}>
+      <Link href="/demo" className={PRIMARY}>
         {known ? `Set up ${name}` : "Start here"}
       </Link>
     </section>

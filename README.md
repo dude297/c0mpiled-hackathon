@@ -6,9 +6,22 @@ DayBridge helps older adults discover activities that match their interests and 
 
 > **Why it matters:** A recommendation is not the same as an outing. DayBridge focuses on the barriers between finding something enjoyable and actually attending.
 
+## Screenshots
+
+| Landing page (`/`) | Interactive story: what fits |
+|---|---|
+| ![DayBridge landing page hero: "A week that works around her."](docs/screenshots/landing-hero.png) | ![Story scene that runs the real barrier engine on Maya's profile](docs/screenshots/landing-what-fits.png) |
+| **Story: her yes (after clicking Approve)** | **Planner (`/demo`, Demo: Margaret)** |
+| ![Approval scene: ride and invite confirmed, plan ready](docs/screenshots/landing-her-yes.png) | ![Margaret's suggested week with explained matches](docs/screenshots/app-plan.png) |
+| **Coordination (`/coordinate`, Maya demo)** | **Landing page on a phone** |
+| ![Coordinating Sunday Fellowship Lunch: plan, approvals, confirmations](docs/screenshots/app-coordinate.png) | <img src="docs/screenshots/landing-phone.png" alt="Landing page hero at phone width" width="260"> |
+
+Screenshots come from a local production build (`DAYBRIDGE_DEMO_EVENTS=1 npm start`) with sample people and simulated providers.
+
 ## What you can try
 
-- **Personalized week:** Answer short onboarding questions (or choose a demo person) to get explainable activity matches.
+- **Landing page:** `/` tells the story with an interactive, swipeable walkthrough of the Maya scenario; **Try it now** opens the app at `/demo`.
+- **Personalized week:** At `/demo`, answer short onboarding questions (or choose a demo person) to get explainable activity matches.
 - **Discover opportunities:** Browse public UC Berkeley event listings where live discovery is enabled. Public events are **not automatically verified** for accessibility, eligibility, price or suitability.
 - **Get me there:** Review a proposed ride/invitation, approve specific actions, and follow coordination status.
 - **Recover from changes:** Simulate a cancelled ride and watch the plan return to a needs-attention state rather than incorrectly remain ready.
@@ -25,7 +38,7 @@ cp .env.example .env.local  # optional: defaults support the local mock demo
 npm run dev
 ```
 
-Open **http://localhost:3000**. On Windows PowerShell use `Copy-Item .env.example .env.local` instead.
+Open **http://localhost:3000** for the landing page, or go straight to the app at **http://localhost:3000/demo**. On Windows PowerShell use `Copy-Item .env.example .env.local` instead.
 
 For a local production build, run `npm run build`, set `DAYBRIDGE_DEMO_EVENTS=1` in `.env.local`, then run `npm start`. This enables simulated coordination and the caregiver API. Set `SHARE_STORE=memory` only if demonstrating sharing. These demo settings are for local use only.
 
@@ -33,7 +46,7 @@ For a local production build, run `npm run build`, set `DAYBRIDGE_DEMO_EVENTS=1`
 
 Use a fresh private browser window, or first select **Margaret** in the person menu at `/home` before starting.
 
-1. At `/`, choose **Demo: Margaret**. Show the actual mock/live explanation label and why the choir's stairs and garden's cost block those outings.
+1. At `/demo`, choose **Demo: Margaret**. Show the actual mock/live explanation label and why the choir's stairs and garden's cost block those outings.
 2. On **Dominoes & Pinochle Lounge**, select **Get me there**. Margaret's bus trip would exceed her 30-minute limit; a 15-minute family ride fits.
 3. Accept the proposal, review and approve the ride to the sample contact, then send the simulated request. It stays pending until **Ride confirmed (simulated)** makes it **READY**.
 4. Select **Ride cancelled (simulated)**. Show **NEEDS_REPLAN**, choose **Central Library Community Room Cards** from the offered alternatives, then **Confirm my plan**. Margaret can use the 15-minute bus route; no replacement ride is invented.

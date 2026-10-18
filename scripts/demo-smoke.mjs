@@ -98,6 +98,8 @@ async function run(name, fn) {
       throw new Error(`GET /: ${err.cause?.code ?? err.message} (is the server running at ${BASE}?)`);
     });
     assert.equal(home.status, 200, `GET / -> ${home.status}`);
+    const app = await fetch(BASE + "/demo", { signal: AbortSignal.timeout(60_000) });
+    assert.equal(app.status, 200, `GET /demo -> ${app.status}`);
     const r = await http("POST", "/api/analyze", { profile: MARGARET });
     assert.ok(Array.isArray(r.plan), "analyze: plan[] missing");
     assert.ok(r.dataSource, "analyze: dataSource missing");

@@ -23,7 +23,7 @@ export function StartHere() {
       <p>Answer a few short questions and we&apos;ll find activities you can actually get to.</p>
       <p className="text-base text-muted-foreground">Or open the person menu above to look around with a sample person.</p>
       <Link
-        href="/"
+        href="/demo"
         className={`inline-flex min-h-14 items-center rounded-xl bg-primary px-6 text-lg font-semibold text-primary-foreground hover:bg-primary/85 ${FOCUS}`}
       >
         Start here

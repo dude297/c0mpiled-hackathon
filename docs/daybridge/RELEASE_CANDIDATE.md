@@ -41,7 +41,7 @@ npm run demo:check            # optional pre-flight against http://localhost:300
 `npm run dev` works too, because demo events are always on in dev. AI explanations: leave `AI_BASE_URL` unset for the mock (offline-safe), or set it in `.env.local` to a model endpoint. Restarting the server wipes coordination plans (in-memory by design), and **Load demo** recreates one.
 
 ## Demo walkthrough (about 3 minutes, repeatable)
-1. `/` → **Load demo: Margaret**. The plan cards appear, and **Why not these?** shows the choir blocked: stairs + walker.
+1. `/demo` (or **Try it now** on the `/` landing page) → **Load demo: Margaret**. The plan cards appear, and **Why not these?** shows the choir blocked: stairs + walker.
 2. Open `/coordinate` (or click **Get me there** on a card with a ride) → **Load demo: Maya**, for Sunday Fellowship Lunch.
 3. The plan offers **a ride from Dan + an invite to Elaine** (it's a big group). **Accept plan.**
 4. Show the consent cards: **exactly what's shared** for each action. Click **Send** first, and it's refused (no approval). Then **Approve** both and **Send**.
