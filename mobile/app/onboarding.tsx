@@ -2,9 +2,9 @@
 // name → 10 interests → times → travel → walking aid → how you get places → anything else that helps
 // (hearing / group size) → budget → review ("Here's what we heard", each answer with Change)
 // → answersToProfile → analyze → Matches.
-// Walking aid, transport, hearing and group size are always asked, never inferred or defaulted;
-// analyze can't run until all are answered.
-// Interests: swipe deck (default), the Easier view grid, or Hands-free (look / head tilt answers the
+// Walking aid, transport, hearing and group size are explicit answers (or editable demo prefills),
+// never inferred or defaulted; analyze can't run until all are answered.
+// Interests: swipe deck, the Easier view grid, or Hands-free (look / head tilt answers the
 // same swipe cards). Switching modes keeps every answer.
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -14,23 +14,28 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ChoiceStep } from '@/components/onboarding/ChoiceStep';
 import { HandsFreeDeck } from '@/components/onboarding/HandsFree';
 import { InterestGrid } from '@/components/onboarding/InterestGrid';
-import { NameStep, type AnswerMode, type DemoKey } from '@/components/onboarding/NameStep';
+import { NameStep } from '@/components/onboarding/NameStep';
 import { ReviewStep } from '@/components/onboarding/ReviewStep';
 import { SwipeDeck } from '@/components/onboarding/SwipeDeck';
 import { PillButton } from '@/components/onboarding/ui';
 import {
   answersToProfile,
   BUDGET_OPTIONS,
+  canStartIntake,
   COMFORT_OPTIONS,
   INTEREST_META,
   MOBILITY_OPTIONS,
+  prefillDemo,
+  profileToDraft,
   reviewRows,
   TIME_OPTIONS,
   TRANSPORT_OPTIONS,
   TRAVEL_BUCKETS,
   toggleComfort,
   type Answer,
+  type AnswerMode,
   type ComfortKey,
+  type PersonChoice,
   type ReviewField,
 } from '@/lib/onboarding';
 import { DEMO_PROFILES } from '@/domain/activities';
@@ -47,32 +52,18 @@ const STEPS = ['name', 'interests', 'times', 'travel', 'mobility', 'transport', 
 const stepOf = (f: (typeof STEPS)[number]) => STEPS.indexOf(f);
 const LAST = INTEREST_META.length - 1;
 
-// Answers rebuilt from the last matched profile, so "Change my answers" / Back from Matches lands on the
-// review with everything kept (also after a demo).
-function draftFrom(p: Profile, first: string | null) {
-  const comfort: ComfortKey[] = [...(p.hearingImpaired ? ['hearing' as const] : []), ...(p.prefersSmallGroups ? ['smallGroups' as const] : [])];
-  return {
-    name: first ?? '',
-    liked: Object.fromEntries(INTEREST_META.map((i) => [i.key, p.interests.includes(i.key)])) as Partial<Record<Key, boolean>>,
-    times: [...p.times] as TimeSlot[],
-    travel: p.maxTravelMin,
-    mobility: p.mobility as MobilityKey,
-    transport: [...p.transport] as TransportKey[],
-    comfort: comfort.length ? comfort : (['neither'] as ComfortKey[]),
-    budget: p.budgetPerWeek,
-  };
-}
-
 export default function Onboarding() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { analyze, loading, profile, firstName } = useApp();
-  const [d0] = useState(() => (profile ? draftFrom(profile, firstName) : null));
+  const [d0] = useState(() => (profile ? profileToDraft(profile, firstName ?? '') : null));
 
   const [step, setStep] = useState(d0 ? STEPS.length - 1 : 0);
   const [name, setName] = useState(d0?.name ?? '');
-  const [easy, setEasy] = useState(false);
-  const [handsFree, setHandsFree] = useState(false);
+  const [person, setPerson] = useState<PersonChoice | null>(d0 ? 'self' : null);
+  const [mode, setAnswerMode] = useState<AnswerMode | null>(d0 ? 'swipe' : null);
+  const easy = mode === 'easy';
+  const handsFree = mode === 'hands';
   const [liked, setLiked] = useState<Partial<Record<Key, boolean>>>(d0?.liked ?? {});
   const [cursor, setCursor] = useState(d0 ? INTEREST_META.length : 0); // swipe deck position
   const [enterFrom, setEnterFrom] = useState<1 | -1 | null>(null);
@@ -84,6 +75,7 @@ export default function Onboarding() {
   const [budget, setBudget] = useState<number | null>(d0?.budget ?? null);
   const [editing, setEditing] = useState(false); // came from the review's Change: Continue returns there
   const submitting = useRef(false); // double-tap lockout for See my matches
+  const navigationUntil = useRef(0); // also keep Start / Continue from skipping a screen on a double tap
   const seen = useRef<Profile | null>(profile); // last profile these answers came from (ours or a demo's)
 
   // A demo matched while this screen stays mounted under the tabs: load its answers so Back / Change
@@ -91,7 +83,7 @@ export default function Onboarding() {
   useEffect(() => {
     if (!profile || profile === seen.current) return;
     seen.current = profile;
-    const d = draftFrom(profile, firstName);
+    const d = profileToDraft(profile, firstName ?? '');
     setName(d.name);
     setLiked(d.liked);
     setCursor(INTEREST_META.length);
@@ -106,12 +98,17 @@ export default function Onboarding() {
   }, [profile, firstName]);
 
   const current = STEPS[step];
-  const next = () => {
+  const advance = () => {
     if (editing) {
       setEditing(false);
       return setStep(stepOf('review'));
     }
-    setStep((i) => Math.min(i + 1, STEPS.length - 1));
+    setStep(Math.min(step + 1, STEPS.length - 1));
+  };
+  const next = () => {
+    if (submitting.current || loading || Date.now() < navigationUntil.current) return;
+    navigationUntil.current = Date.now() + 450;
+    advance();
   };
 
   // "3 of 18" in swipe mode (name + 10 cards + 6 questions + review); "3 of 9" in easier view.
@@ -128,34 +125,57 @@ export default function Onboarding() {
 
   // Back keeps `editing`: after a Change, stepping back (or undoing a swipe card) still returns to the review.
   const back = () => {
+    if (submitting.current || loading || Date.now() < navigationUntil.current) return;
+    navigationUntil.current = Date.now() + 450;
     if (current === 'interests' && !easy && cursor > 0) return undoCard(cursor - 1);
     if (current === 'times' && !easy) {
       undoCard(LAST);
       return setStep(1);
     }
-    setStep((i) => Math.max(i - 1, 0));
+    setStep(Math.max(step - 1, 0));
   };
 
   const answerCard = (key: Key, yes: boolean) => {
+    if (current !== 'interests' || key !== INTEREST_META[Math.min(cursor, LAST)].key) return;
     setLiked((p) => ({ ...p, [key]: yes }));
     setEnterFrom(null);
     if (cursor >= LAST) {
       setCursor(INTEREST_META.length);
-      next();
+      advance(); // the deck already locks each commit; never throttle its final answer
     } else setCursor(cursor + 1);
   };
 
-  const toggleEasy = (v: boolean) => {
-    setEasy(v);
-    if (v) setHandsFree(false);
+  const setMode = (m: AnswerMode) => {
+    setAnswerMode(m);
     setEnterFrom(null);
-    if (!v && cursor > LAST) setCursor(LAST); // back to cards: show the last one, answers kept
+    if (person === 'margaret' && m === 'easy') {
+      // Seed only unanswered tiles; mode changes never overwrite the presenter's edits.
+      const sample = prefillDemo(DEMO_PROFILES.margaret, m);
+      setLiked((p) => ({ ...sample.liked, ...p }));
+    }
+    if (m !== 'easy' && cursor > LAST) setCursor(LAST);
   };
 
-  const mode: AnswerMode = easy ? 'easy' : handsFree ? 'hands' : 'swipe';
-  const setMode = (m: AnswerMode) => {
-    toggleEasy(m === 'easy');
-    setHandsFree(m === 'hands');
+  const choosePerson = (choice: PersonChoice) => {
+    if (choice === person || submitting.current || loading) return;
+    setPerson(choice);
+    setEditing(false); // a different person needs the full intake, including the interest cards
+    const d = choice === 'margaret' ? prefillDemo(DEMO_PROFILES.margaret, mode) : null;
+    setName(d?.name ?? '');
+    setLiked(d?.liked ?? {});
+    setCursor(0);
+    setEnterFrom(null);
+    setTimes(d?.times ?? []);
+    setTravel(d?.travel ?? null);
+    setMobility(d?.mobility ?? null);
+    setTransport(d?.transport ?? []);
+    setComfort(d?.comfort ?? []);
+    setBudget(d?.budget ?? null);
+  };
+
+  const start = () => {
+    if (!canStartIntake(person, name, mode)) return;
+    next();
   };
 
   const answers = (): Answer[] => [
@@ -198,11 +218,10 @@ export default function Onboarding() {
     }
   };
 
-  // Demo: skip the questions and match a sample person straight away.
-  const runDemo = async (key: DemoKey) => {
-    if (submitting.current || loading) return;
-    const p = DEMO_PROFILES[key];
-    if (!p) return;
+  // Explicit secondary shortcut only. Selecting the sample itself never runs analysis.
+  const skipToMargaret = async () => {
+    if (person !== 'margaret' || submitting.current || loading) return;
+    const p = DEMO_PROFILES.margaret;
     submitting.current = true;
     try {
       await analyze(p, p.name);
@@ -256,12 +275,14 @@ export default function Onboarding() {
 
       {current === 'name' && (
         <NameStep
+          person={person}
+          onPerson={choosePerson}
           name={name}
           onName={setName}
           mode={mode}
           onMode={setMode}
-          onStart={next}
-          onDemo={runDemo}
+          onStart={start}
+          onSkipDemo={skipToMargaret}
           busy={loading}
           bottomInset={bottom}
         />
@@ -270,9 +291,10 @@ export default function Onboarding() {
       {current === 'interests' &&
         (easy ? (
           <InterestGrid
+            sampleInterests={person === 'margaret' ? DEMO_PROFILES.margaret.interests : undefined}
             picked={new Set(INTEREST_META.filter((i) => liked[i.key]).map((i) => i.key))}
             onToggle={(k) => setLiked((p) => ({ ...p, [k]: !p[k] }))}
-            onClear={() => setLiked({})}
+            onClear={() => setLiked(Object.fromEntries(INTEREST_META.map((i) => [i.key, false])))}
             onContinue={() => {
               setLiked((p) => Object.fromEntries(INTEREST_META.map((i) => [i.key, !!p[i.key]])));
               setCursor(INTEREST_META.length);
@@ -282,11 +304,12 @@ export default function Onboarding() {
           />
         ) : handsFree ? (
           <View style={{ flex: 1, minHeight: 0, paddingBottom: bottom + space.sm }}>
-            <HandsFreeDeck cursor={Math.min(cursor, LAST)} enterFrom={enterFrom} onAnswer={answerCard} onBack={back} />
+            <HandsFreeDeck cursor={Math.min(cursor, LAST)} enterFrom={enterFrom} onAnswer={answerCard} onBack={back} sampleInterests={person === 'margaret' ? DEMO_PROFILES.margaret.interests : undefined} />
           </View>
         ) : (
           <View style={{ flex: 1, minHeight: 0, paddingBottom: bottom + space.sm }}>
             <SwipeDeck
+              sampleInterests={person === 'margaret' ? DEMO_PROFILES.margaret.interests : undefined}
               cursor={Math.min(cursor, LAST)}
               enterFrom={enterFrom}
               canBack
@@ -298,6 +321,7 @@ export default function Onboarding() {
 
       {current === 'times' && (
         <ChoiceStep
+          key={current}
           title="When are you usually free?"
           multi
           options={TIME_OPTIONS.map((o) => ({ id: o.key, label: o.label, emoji: o.emoji }))}
@@ -316,6 +340,7 @@ export default function Onboarding() {
 
       {current === 'travel' && (
         <ChoiceStep
+          key={current}
           title="How far is too far?"
           subtitle="Pick what feels right."
           options={TRAVEL_BUCKETS.map((b) => ({ id: String(b.min), label: b.label, detail: b.detail }))}
@@ -328,6 +353,7 @@ export default function Onboarding() {
 
       {current === 'mobility' && (
         <ChoiceStep
+          key={current}
           title="Do you use anything to help you walk?"
           options={MOBILITY_OPTIONS.map((o) => ({ id: o.key, label: o.label }))}
           selected={mobility ? [mobility] : []}
@@ -339,6 +365,7 @@ export default function Onboarding() {
 
       {current === 'transport' && (
         <ChoiceStep
+          key={current}
           title="How do you usually get places?"
           subtitle="We'll only plan trips you can actually make."
           multi
@@ -356,6 +383,7 @@ export default function Onboarding() {
 
       {current === 'comfort' && (
         <ChoiceStep
+          key={current}
           title="Anything else that helps?"
           multi
           helper="Pick any that apply."
@@ -369,6 +397,7 @@ export default function Onboarding() {
 
       {current === 'budget' && (
         <ChoiceStep
+          key={current}
           title="What's a comfortable weekly budget?"
           subtitle="Many of the best activities are free."
           options={BUDGET_OPTIONS.map((b) => ({ id: String(b.amount), label: b.label, detail: b.detail }))}

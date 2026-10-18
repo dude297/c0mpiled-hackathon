@@ -7,13 +7,12 @@
 export type Mode = 'look' | 'tilt';
 export type Zone = 'left' | 'center' | 'right'; // left = ✕ (no), right = ❤️ (yes) — screen sides
 
-// Look combines eye gaze with head yaw (nose offset / inter-eye distance). A small glance or
-// turn should be enough on a phone; hysteresis and return-to-center keep holds deliberate.
-// Tilt remains in degrees with its original tuning.
+// Look uses only eye-in-head gaze, centered by calibration and smoothed for phone-distance glances.
+// Tilt uses only head roll in degrees. Neither mode mixes in the other signal or head yaw.
 export const TUNING = {
-  look: { dwellMs: 1200, threshold: 0.14, hysteresis: 0.04, yawWeight: 1.5 },
-  tilt: { dwellMs: 800, threshold: 15, hysteresis: 3 },
-  rearmMs: 400, // must look/hold back at the middle this long before the next answer
+  look: { dwellMs: 600, threshold: 0.09, hysteresis: 0.03, alpha: 0.35 },
+  tilt: { dwellMs: 500, threshold: 10, hysteresis: 3 },
+  rearmMs: 250, // must look/hold back at the middle this long before the next answer
   calibrateMs: 2000, // "look at the middle" step at start
 } as const;
 
@@ -21,8 +20,6 @@ export const TUNING = {
 // Gaze: MediaPipe blendshapes follow ARKit naming (the subject's own left/right eye), so
 // "looking to my right" is already "looking at the screen's right" — no flip.
 export const GAZE_SIGN = 1;
-// Raw camera: own right moves the nose image-left. Use eye midpoint MINUS nose below.
-export const YAW_SIGN = 1;
 // Reverse the previous roll mapping per the iPhone repro. The panel also offers a persisted
 // Swap sides override because camera/landmark orientation needs confirmation on each device.
 export const TILT_SIGN = 1;
@@ -38,17 +35,13 @@ export function gazeFromBlendshapes(b: Record<string, number>): number {
   return clamp((GAZE_SIGN * (right - left)) / 2, -1, 1);
 }
 
-// Head yaw proxy: nose tip (1) relative to the midpoint of the outer eye corners (33/263),
-// normalized by their aspect-corrected distance. Positive = toward screen right (❤️).
-export function yawFromLandmarks(nose: { x: number; y: number }, p33: { x: number; y: number }, p263: { x: number; y: number }, aspect = 1): number {
-  const eyeDistance = Math.hypot((p263.x - p33.x) * aspect, p263.y - p33.y);
-  if (eyeDistance < 1e-6) return 0;
-  const offset = ((p33.x + p263.x) / 2 - nose.x) * aspect;
-  return clamp((YAW_SIGN * offset) / eyeDistance, -1, 1);
+// Baseline-subtracted eyes ONLY: no landmarks, yaw, or roll enter this signal.
+export function lookFromSignals(gaze: number, baseline = 0): number {
+  return gaze - baseline;
 }
 
-export function lookFromSignals(gaze: number, yaw: number, baseline = { gaze: 0, yaw: 0 }): number {
-  return gaze - baseline.gaze + TUNING.look.yawWeight * (yaw - baseline.yaw);
+export function smoothLook(value: number, previous: number): number {
+  return previous + TUNING.look.alpha * (value - previous);
 }
 
 // Head roll in degrees from the outer eye corners (landmarks 33 and 263, normalized x/y),
@@ -70,7 +63,6 @@ export function classify(v: number, prev: Zone, threshold: number, hysteresis: n
 }
 
 export type DwellState = {
-  lastAt: number | null;
   side: 'left' | 'right' | null; // side currently being held
   since: number; // when that hold started (ms)
   needsCenter: boolean; // just answered: wait for the middle before arming again
@@ -84,27 +76,22 @@ export type DwellStep = {
   fired: 'left' | 'right' | null; // an answer happened on this frame
 };
 
-export const initialDwell = (): DwellState => ({ side: null, since: 0, needsCenter: false, centerSince: null, lastAt: null });
-// After a Look/Tilt switch: wait for the middle before answering, so a head already turned or tilted
+export const initialDwell = (): DwellState => ({ side: null, since: 0, needsCenter: false, centerSince: null });
+// After calibration or a Look/Tilt switch: wait for the middle before answering, so a side already held
 // to one side can't fire straight away under the new mode.
-export const rearmDwell = (): DwellState => ({ side: null, since: 0, needsCenter: true, centerSince: null, lastAt: null });
+export const rearmDwell = (): DwellState => ({ side: null, since: 0, needsCenter: true, centerSince: null });
 
 // One frame of the dwell machine. zone = null means no face (resets the hold).
 export function stepDwell(s: DwellState, zone: Zone | null, now: number, dwellMs: number, rearmMs: number): DwellStep {
-  if (!Number.isFinite(now) || !Number.isFinite(dwellMs) || dwellMs <= 0 || !Number.isFinite(rearmMs) || rearmMs < 0 ||
-      (s.lastAt !== null && (now < s.lastAt || now - s.lastAt > 500))) {
-    return { state: { ...rearmDwell(), lastAt: Number.isFinite(now) ? now : null }, side: null, progress: 0, fired: null };
-  }
-  s = { ...s, lastAt: now };
   if (zone === null) {
-    return { state: { ...s, side: null, since: now, needsCenter: true, centerSince: null }, side: null, progress: 0, fired: null };
+    return { state: { ...s, side: null, since: now, centerSince: null }, side: null, progress: 0, fired: null };
   }
   if (s.needsCenter) {
     if (zone !== 'center') return { state: { ...s, side: null, centerSince: null }, side: null, progress: 0, fired: null };
     const centerSince = s.centerSince ?? now;
     const rearmed = now - centerSince >= rearmMs;
     return {
-      state: { side: null, since: now, needsCenter: !rearmed, centerSince: rearmed ? null : centerSince, lastAt: now },
+      state: { side: null, since: now, needsCenter: !rearmed, centerSince: rearmed ? null : centerSince },
       side: null,
       progress: 0,
       fired: null,
@@ -114,7 +101,7 @@ export function stepDwell(s: DwellState, zone: Zone | null, now: number, dwellMs
   const since = s.side === zone ? s.since : now;
   const progress = Math.min(1, (now - since) / dwellMs);
   if (progress >= 1) {
-    return { state: { side: null, since: now, needsCenter: true, centerSince: null, lastAt: now }, side: null, progress: 0, fired: zone };
+    return { state: { side: null, since: now, needsCenter: true, centerSince: null }, side: null, progress: 0, fired: zone };
   }
   return { state: { ...s, side: zone, since }, side: zone, progress, fired: null };
 }
@@ -122,13 +109,12 @@ export function stepDwell(s: DwellState, zone: Zone | null, now: number, dwellMs
 // Plain-JS twin of everything above, injected into the WebView page. Keep in sync (see top).
 export const HANDSFREE_CORE_JS = String.raw`
 var TUNING = {
-  look: { dwellMs: 1200, threshold: 0.14, hysteresis: 0.04, yawWeight: 1.5 },
-  tilt: { dwellMs: 800, threshold: 15, hysteresis: 3 },
+  look: { dwellMs: 600, threshold: 0.09, hysteresis: 0.03, alpha: 0.35 },
+  tilt: { dwellMs: 500, threshold: 10, hysteresis: 3 },
   rearmMs: 400,
   calibrateMs: 2000
 };
 var GAZE_SIGN = 1;
-var YAW_SIGN = 1;
 var TILT_SIGN = 1;
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 function gazeFromBlendshapes(b) {
@@ -137,16 +123,12 @@ function gazeFromBlendshapes(b) {
   var left = g('eyeLookOutLeft') + g('eyeLookInRight');
   return clamp((GAZE_SIGN * (right - left)) / 2, -1, 1);
 }
-function yawFromLandmarks(nose, p33, p263, aspect) {
-  if (aspect == null) aspect = 1;
-  var eyeDistance = Math.hypot((p263.x - p33.x) * aspect, p263.y - p33.y);
-  if (eyeDistance < 1e-6) return 0;
-  var offset = ((p33.x + p263.x) / 2 - nose.x) * aspect;
-  return clamp((YAW_SIGN * offset) / eyeDistance, -1, 1);
+function lookFromSignals(gaze, baseline) {
+  if (baseline == null) baseline = 0;
+  return gaze - baseline;
 }
-function lookFromSignals(gaze, yaw, baseline) {
-  if (baseline == null) baseline = { gaze: 0, yaw: 0 };
-  return gaze - baseline.gaze + TUNING.look.yawWeight * (yaw - baseline.yaw);
+function smoothLook(value, previous) {
+  return previous + TUNING.look.alpha * (value - previous);
 }
 function tiltFromLandmarks(p33, p263, aspect) {
   if (aspect == null) aspect = 1;
@@ -161,29 +143,24 @@ function classify(v, prev, threshold, hysteresis) {
   if (v > threshold) return 'right';
   return 'center';
 }
-function initialDwell() { return { side: null, since: 0, needsCenter: false, centerSince: null, lastAt: null }; }
-function rearmDwell() { return { side: null, since: 0, needsCenter: true, centerSince: null, lastAt: null }; }
+function initialDwell() { return { side: null, since: 0, needsCenter: false, centerSince: null }; }
+function rearmDwell() { return { side: null, since: 0, needsCenter: true, centerSince: null }; }
 function stepDwell(s, zone, now, dwellMs, rearmMs) {
-  if (!Number.isFinite(now) || !Number.isFinite(dwellMs) || dwellMs <= 0 || !Number.isFinite(rearmMs) || rearmMs < 0 ||
-      (s.lastAt !== null && (now < s.lastAt || now - s.lastAt > 500))) {
-    return { state: { side: null, since: 0, needsCenter: true, centerSince: null, lastAt: Number.isFinite(now) ? now : null }, side: null, progress: 0, fired: null };
-  }
-  s = Object.assign({}, s, { lastAt: now });
   if (zone === null) {
-    return { state: { side: null, since: now, needsCenter: true, centerSince: null, lastAt: now }, side: null, progress: 0, fired: null };
+    return { state: { side: null, since: now, needsCenter: s.needsCenter, centerSince: null }, side: null, progress: 0, fired: null };
   }
   if (s.needsCenter) {
-    if (zone !== 'center') return { state: { side: null, since: s.since, needsCenter: true, centerSince: null, lastAt: now }, side: null, progress: 0, fired: null };
+    if (zone !== 'center') return { state: { side: null, since: s.since, needsCenter: true, centerSince: null }, side: null, progress: 0, fired: null };
     var centerSince = s.centerSince == null ? now : s.centerSince;
     var rearmed = now - centerSince >= rearmMs;
-    return { state: { side: null, since: now, needsCenter: !rearmed, centerSince: rearmed ? null : centerSince, lastAt: now }, side: null, progress: 0, fired: null };
+    return { state: { side: null, since: now, needsCenter: !rearmed, centerSince: rearmed ? null : centerSince }, side: null, progress: 0, fired: null };
   }
-  if (zone === 'center') return { state: { side: null, since: now, needsCenter: false, centerSince: s.centerSince, lastAt: now }, side: null, progress: 0, fired: null };
+  if (zone === 'center') return { state: { side: null, since: now, needsCenter: false, centerSince: s.centerSince }, side: null, progress: 0, fired: null };
   var since = s.side === zone ? s.since : now;
   var progress = Math.min(1, (now - since) / dwellMs);
   if (progress >= 1) {
-    return { state: { side: null, since: now, needsCenter: true, centerSince: null, lastAt: now }, side: null, progress: 0, fired: zone };
+    return { state: { side: null, since: now, needsCenter: true, centerSince: null }, side: null, progress: 0, fired: zone };
   }
-  return { state: { side: zone, since: since, needsCenter: false, centerSince: s.centerSince, lastAt: now }, side: zone, progress: progress, fired: null };
+  return { state: { side: zone, since: since, needsCenter: false, centerSince: s.centerSince }, side: zone, progress: progress, fired: null };
 }
 `;

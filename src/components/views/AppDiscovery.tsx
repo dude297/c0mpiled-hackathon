@@ -62,10 +62,15 @@ export function AppDiscovery({ compact = false }: { compact?: boolean }) {
           ) : <PublicListingCards events={events} compact={compact} />}
         </>
       )}
-      <button type="button" onClick={() => { if (state.kind !== "loading") retry(); }} aria-disabled={state.kind === "loading"} className={LINK}>
-        {state.kind === "loading" ? "Loading public listings…" : "Refresh public listings"}
-      </button>
-      {compact && <Link href="/matches#discover-public" className={LINK}>See more public listings <span aria-hidden="true">→</span></Link>}
+      {/* Off on this server: refreshing can't change that and there is nothing more to see, so no dead controls. */}
+      {state.kind !== "disabled" && (
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+          <button type="button" onClick={() => { if (state.kind !== "loading") retry(); }} aria-disabled={state.kind === "loading"} className={LINK}>
+            {state.kind === "loading" ? "Loading public listings…" : "Refresh public listings"}
+          </button>
+          {compact && state.kind === "ready" && <Link href="/matches#discover-public" className={LINK}>See more public listings <span aria-hidden="true">→</span></Link>}
+        </div>
+      )}
     </section>
   );
 }
